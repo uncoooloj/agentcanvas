@@ -1,5 +1,12 @@
 """Language-neutral core model for AgentCanvas repo understanding."""
 
+from .app_surface import (
+    annotate_bundle_with_surfaces,
+    app_surface_for_path,
+    app_surface_id_for_path,
+    detect_app_surfaces,
+    enrich_app_surfaces,
+)
 from .mapper import repo_facts_to_canvas_model
 from .model import (
     CANVAS_SCHEMA,
@@ -51,7 +58,12 @@ __all__ = [
     "RouteFact",
     "SourceLocation",
     "SymbolFact",
+    "annotate_bundle_with_surfaces",
+    "app_surface_for_path",
+    "app_surface_id_for_path",
     "all_fact_ids",
+    "detect_app_surfaces",
+    "enrich_app_surfaces",
     "make_fact_id",
     "normalize_canvas_model",
     "normalize_http_method",

@@ -33,7 +33,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-5xl items-center px-6">
           <span className="flex items-center gap-2 font-medium">
-            <span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <span className="flex size-7 items-center justify-center rounded-md bg-clay text-white">
               <Sparkles className="size-4" />
             </span>
             AgentCanvas
@@ -87,7 +87,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
         <section id="how" className="border-t border-border/60 bg-secondary/30">
           <div className="mx-auto max-w-5xl px-6 py-24">
             <div className="mx-auto max-w-2xl text-center">
-              <p className="text-sm font-medium uppercase tracking-wide text-primary">How you use it</p>
+              <p className="text-sm font-medium uppercase tracking-wide text-clay">How you use it</p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
                 No code. Just what your app does.
               </h2>
@@ -102,7 +102,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
                   key={step.title}
                   className="flex items-start gap-5 rounded-2xl border bg-card p-5 sm:p-6"
                 >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-clay/12 text-sm font-medium text-clay">
                     {i + 1}
                   </span>
                   <div className="pt-1">
@@ -163,7 +163,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
       <footer className="border-t border-border/60">
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-3 px-6 py-12 text-center">
           <span className="flex items-center gap-2 text-sm font-medium">
-            <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <span className="flex size-6 items-center justify-center rounded-md bg-clay text-white">
               <Sparkles className="size-3.5" />
             </span>
             AgentCanvas
@@ -188,7 +188,7 @@ const STEPS = [
 function Value({ Icon, title, body }: { Icon: LucideIcon; title: string; body: string }) {
   return (
     <div>
-      <span className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+      <span className="flex size-11 items-center justify-center rounded-xl bg-clay/12 text-clay">
         <Icon className="size-5" />
       </span>
       <p className="mt-5 text-lg font-medium">{title}</p>

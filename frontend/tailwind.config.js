@@ -57,6 +57,9 @@ export default {
           fg: "hsl(var(--rule-fg))",
           accent: "hsl(var(--rule-accent))",
         },
+        // Warm life accents (use sparingly on labels, icons, brand).
+        gold: "#eda100",
+        clay: "#d97757",
       },
       borderRadius: {
         lg: "var(--radius)",

@@ -227,7 +227,7 @@ export default function App() {
           onClick={() => go("/welcome")}
           aria-label="Back to the AgentCanvas home page"
           title="Home"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-85"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-clay text-white transition-opacity hover:opacity-85"
         >
           <Sparkles className="h-4 w-4" />
         </button>
@@ -399,7 +399,7 @@ function Rail({
           activeId === HOME ? "bg-secondary font-medium" : "text-muted-foreground hover:bg-secondary/60"
         )}
       >
-        <Sparkles className={cn("h-4 w-4", activeId === HOME ? "text-primary" : "opacity-60")} />
+        <Sparkles className={cn("h-4 w-4", activeId === HOME ? "text-clay" : "opacity-60")} />
         All flows
       </button>
       <p className="px-2 pb-2 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -536,8 +536,8 @@ function JourneyView({
       <div className="mb-5">
         <h1 className="text-xl font-semibold tracking-tight">{journey.title}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{journey.summary}</p>
-        <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground">
-          <Lightbulb className="h-3.5 w-3.5" />
+        <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-gold/10 px-3 py-1 text-xs text-muted-foreground">
+          <Lightbulb className="h-3.5 w-3.5 text-gold" />
           Click a step to change it — or hover a step to add, branch, or remove right there.
         </p>
       </div>

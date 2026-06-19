@@ -1,0 +1,6 @@
+{
+  "type": "module",
+  "scripts": {
+    "test": "node checkout.test.js && node tests/checkout.integration.test.js"
+  }
+}

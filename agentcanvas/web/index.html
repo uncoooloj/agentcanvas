@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentCanvas</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app">
+      <header class="topbar">
+        <div class="brand" aria-label="AgentCanvas">
+          <span class="brand-mark" aria-hidden="true">AC</span>
+          <span>
+            <strong>AgentCanvas</strong>
+            <small id="workspaceLabel">Loading workspace graph</small>
+          </span>
+        </div>
+        <div class="topbar-status">
+          <span id="tokenStatus" class="status-pill">Local</span>
+          <span id="graphStatus" class="status-text">Connecting to /api/graph</span>
+        </div>
+        <div class="topbar-actions">
+          <button id="refreshButton" class="button button-secondary" type="button">
+            Refresh
+          </button>
+          <button id="reindexButton" class="button button-primary" type="button">
+            Reindex
+          </button>
+        </div>
+      </header>
+
+      <div class="app-shell">
+        <aside class="sidebar" aria-label="Workflow views and layers">
+          <section class="panel-section">
+            <h2>Views</h2>
+            <nav id="viewList" class="view-list" aria-label="Canvas views"></nav>
+          </section>
+
+          <section class="panel-section panel-section-fill">
+            <div class="section-heading-row">
+              <h2>Layers</h2>
+              <button id="clearGroupButton" class="quiet-button" type="button">All</button>
+            </div>
+            <div id="layerList" class="layer-list"></div>
+          </section>
+
+          <section class="panel-section legend">
+            <h2>Legend</h2>
+            <p><span class="legend-swatch swatch-teal"></span>Selected flow</p>
+            <p><span class="legend-swatch swatch-amber"></span>Low confidence</p>
+            <p><span class="legend-swatch swatch-blue"></span>Source reference</p>
+            <p><span class="legend-swatch swatch-red"></span>Delete or reroute request</p>
+          </section>
+        </aside>
+
+        <main class="workspace">
+          <section class="canvas-panel" aria-label="Workflow canvas">
+            <div class="canvas-toolbar">
+              <div>
+                <h1 id="viewTitle">Current Change</h1>
+                <p id="viewSummary">Loading graph data</p>
+              </div>
+              <div class="toolbar-actions" aria-label="Canvas controls">
+                <div class="zoom-controls" role="group" aria-label="Zoom controls">
+                  <button id="zoomOutButton" class="icon-button" type="button" aria-label="Zoom out">-</button>
+                  <button id="zoomFitButton" class="zoom-value" type="button" aria-label="Fit canvas">100%</button>
+                  <button id="zoomInButton" class="icon-button" type="button" aria-label="Zoom in">+</button>
+                </div>
+                <button id="addNoteButton" class="button button-secondary" type="button">Add note</button>
+                <button id="addNodeButton" class="button button-primary" type="button">Add node</button>
+              </div>
+            </div>
+
+            <div id="canvasViewport" class="canvas-viewport" tabindex="0">
+              <div id="canvasContent" class="canvas-content">
+                <svg id="edgeLayer" class="edge-layer" aria-hidden="true">
+                  <defs>
+                    <marker id="arrowHead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                      <path d="M 0 0 L 10 5 L 0 10 z"></path>
+                    </marker>
+                  </defs>
+                </svg>
+                <div id="nodeLayer" class="node-layer"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="queue-panel" aria-label="Pending change requests">
+            <div class="queue-heading">
+              <div>
+                <h2>Pending Queue</h2>
+                <p id="queueSummary">Loading pending change requests</p>
+              </div>
+              <button id="refreshPendingButton" class="quiet-button" type="button">Refresh</button>
+            </div>
+            <div id="pendingList" class="pending-list"></div>
+          </section>
+        </main>
+
+        <aside id="inspector" class="inspector" aria-label="Inspector"></aside>
+      </div>
+    </div>
+
+    <dialog id="requestDialog" class="request-dialog">
+      <form id="requestForm" method="dialog">
+        <header>
+          <div>
+            <h2 id="requestTitle">Change request</h2>
+            <p id="requestTarget">Canvas</p>
+          </div>
+          <button class="icon-button" value="cancel" type="submit" aria-label="Close dialog">x</button>
+        </header>
+        <div id="requestFields" class="request-fields"></div>
+        <footer>
+          <button class="button button-secondary" value="cancel" type="submit">Cancel</button>
+          <button id="submitRequestButton" class="button button-primary" value="submit" type="submit">
+            Queue request
+          </button>
+        </footer>
+      </form>
+    </dialog>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

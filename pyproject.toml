@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentcanvas"
+version = "0.1.0"
+description = "Local editable workflow canvas for AI coding agents."
+readme = "README.md"
+requires-python = ">=3.7"
+license = { text = "MIT" }
+authors = [{ name = "AgentCanvas contributors" }]
+keywords = ["ai-agents", "workflow", "canvas", "developer-tools"]
+dependencies = []
+
+[project.scripts]
+agentcanvas = "agentcanvas.cli:main"
+
+[tool.setuptools.package-data]
+agentcanvas = ["web/*"]

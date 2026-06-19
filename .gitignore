@@ -1,0 +1,10 @@
+.agentcanvas/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+.venv/
+node_modules/
+.DS_Store

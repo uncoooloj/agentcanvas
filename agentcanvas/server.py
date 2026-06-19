@@ -4,15 +4,51 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import secrets
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, Optional
-from urllib.parse import parse_qs, unquote, urlparse
+from typing import Any, Dict, Optional, Tuple
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from .indexer import index_workspace
-from .ir import list_pending, load_ir, resolve_workspace, state_paths, write_pending_change
+from .ir import (
+    list_pending,
+    load_ir,
+    resolve_workspace,
+    state_paths,
+    update_pending_status,
+    write_pending_change,
+)
+
+
+# Known coding-agent platforms that may launch AgentCanvas, with human labels.
+_ASSISTANTS = {
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "cursor": "Cursor",
+    "antigravity": "Antigravity",
+    "generic": "Your assistant",
+}
+
+
+def resolve_assistant(agent: Optional[str]) -> Tuple[str, str]:
+    """Return (id, display_name) for the coding agent invoking AgentCanvas.
+
+    Prefers an explicit --agent value, then env hints, else a neutral default.
+    """
+    if agent:
+        key = agent.strip().lower().replace(" ", "-")
+        return key, _ASSISTANTS.get(key, agent)
+    env = os.environ
+    if env.get("CLAUDECODE") or env.get("CLAUDE_CODE") or "CLAUDE_CODE_ENTRYPOINT" in env:
+        return "claude-code", _ASSISTANTS["claude-code"]
+    if any(k.startswith("CODEX_") for k in env) or env.get("CODEX"):
+        return "codex", _ASSISTANTS["codex"]
+    if any(k.startswith("CURSOR") for k in env):
+        return "cursor", _ASSISTANTS["cursor"]
+    return "generic", _ASSISTANTS["generic"]
 
 
 def run_server(
@@ -20,17 +56,41 @@ def run_server(
     host: str = "127.0.0.1",
     port: int = 8765,
     token: Optional[str] = None,
+    agent: Optional[str] = None,
+    demo_mode: bool = False,
+    landing_mode: bool = False,
+    session_id: Optional[str] = None,
 ) -> None:
     root = resolve_workspace(workspace)
     token = token or secrets.token_urlsafe(24)
+    assistant_id, assistant_name = resolve_assistant(agent)
+    if demo_mode and assistant_id == "generic":
+        assistant_name = "No agent connected"
     ensure_ir(root)
-    handler_class = make_handler(root, token)
+    handler_class = make_handler(
+        root,
+        token,
+        assistant_id,
+        assistant_name,
+        demo_mode,
+        landing_mode=landing_mode,
+        session_id=session_id,
+    )
     httpd = ThreadingHTTPServer((host, port), handler_class)
     actual_host, actual_port = httpd.server_address[:2]
     display_host = "127.0.0.1" if actual_host in {"0.0.0.0", "::"} else actual_host
-    url = f"http://{display_host}:{actual_port}/?token={token}"
+    query = {"token": token}
+    if session_id:
+        query["sessionId"] = session_id
+    url = f"http://{display_host}:{actual_port}/?{urlencode(query)}"
 
-    print(f"AgentCanvas serving {root}", flush=True)
+    if landing_mode:
+        prefix = "AgentCanvas launch page serving"
+    elif demo_mode:
+        prefix = "AgentCanvas demo mode serving"
+    else:
+        prefix = "AgentCanvas serving"
+    print(f"{prefix} {root}", flush=True)
     print(f"Open {url}", flush=True)
     print("Press Ctrl-C to stop.", flush=True)
 
@@ -48,7 +108,15 @@ def ensure_ir(workspace: Path) -> None:
         index_workspace(workspace)
 
 
-def make_handler(workspace: Path, token: str):
+def make_handler(
+    workspace: Path,
+    token: str,
+    assistant_id: str,
+    assistant_name: str,
+    demo_mode: bool = False,
+    landing_mode: bool = False,
+    session_id: Optional[str] = None,
+):
     web_root = (Path(__file__).resolve().parent / "web").resolve()
 
     class AgentCanvasHandler(SimpleHTTPRequestHandler):
@@ -104,6 +172,34 @@ def make_handler(workspace: Path, token: str):
                 self.write_json({"ok": True, "pending": list_pending(workspace)})
                 return
 
+            if parsed.path == "/api/context":
+                request_session_id = self.request_session_id(parsed)
+                request_demo_mode = self.request_demo_mode(parsed)
+                effective_demo_mode = demo_mode or request_demo_mode
+                mode = (
+                    "landing"
+                    if landing_mode and not request_demo_mode
+                    else "demo"
+                    if effective_demo_mode
+                    else "workspace"
+                )
+                self.write_json(
+                    {
+                        "ok": True,
+                        "context": {
+                            "workspace": workspace.name,
+                            "workspacePath": "" if mode == "landing" else str(workspace),
+                            "assistantId": assistant_id,
+                            "assistant": assistant_name,
+                            "mode": mode,
+                            "isDemo": effective_demo_mode,
+                            "demoFixture": workspace.name if effective_demo_mode else None,
+                            "sessionId": request_session_id,
+                        },
+                    }
+                )
+                return
+
             self.write_json(
                 {"ok": False, "error": "not found"},
                 status=HTTPStatus.NOT_FOUND,
@@ -131,7 +227,12 @@ def make_handler(workspace: Path, token: str):
                 except FileNotFoundError:
                     graph = index_workspace(workspace)
                 try:
-                    pending = write_pending_change(workspace, payload, graph)
+                    pending = write_pending_change(
+                        workspace,
+                        payload,
+                        graph,
+                        session_id=self.request_session_id(parsed, payload),
+                    )
                 except ValueError as exc:
                     self.write_json(
                         {"ok": False, "error": str(exc)},
@@ -142,6 +243,35 @@ def make_handler(workspace: Path, token: str):
                     {"ok": True, "pending": pending},
                     status=HTTPStatus.CREATED,
                 )
+                return
+
+            if parsed.path == "/api/status":
+                payload = self.read_json_body()
+                if payload is None:
+                    return
+                pending_id = payload.get("id") or payload.get("pendingId")
+                status = payload.get("status")
+                note = payload.get("note")
+                if not isinstance(pending_id, str) or not isinstance(status, str):
+                    self.write_json(
+                        {"ok": False, "error": "id and status are required"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                try:
+                    pending = update_pending_status(
+                        workspace,
+                        pending_id,
+                        status,
+                        note=note if isinstance(note, str) else None,
+                    )
+                except (FileNotFoundError, ValueError) as exc:
+                    self.write_json(
+                        {"ok": False, "error": str(exc)},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                self.write_json({"ok": True, "pending": pending})
                 return
 
             self.write_json(
@@ -157,6 +287,31 @@ def make_handler(workspace: Path, token: str):
             if auth.startswith("Bearer "):
                 bearer_token = auth[len("Bearer ") :].strip()
             return token in {query_token, header_token, bearer_token}
+
+        def request_session_id(
+            self,
+            parsed,
+            payload: Optional[Dict[str, Any]] = None,
+        ) -> Optional[str]:
+            query = parse_qs(parsed.query)
+            values = [
+                *(query.get("sessionId") or []),
+                *(query.get("session_id") or []),
+            ]
+            if payload:
+                for key in ["sessionId", "session_id"]:
+                    value = payload.get(key)
+                    if isinstance(value, str):
+                        values.append(value)
+            values.append(session_id)
+            for value in values:
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return None
+
+        def request_demo_mode(self, parsed) -> bool:
+            value = parse_qs(parsed.query).get("demo", [""])[0]
+            return value.lower() in {"1", "true", "yes"}
 
         def read_json_body(self) -> Optional[Dict[str, Any]]:
             try:

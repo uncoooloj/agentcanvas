@@ -6,6 +6,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +75,61 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             with self.subTest(path=relative_path):
                 self.assertTrue((SAMPLE_APP / relative_path).is_file())
 
+    def test_start_without_workspace_can_use_demo_workspace_for_launch_or_demo(self):
+        from agentcanvas.cli import selected_workspace
+        from agentcanvas.demo import demo_fixture, demo_workspace
+
+        args = SimpleNamespace(workspace=None, path=None, demo=False)
+
+        self.assertEqual(selected_workspace(args), ".")
+        selected = Path(selected_workspace(args, demo_default=True))
+        self.assertEqual(selected.name, demo_fixture().name)
+        self.assertTrue(selected.is_dir())
+        self.assertNotEqual(selected, demo_fixture())
+        self.assertTrue((selected / ".agentcanvas-demo").is_file())
+
+        copied = demo_workspace()
+        self.assertEqual(copied.name, demo_fixture().name)
+        self.assertTrue(copied.is_dir())
+
+    def test_start_command_passes_launch_mode_to_server(self):
+        from agentcanvas.cli import main
+        from agentcanvas.demo import demo_fixture
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "real-workspace"
+            workspace.mkdir()
+            cases = [
+                (["start", "--port", "0"], True, False, None),
+                (["start", "--demo", "--port", "0"], False, True, None),
+                (["start", str(workspace), "--port", "0"], False, False, workspace),
+                (
+                    ["start", "--workspace", str(workspace), "--port", "0"],
+                    False,
+                    False,
+                    workspace,
+                ),
+            ]
+
+            for argv, landing_mode, demo_mode, expected_workspace in cases:
+                with self.subTest(argv=argv):
+                    with patch("agentcanvas.cli.run_server") as run_server:
+                        self.assertEqual(main(argv), 0)
+
+                    run_server.assert_called_once()
+                    _, kwargs = run_server.call_args
+                    self.assertEqual(kwargs["landing_mode"], landing_mode)
+                    self.assertEqual(kwargs["demo_mode"], demo_mode)
+                    self.assertEqual(kwargs["port"], 0)
+                    self.assertEqual(kwargs["host"], "127.0.0.1")
+
+                    selected = Path(kwargs["workspace"])
+                    if expected_workspace is None:
+                        self.assertEqual(selected.name, demo_fixture().name)
+                        self.assertTrue((selected / ".agentcanvas-demo").is_file())
+                    else:
+                        self.assertEqual(selected, expected_workspace)
+
     def test_index_command_writes_workflow_ir_for_sample_app(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = self._copy_sample_workspace(temp_root)
@@ -91,6 +148,21 @@ class AgentCanvasCliContractTests(unittest.TestCase):
 
             with ir_path.open(encoding="utf-8") as handle:
                 workflow_ir = json.load(handle)
+
+            self.assertIn("source_facts", workflow_ir)
+            self.assertGreater(workflow_ir["summary"].get("language_facts", 0), 0)
+            self.assertIn(
+                "javascript-typescript",
+                workflow_ir["summary"].get("language_modules", []),
+            )
+            self.assertEqual(
+                workflow_ir["projection_contract"]["primary_mode"],
+                "llm-assisted",
+            )
+            self.assertEqual(
+                workflow_ir["projection_contract"]["language_module_role"]["purpose"],
+                "grounding_chunking_provenance",
+            )
 
             discovered = "\n".join(_json_strings(workflow_ir))
             for expected_fragment in [
@@ -116,6 +188,10 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                         "id": "raise-checkout-empty-state",
                         "title": "Raise checkout empty state",
                         "target": "src/routes/checkout.js",
+                        "status": "pending",
+                        "created_at": "2026-06-19T00:00:00Z",
+                        "workspace": str(workspace),
+                        "change": {},
                     }
                 ),
                 encoding="utf-8",
@@ -131,6 +207,101 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             )
             self.assertIn("raise-checkout-empty-state.md", completed.stdout)
             self.assertIn("raise-checkout-empty-state.json", completed.stdout)
+
+            status_result = self._run_agentcanvas(
+                "status",
+                "raise-checkout-empty-state",
+                str(workspace),
+                "--status",
+                "in_progress",
+                "--note",
+                "Working on it.",
+                cwd=temp_root,
+            )
+            self.assertEqual(
+                status_result.returncode,
+                0,
+                status_result.stdout + status_result.stderr,
+            )
+            with (pending_dir / "raise-checkout-empty-state.json").open(encoding="utf-8") as handle:
+                updated = json.load(handle)
+            self.assertEqual(updated["status"], "in_progress")
+            self.assertEqual(updated["note"], "Working on it.")
+
+    def test_apply_query_materializes_llm_canvas_query(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._copy_sample_workspace(temp_root)
+
+            index_result = self._run_agentcanvas("index", str(workspace), cwd=temp_root)
+            self._skip_if_cli_scaffold(index_result)
+            self.assertEqual(
+                index_result.returncode,
+                0,
+                index_result.stdout + index_result.stderr,
+            )
+
+            with (workspace / ".agentcanvas" / "workflow.ir.json").open(encoding="utf-8") as handle:
+                workflow_ir = json.load(handle)
+            fact_id = workflow_ir["source_facts"]["facts"][0]["id"]
+            query_path = Path(temp_root) / "canvas-query.json"
+            query_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "agentcanvas.canvas_query.v1",
+                        "version": "0.1.0",
+                        "mode": "llm-assisted",
+                        "operations": [
+                            {
+                                "op": "upsert_node",
+                                "node": {
+                                    "id": "when:checkout",
+                                    "type": "route",
+                                    "label": "Someone starts checkout",
+                                },
+                                "fact_ids": [fact_id],
+                            },
+                            {
+                                "op": "upsert_node",
+                                "node": {
+                                    "id": "do:submit-order",
+                                    "type": "action",
+                                    "label": "Submit the order",
+                                },
+                                "fact_ids": [fact_id],
+                            },
+                            {
+                                "op": "upsert_edge",
+                                "edge": {
+                                    "source": "when:checkout",
+                                    "target": "do:submit-order",
+                                    "kind": "then",
+                                },
+                                "fact_ids": [fact_id],
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            completed = self._run_agentcanvas(
+                "apply-query",
+                str(workspace),
+                "--query",
+                str(query_path),
+                cwd=temp_root,
+            )
+            self.assertEqual(
+                completed.returncode,
+                0,
+                completed.stdout + completed.stderr,
+            )
+
+            with (workspace / ".agentcanvas" / "workflow.ir.json").open(encoding="utf-8") as handle:
+                materialized = json.load(handle)
+            self.assertEqual(materialized["projection"]["mode"], "llm-assisted")
+            self.assertEqual(len(materialized["nodes"]), 2)
+            self.assertIn("source_facts", materialized)
 
 
 if __name__ == "__main__":

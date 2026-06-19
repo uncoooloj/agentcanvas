@@ -1,0 +1,12 @@
+{
+  "name": "@agentcanvas/demo-project",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bundled AgentCanvas demo project that exercises the real indexing pipeline.",
+  "scripts": {
+    "start": "node src/app.js",
+    "test": "node tests/order-flow.test.js",
+    "agentcanvas:index": "agentcanvas index --workspace ."
+  }
+}

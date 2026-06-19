@@ -13,6 +13,14 @@ SCHEMA = "agentcanvas.workflow.v1"
 IR_FILENAME = "workflow.ir.json"
 STATE_DIR_NAME = ".agentcanvas"
 PENDING_DIR_NAME = "pending"
+PENDING_STATUSES = {
+    "pending",
+    "sent",
+    "in_progress",
+    "done",
+    "needs_input",
+    "blocked",
+}
 
 
 def now_utc() -> str:
@@ -133,8 +141,8 @@ def _markdown_for_pending(record: Dict[str, Any]) -> str:
         f"# {record['title']}",
         "",
         f"- ID: {record['id']}",
-        f"- Created: {record['created_at']}",
-        f"- Workspace: {record['workspace']}",
+        f"- Created: {record.get('created_at') or record.get('updated_at') or 'unknown time'}",
+        f"- Workspace: {record.get('workspace') or 'unknown workspace'}",
         f"- Status: {record['status']}",
         "- Source: AgentCanvas local canvas",
         "",
@@ -151,7 +159,33 @@ def _markdown_for_pending(record: Dict[str, Any]) -> str:
         "## Agent Handoff",
         "",
         "Apply this request only after checking the current workspace state. "
-        "Prefer a small, reviewable change and update this pending item when done.",
+        "Prefer a small, reviewable change.",
+        "",
+        "If you are already running while the user edits AgentCanvas, poll for "
+        "ready requests with:",
+        "",
+        "```bash",
+        f"agentcanvas pending --workspace {json.dumps(record.get('workspace') or '.')}",
+        "```",
+        "",
+        "When you start this request, update its status:",
+        "",
+        "```bash",
+        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status in_progress",
+        "```",
+        "",
+        "If you need the user, mark it clearly:",
+        "",
+        "```bash",
+        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status needs_input --note \"What I need from you...\"",
+        "```",
+        "",
+        "When finished, run the relevant tests, re-index, then mark it done:",
+        "",
+        "```bash",
+        f"agentcanvas index --workspace {json.dumps(record.get('workspace') or '.')}",
+        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status done --note \"Implemented and verified.\"",
+        "```",
         "",
     ]
     return "\n".join(lines)
@@ -161,6 +195,7 @@ def write_pending_change(
     workspace: str | Path,
     change: Dict[str, Any],
     workflow_ir: Dict[str, Any] | None = None,
+    session_id: str | None = None,
 ) -> Dict[str, Any]:
     if not isinstance(change, dict):
         raise ValueError("change payload must be a JSON object")
@@ -197,6 +232,8 @@ def write_pending_change(
         "change": change,
         "graph": graph_snapshot,
     }
+    if session_id:
+        record["sessionId"] = session_id
 
     atomic_write_json(json_path, record)
     atomic_write_text(markdown_path, _markdown_for_pending(record))
@@ -205,4 +242,53 @@ def write_pending_change(
         **record,
         "json_path": str(json_path),
         "markdown_path": str(markdown_path),
+    }
+
+
+def update_pending_status(
+    workspace: str | Path,
+    pending_id: str,
+    status: str,
+    note: str | None = None,
+) -> Dict[str, Any]:
+    if status not in PENDING_STATUSES:
+        allowed = ", ".join(sorted(PENDING_STATUSES))
+        raise ValueError(f"status must be one of: {allowed}")
+
+    _, _, pending_dir = state_paths(workspace)
+    json_path = pending_dir / f"{pending_id}.json"
+    if not json_path.exists():
+        matches = sorted(pending_dir.glob(f"*{pending_id}*.json"))
+        if len(matches) == 1:
+            json_path = matches[0]
+        else:
+            raise FileNotFoundError(f"pending request not found: {pending_id}")
+
+    with json_path.open("r", encoding="utf-8") as handle:
+        record = json.load(handle)
+
+    updated_at = now_utc()
+    history = list(record.get("status_history") or [])
+    history.append(
+        {
+            "status": status,
+            "updated_at": updated_at,
+            **({"note": note} if note else {}),
+        }
+    )
+    record["status"] = status
+    record["updated_at"] = updated_at
+    record["status_history"] = history
+    if note:
+        record["note"] = note
+
+    atomic_write_json(json_path, record)
+    markdown_path = json_path.with_suffix(".md")
+    if markdown_path.exists():
+        atomic_write_text(markdown_path, _markdown_for_pending(record))
+
+    return {
+        **record,
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path) if markdown_path.exists() else None,
     }

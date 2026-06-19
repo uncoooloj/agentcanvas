@@ -17,4 +17,14 @@ dependencies = []
 agentcanvas = "agentcanvas.cli:main"
 
 [tool.setuptools.package-data]
-agentcanvas = ["web/*"]
+agentcanvas = [
+  "web/*",
+  "web/assets/*",
+  "demo_project/*",
+  "demo_project/src/*",
+  "demo_project/src/actions/*",
+  "demo_project/src/jobs/*",
+  "demo_project/src/routes/*",
+  "demo_project/src/services/*",
+  "demo_project/tests/*",
+]

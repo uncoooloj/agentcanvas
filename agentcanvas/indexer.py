@@ -11,8 +11,11 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .ir import SCHEMA, now_utc, resolve_workspace, save_ir, summarize_ir
+from .languages import js_ts, python_lang
+from .projection import SOURCE_FACTS_SCHEMA, build_projection_contract, facts_from_workflow_ir
 
-SOURCE_EXTENSIONS = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+PYTHON_SOURCE_EXTENSIONS = {".py"}
+SOURCE_EXTENSIONS = set(js_ts.SOURCE_EXTENSIONS) | PYTHON_SOURCE_EXTENSIONS
 IMPORT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json"]
 SKIP_DIRS = {
     ".agentcanvas",
@@ -33,6 +36,7 @@ SKIP_DIRS = {
 }
 MAX_INDEXED_FILES = 3000
 MAX_FILE_BYTES = 1_000_000
+MAX_SOURCE_FACTS = 500
 
 IMPORT_RE = re.compile(
     r"""
@@ -137,6 +141,21 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
             "edges": len(edges),
         }
     )
+    source_facts = build_source_facts(root, source_paths, workflow_ir)
+    workflow_ir["source_facts"] = source_facts
+    workflow_ir["summary"]["language_facts"] = len(source_facts.get("facts") or [])
+    workflow_ir["summary"]["language_modules"] = sorted(
+        {
+            fact.get("attributes", {}).get("language")
+            for fact in source_facts.get("facts") or []
+            if fact.get("attributes", {}).get("language")
+        }
+    )
+    workflow_ir["projection_contract"] = build_projection_contract(
+        source_facts,
+        projection_repo_summary(workflow_ir),
+        max_facts=200,
+    )
     return workflow_ir
 
 
@@ -183,6 +202,239 @@ def safe_read_text(path: Path) -> Optional[str]:
         return path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
+
+
+def build_source_facts(
+    root: Path,
+    source_paths: Sequence[Path],
+    workflow_ir: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build an LLM-ready source-facts bundle from language modules plus IR facts."""
+
+    repo = projection_repo_summary(workflow_ir)
+    facts: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+
+    js_paths = [
+        path
+        for path in source_paths
+        if path.suffix.lower() in js_ts.SOURCE_EXTENSIONS
+    ]
+    if js_paths:
+        try:
+            js_bundle = js_ts.parse_workspace(root, paths=js_paths)
+            facts.extend(canonical_language_facts(js_bundle, "javascript-typescript"))
+        except Exception as exc:  # pragma: no cover - defensive, keeps indexing useful.
+            warnings.append(f"JS/TS language module failed: {type(exc).__name__}: {exc}")
+
+    python_paths = [
+        path
+        for path in source_paths
+        if path.suffix.lower() in PYTHON_SOURCE_EXTENSIONS
+    ]
+    for path in python_paths:
+        rel = to_posix(path.relative_to(root))
+        text = safe_read_text(path)
+        if text is None:
+            warnings.append(f"Python source file was not readable: {rel}")
+            facts.append(
+                canonical_language_fact(
+                    {
+                        "id": f"read_error:{rel}",
+                        "type": "read_error",
+                        "kind": "read_error",
+                        "language": "python",
+                        "file": rel,
+                        "path": rel,
+                        "readable": False,
+                        "provenance": {"path": rel, "line": 1},
+                    },
+                    "python",
+                    len(facts),
+                )
+            )
+            continue
+        try:
+            py_bundle = python_lang.extract_source_facts(rel, source=text)
+            facts.extend(canonical_language_facts(py_bundle, "python"))
+        except Exception as exc:  # pragma: no cover - defensive, keeps indexing useful.
+            warnings.append(f"Python language module failed for {rel}: {type(exc).__name__}: {exc}")
+
+    base_bundle = facts_from_workflow_ir(
+        workflow_ir,
+        repo,
+        max_facts=150,
+    )
+    facts.extend(base_bundle.get("facts") or [])
+
+    if len(facts) > MAX_SOURCE_FACTS:
+        warnings.append(
+            f"Source facts truncated from {len(facts)} to {MAX_SOURCE_FACTS} facts."
+        )
+        facts = facts[:MAX_SOURCE_FACTS]
+
+    return {
+        "schema": SOURCE_FACTS_SCHEMA,
+        "version": "0.1.0",
+        "repo": repo,
+        "facts": facts,
+        "warnings": warnings,
+    }
+
+
+def canonical_language_facts(
+    bundle: Dict[str, Any],
+    default_language: str,
+) -> List[Dict[str, Any]]:
+    language = str(bundle.get("language") or bundle.get("language_family") or default_language)
+    return [
+        canonical_language_fact(raw, language, index)
+        for index, raw in enumerate(bundle.get("facts") or [])
+        if isinstance(raw, dict)
+    ]
+
+
+def canonical_language_fact(
+    raw: Dict[str, Any],
+    language: str,
+    index: int,
+) -> Dict[str, Any]:
+    raw_type = str(raw.get("type") or raw.get("kind") or "fact")
+    raw_kind = str(raw.get("kind") or raw_type)
+    raw_id = str(raw.get("id") or f"{raw_type}:{index}")
+    subject = language_fact_subject(raw)
+    summary = language_fact_summary(raw, language, raw_type, raw_kind, subject)
+    attributes = compact_language_attributes(raw)
+    attributes["language"] = language
+    attributes["fact_type"] = raw_type
+
+    return {
+        "id": f"language:{language}:{raw_id}",
+        "kind": f"language_{raw_type}",
+        "subject": subject,
+        "summary": summary,
+        "attributes": attributes,
+        "evidence": language_fact_evidence(raw),
+        "confidence": language_fact_confidence(raw_type),
+    }
+
+
+def language_fact_subject(raw: Dict[str, Any]) -> str:
+    if raw.get("type") == "route" and raw.get("path"):
+        method = raw.get("method")
+        return f"{method} {raw['path']}" if method else str(raw["path"])
+    if raw.get("qualified_name"):
+        return str(raw["qualified_name"])
+    if raw.get("name"):
+        return str(raw["name"])
+    if raw.get("function"):
+        return str(raw["function"])
+    if raw.get("specifier"):
+        return str(raw["specifier"])
+    if raw.get("file"):
+        return str(raw["file"])
+    if raw.get("path"):
+        return str(raw["path"])
+    return str(raw.get("id") or "source fact")
+
+
+def language_fact_summary(
+    raw: Dict[str, Any],
+    language: str,
+    raw_type: str,
+    raw_kind: str,
+    subject: str,
+) -> str:
+    file_path = raw.get("file") or raw.get("path")
+    line = raw.get("line")
+    location = ""
+    if file_path:
+        location = f" in {file_path}"
+        if line:
+            location += f":{line}"
+
+    if raw_type == "route":
+        method = raw.get("method")
+        return f"{language} route {method + ' ' if method else ''}{subject}{location}"
+    if raw_type == "branch":
+        condition = raw.get("condition") or subject
+        return f"{language} {raw_kind} branch {condition}{location}"
+    if raw_type == "call":
+        return f"{language} call {subject}{location}"
+    if raw_type == "symbol":
+        return f"{language} {raw_kind} {subject}{location}"
+    if raw_type == "import":
+        return f"{language} import {subject}{location}"
+    return f"{language} {raw_type} {subject}{location}"
+
+
+def language_fact_evidence(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+    evidence: List[Dict[str, Any]] = []
+    for key in ["source_ref", "provenance"]:
+        ref = raw.get(key)
+        if isinstance(ref, dict):
+            item: Dict[str, Any] = {}
+            if ref.get("path"):
+                item["path"] = to_posix(str(ref["path"]))
+            if ref.get("line"):
+                item["line"] = ref["line"]
+            if ref.get("column"):
+                item["column"] = ref["column"]
+            if item:
+                evidence.append(item)
+                return evidence
+
+    file_path = raw.get("file") or raw.get("path")
+    if isinstance(file_path, str) and file_path:
+        item = {"path": to_posix(file_path)}
+        if raw.get("line"):
+            item["line"] = raw["line"]
+        evidence.append(item)
+    return evidence
+
+
+def language_fact_confidence(raw_type: str) -> float:
+    if raw_type in {"file", "import", "symbol", "export", "route"}:
+        return 0.9
+    if raw_type in {"branch", "call"}:
+        return 0.75
+    if raw_type.endswith("error"):
+        return 1.0
+    return 0.65
+
+
+def compact_language_attributes(raw: Dict[str, Any]) -> Dict[str, Any]:
+    skip = {"id", "source_ref", "provenance"}
+    return {
+        key: json_safe(value)
+        for key, value in raw.items()
+        if key not in skip and value is not None
+    }
+
+
+def json_safe(value: Any) -> Any:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {
+            str(key): json_safe(item)
+            for key, item in list(value.items())[:20]
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [json_safe(item) for item in list(value)[:20]]
+    return str(value)
+
+
+def projection_repo_summary(workflow_ir: Dict[str, Any]) -> Dict[str, Any]:
+    workspace = workflow_ir.get("workspace") or {}
+    return {
+        "name": workspace.get("name"),
+        "root": workspace.get("root"),
+        "summary": workflow_ir.get("summary") or {},
+        "package": workflow_ir.get("package") or {},
+        "git": workflow_ir.get("git") or {},
+        "focus": workflow_ir.get("focus") or {},
+    }
 
 
 def collect_package_info(root: Path, files: Sequence[Path]) -> Dict[str, Any]:

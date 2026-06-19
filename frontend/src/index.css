@@ -1,0 +1,85 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 20% 99%;
+    --foreground: 240 10% 8%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 8%;
+    --primary: 250 60% 56%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 6% 20%;
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 250 60% 96%;
+    --accent-foreground: 250 50% 40%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 250 60% 56%;
+    --radius: 0.7rem;
+
+    /* Behavior-block roles: when (trigger), act (action), rule (decision) */
+    --when-bg: 38 92% 95%;
+    --when-fg: 28 80% 26%;
+    --when-accent: 35 92% 52%;
+    --act-bg: 162 60% 94%;
+    --act-fg: 168 72% 20%;
+    --act-accent: 165 70% 38%;
+    --rule-bg: 250 70% 96%;
+    --rule-fg: 250 52% 40%;
+    --rule-accent: 250 60% 62%;
+  }
+
+  .dark {
+    --background: 240 10% 8%;
+    --foreground: 0 0% 96%;
+    --card: 240 9% 11%;
+    --card-foreground: 0 0% 96%;
+    --popover: 240 9% 11%;
+    --popover-foreground: 0 0% 96%;
+    --primary: 250 70% 68%;
+    --primary-foreground: 240 20% 10%;
+    --secondary: 240 5% 17%;
+    --secondary-foreground: 0 0% 92%;
+    --muted: 240 5% 17%;
+    --muted-foreground: 240 5% 64%;
+    --accent: 250 30% 22%;
+    --accent-foreground: 250 70% 86%;
+    --destructive: 0 62% 52%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5% 20%;
+    --input: 240 5% 22%;
+    --ring: 250 70% 68%;
+
+    --when-bg: 30 40% 16%;
+    --when-fg: 38 90% 76%;
+    --when-accent: 35 80% 56%;
+    --act-bg: 168 38% 14%;
+    --act-fg: 162 60% 70%;
+    --act-accent: 165 60% 46%;
+    --rule-bg: 250 32% 20%;
+    --rule-fg: 250 70% 82%;
+    --rule-accent: 250 60% 68%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}

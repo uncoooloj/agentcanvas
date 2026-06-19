@@ -27,6 +27,16 @@ AgentCanvas sits in that gap.
 The Agentation-inspired part is the loop: work is not a vague chat message that
 disappears. It becomes an item with a status, files, notes, and a copy fallback.
 
+## What It Looks Like
+
+No workspace selected:
+
+![AgentCanvas landing page](docs/assets/agentcanvas-landing.png)
+
+Demo mode / all flows:
+
+![AgentCanvas demo flows](docs/assets/agentcanvas-demo-flows.png)
+
 ## Install
 
 From this repo:

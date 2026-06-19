@@ -105,6 +105,57 @@ class ProjectionContractTests(unittest.TestCase):
         self.assertEqual(model["summary"]["nodes"], 2)
         self.assertEqual(model["summary"]["edges"], 1)
 
+    def test_workflow_facts_include_app_surfaces_for_monorepos(self):
+        workflow_ir = {
+            "schema": WORKFLOW_IR_SCHEMA,
+            "version": "0.1.0",
+            "workspace": {"root": "/tmp/example", "name": "example"},
+            "summary": {"app_surfaces": 2},
+            "package": {},
+            "git": {},
+            "focus": {},
+            "app_surfaces": [
+                {
+                    "id": "surface:apps:mobile",
+                    "root": "apps/mobile",
+                    "name": "mobile",
+                    "kind": "mobile",
+                    "platform": "flutter",
+                    "manifest_paths": ["apps/mobile/pubspec.yaml"],
+                    "languages": ["dart-flutter"],
+                    "entrypoints": [{"kind": "route", "path": "/signup"}],
+                    "confidence": 0.8,
+                },
+                {
+                    "id": "surface:services:api",
+                    "root": "services/api",
+                    "name": "api",
+                    "kind": "backend",
+                    "platform": "server",
+                    "manifest_paths": ["services/api/go.mod"],
+                    "languages": ["go"],
+                    "entrypoints": [{"kind": "route", "path": "/signup", "method": "POST"}],
+                    "confidence": 0.8,
+                },
+            ],
+            "components": [],
+            "nodes": [],
+            "edges": [],
+        }
+
+        source_facts = facts_from_workflow_ir(workflow_ir)
+        surface_facts = [
+            fact for fact in source_facts["facts"] if fact["kind"] == "app_surface"
+        ]
+
+        self.assertEqual(len(surface_facts), 2)
+        self.assertEqual(
+            source_facts["repo"]["app_surfaces"],
+            workflow_ir["app_surfaces"],
+        )
+        instructions = " ".join(build_projection_contract(source_facts)["instructions"])
+        self.assertIn("group behavior by human journey first", instructions)
+
     def test_canvas_query_rejects_unknown_fact_ids(self):
         query = {
             "schema": CANVAS_QUERY_SCHEMA,

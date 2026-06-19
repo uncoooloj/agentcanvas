@@ -57,6 +57,40 @@ The module output must be JSON-serializable and should include:
 - `summary`: counts by type and kind
 - `errors` or `diagnostics`: parse/read problems represented as facts, not hard failures
 
+## Built-In MVP Modules
+
+The shared indexer registers these language modules today:
+
+- `javascript-typescript`: `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs`
+- `python`: `.py`
+- `go`: `.go`
+- `php-laravel`: `.php`
+- `ruby-rails`: `.rb`
+- `dart-flutter`: `.dart`
+- `swift`: `.swift`
+- `kotlin`: `.kt`, `.kts`
+
+The Go, PHP/Laravel, Ruby/Rails, Dart/Flutter, Swift, and Kotlin modules use
+lightweight extraction for MVP coverage. They should still emit stable language
+names, file facts, provenance, and best-effort imports, symbols, routes,
+branches, and calls.
+
+## Monorepo App Surfaces
+
+Language facts should remain language-neutral, but the workflow IR should keep
+monorepo app surfaces distinct. In a workspace with multiple apps, such as
+`apps/customer-web` and `apps/admin`, the indexer should:
+
+- expose each app under top-level `workflow_ir.app_surfaces`
+- report the count in `workflow_ir.summary.app_surfaces`
+- include stable surface identifiers or paths so two apps are not collapsed into
+  one generic frontend or backend surface
+- preserve enough surface metadata for source facts and projection prompts to
+  connect files back to the app surface they belong to
+
+This metadata belongs in the core workflow IR and source-facts grounding layer.
+Do not make the frontend infer app surfaces from language-specific file paths.
+
 ## Fact Types
 
 Start with the smallest useful set. A module does not need every fact type on

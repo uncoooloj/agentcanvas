@@ -8,15 +8,57 @@ import re
 import subprocess
 from collections import Counter, defaultdict
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from .core import (
+    annotate_bundle_with_surfaces,
+    app_surface_for_path,
+    detect_app_surfaces,
+    enrich_app_surfaces,
+)
 from .ir import SCHEMA, now_utc, resolve_workspace, save_ir, summarize_ir
-from .languages import js_ts, python_lang
+from .languages import (
+    dart_lang,
+    go_lang,
+    js_ts,
+    kotlin_lang,
+    php_lang,
+    python_lang,
+    ruby_lang,
+    swift_lang,
+)
 from .projection import SOURCE_FACTS_SCHEMA, build_projection_contract, facts_from_workflow_ir
 
 PYTHON_SOURCE_EXTENSIONS = {".py"}
-SOURCE_EXTENSIONS = set(js_ts.SOURCE_EXTENSIONS) | PYTHON_SOURCE_EXTENSIONS
-IMPORT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json"]
+LANGUAGE_MODULES = [
+    ("go", go_lang.SOURCE_EXTENSIONS, go_lang.parse_workspace),
+    ("php-laravel", php_lang.SOURCE_EXTENSIONS, php_lang.parse_workspace),
+    ("ruby-rails", ruby_lang.SOURCE_EXTENSIONS, ruby_lang.parse_workspace),
+    ("dart-flutter", dart_lang.SOURCE_EXTENSIONS, dart_lang.parse_workspace),
+    ("swift", swift_lang.SOURCE_EXTENSIONS, swift_lang.parse_workspace),
+    ("kotlin", kotlin_lang.SOURCE_EXTENSIONS, kotlin_lang.parse_workspace),
+]
+SOURCE_EXTENSIONS = (
+    set(js_ts.SOURCE_EXTENSIONS)
+    | PYTHON_SOURCE_EXTENSIONS
+    | set().union(*(set(extensions) for _, extensions, _ in LANGUAGE_MODULES))
+)
+IMPORT_EXTENSIONS = [
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".json",
+    ".go",
+    ".php",
+    ".rb",
+    ".dart",
+    ".swift",
+    ".kt",
+    ".kts",
+]
 SKIP_DIRS = {
     ".agentcanvas",
     ".git",
@@ -80,13 +122,15 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
     discovered, truncated = discover_files(root)
     package_info = collect_package_info(root, discovered)
     git = collect_git_info(root)
+    app_surfaces = detect_app_surfaces(root, discovered)
 
     source_paths = [path for path in discovered if is_source_file(path)]
     source_set = {to_posix(path.relative_to(root)) for path in source_paths}
     file_infos = [
-        analyze_source_file(root, path, source_set)
+        analyze_source_file(root, path, source_set, app_surfaces)
         for path in source_paths
     ]
+    app_surfaces = enrich_app_surfaces(app_surfaces, file_infos)
 
     tests = [info for info in file_infos if info["is_test"]]
     routes = [route for info in file_infos for route in info["routes"]]
@@ -105,6 +149,7 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
     )
     nodes, edges = build_graph(
         file_infos=file_infos,
+        app_surfaces=app_surfaces,
         components=components,
         package_info=package_info,
     )
@@ -124,6 +169,7 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
             "imports": import_count,
             "exports": len(exports),
             "routes": len(routes),
+            "app_surfaces": len(app_surfaces),
             "components": len(components),
             "changed_files": len(changed_path_set),
             "truncated": truncated,
@@ -131,6 +177,7 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
         "package": package_info,
         "git": git,
         "focus": focus,
+        "app_surfaces": app_surfaces,
         "components": components,
         "nodes": nodes,
         "edges": edges,
@@ -223,6 +270,7 @@ def build_source_facts(
     if js_paths:
         try:
             js_bundle = js_ts.parse_workspace(root, paths=js_paths)
+            annotate_bundle_with_surfaces(js_bundle, workflow_ir.get("app_surfaces") or [])
             facts.extend(canonical_language_facts(js_bundle, "javascript-typescript"))
         except Exception as exc:  # pragma: no cover - defensive, keeps indexing useful.
             warnings.append(f"JS/TS language module failed: {type(exc).__name__}: {exc}")
@@ -256,9 +304,25 @@ def build_source_facts(
             continue
         try:
             py_bundle = python_lang.extract_source_facts(rel, source=text)
+            annotate_bundle_with_surfaces(py_bundle, workflow_ir.get("app_surfaces") or [])
             facts.extend(canonical_language_facts(py_bundle, "python"))
         except Exception as exc:  # pragma: no cover - defensive, keeps indexing useful.
             warnings.append(f"Python language module failed for {rel}: {type(exc).__name__}: {exc}")
+
+    for language, extensions, parser in LANGUAGE_MODULES:
+        language_paths = [
+            path
+            for path in source_paths
+            if path.suffix.lower() in extensions
+        ]
+        if not language_paths:
+            continue
+        try:
+            bundle = parser(root, paths=language_paths)
+            annotate_bundle_with_surfaces(bundle, workflow_ir.get("app_surfaces") or [])
+            facts.extend(canonical_language_facts(bundle, language))
+        except Exception as exc:  # pragma: no cover - defensive, keeps indexing useful.
+            warnings.append(f"{language} language module failed: {type(exc).__name__}: {exc}")
 
     base_bundle = facts_from_workflow_ir(
         workflow_ir,
@@ -434,6 +498,22 @@ def projection_repo_summary(workflow_ir: Dict[str, Any]) -> Dict[str, Any]:
         "package": workflow_ir.get("package") or {},
         "git": workflow_ir.get("git") or {},
         "focus": workflow_ir.get("focus") or {},
+        "app_surfaces": workflow_ir.get("app_surfaces") or [],
+    }
+
+
+def app_surface_metadata(surface: Mapping[str, Any]) -> Dict[str, Any]:
+    surface_id = surface.get("id")
+    surface_type = surface.get("type")
+    surface_root = surface.get("root")
+    return {
+        "app_surface_id": surface_id,
+        "app_surface_type": surface_type,
+        "app_surface_root": surface_root,
+        "app_surface": surface_id,
+        "surface_root": surface_root,
+        "surface_kind": surface_type,
+        "surface_platform": surface.get("platform"),
     }
 
 
@@ -575,23 +655,37 @@ def parse_git_status(root: Path) -> List[Dict[str, str]]:
     return items
 
 
-def analyze_source_file(root: Path, path: Path, source_set: set[str]) -> Dict[str, Any]:
+def analyze_source_file(
+    root: Path,
+    path: Path,
+    source_set: set[str],
+    app_surfaces: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
     rel = to_posix(path.relative_to(root))
     text = safe_read_text(path)
     imports = extract_imports(text or "", rel)
     for imported in imports:
         imported["resolved_path"] = resolve_import(root, rel, imported["specifier"], source_set)
+    routes = extract_routes(text or "", rel)
+    surface = app_surface_for_path(rel, app_surfaces)
+    surface_meta = app_surface_metadata(surface) if surface else {}
+    if surface:
+        for route in routes:
+            route.update(surface_meta)
 
-    return {
+    info = {
         "path": rel,
         "kind": classify_source_file(rel),
         "is_test": is_test_path(rel),
         "imports": imports,
         "exports": extract_exports(text or "", rel),
-        "routes": extract_routes(text or "", rel),
+        "routes": routes,
         "component": component_key(rel),
         "readable": text is not None,
     }
+    if surface:
+        info.update(surface_meta)
+    return info
 
 
 def classify_source_file(rel: str) -> str:
@@ -843,6 +937,13 @@ def build_components(
                 "exports": sum(len(info["exports"]) for info in infos),
                 "changed_files": changed,
                 "dominant_file_kind": kind_counts.most_common(1)[0][0],
+                "app_surfaces": sorted(
+                    {
+                        info["app_surface"]
+                        for info in infos
+                        if info.get("app_surface")
+                    }
+                ),
             }
         )
     return components
@@ -924,6 +1025,7 @@ def related_tests_for_changes(
 def build_graph(
     *,
     file_infos: Sequence[Dict[str, Any]],
+    app_surfaces: Sequence[Dict[str, Any]],
     components: Sequence[Dict[str, Any]],
     package_info: Dict[str, Any],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -946,6 +1048,17 @@ def build_graph(
         edge.update(extra)
         edges.append(edge)
 
+    for surface in app_surfaces:
+        add_node(
+            {
+                "id": surface["id"],
+                "type": "app_surface",
+                "label": surface["name"],
+                "path": None if surface["root"] == "." else surface["root"],
+                "data": surface,
+            }
+        )
+
     for component in components:
         add_node(
             {
@@ -955,6 +1068,8 @@ def build_graph(
                 "data": component,
             }
         )
+        for app_surface in component.get("app_surfaces") or []:
+            add_edge(app_surface, component["id"], "contains")
 
     for info in file_infos:
         file_id = file_node_id(info["path"])
@@ -972,6 +1087,13 @@ def build_graph(
                     "exports": info["exports"],
                     "routes": info["routes"],
                     "readable": info["readable"],
+                    "app_surface_id": info.get("app_surface_id"),
+                    "app_surface_type": info.get("app_surface_type"),
+                    "app_surface_root": info.get("app_surface_root"),
+                    "app_surface": info.get("app_surface"),
+                    "surface_root": info.get("surface_root"),
+                    "surface_kind": info.get("surface_kind"),
+                    "surface_platform": info.get("surface_platform"),
                 },
             }
         )

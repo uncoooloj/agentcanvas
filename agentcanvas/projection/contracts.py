@@ -181,7 +181,13 @@ they are not required to be perfect parsers before useful projection can happen.
 Use only supplied source facts as evidence. Do not invent routes, files, tests,
 services, or relationships that are not supported by fact_ids. If a useful
 canvas relationship is uncertain, omit it or add a warning. Output only JSON
-matching the response schema."""
+matching the response schema.
+
+When the repo summary includes app_surfaces, treat those as app/workspace lanes
+inside a human journey. For example, signup in a monorepo is usually one
+business journey with mobile, web, and backend surfaces participating through
+entrypoints and handoffs. Split into separate top-level journeys only when the
+actor, outcome, or business rules truly differ."""
 
 
 USER_PROMPT_TEMPLATE = """Project these grounded facts into AgentCanvas canvas query language.
@@ -229,6 +235,8 @@ def build_projection_contract(
         "instructions": [
             "Treat LLM-assisted projection as the primary path.",
             "Use language-module facts as grounding evidence, not as a complete parser output.",
+            "For monorepos, group behavior by human journey first, then use app_surfaces as lanes or drilldowns.",
+            "Represent cross-surface handoffs only when route, call, import, event, or entrypoint facts support them.",
             "Use only source_facts as evidence.",
             "Return JSON only; no Markdown wrapper.",
             "Set mode to llm-assisted.",
@@ -312,6 +320,9 @@ def facts_from_workflow_ir(
         repo = _merge_repo_summary(repo, repo_summary)
 
     facts: List[Dict[str, Any]] = []
+    for surface in workflow_ir.get("app_surfaces") or []:
+        facts.append(_app_surface_fact(surface))
+
     for component in workflow_ir.get("components") or []:
         facts.append(_component_fact(component))
 
@@ -339,6 +350,7 @@ def _repo_summary_from_workflow_ir(workflow_ir: Dict[str, Any]) -> Dict[str, Any
         "package": workflow_ir.get("package") or {},
         "git": workflow_ir.get("git") or {},
         "focus": workflow_ir.get("focus") or {},
+        "app_surfaces": workflow_ir.get("app_surfaces") or [],
     }
 
 
@@ -355,6 +367,37 @@ def _merge_repo_summary(
         else:
             merged[key] = value
     return merged
+
+
+def _app_surface_fact(surface: Dict[str, Any]) -> Dict[str, Any]:
+    surface_id = str(surface.get("id") or surface.get("root") or "surface")
+    root = surface.get("root") or "."
+    label = surface.get("name") or root
+    kind = surface.get("kind") or "app_surface"
+    platform = surface.get("platform") or "unknown"
+    return {
+        "id": f"app_surface:{surface_id}",
+        "kind": "app_surface",
+        "subject": surface_id,
+        "summary": f"{kind} app surface {label} at {root} ({platform})",
+        "attributes": _compact_dict(surface),
+        "evidence": _path_evidence(
+            [root if root != "." else None, *(surface.get("manifest_paths") or [])]
+        ),
+        "confidence": _confidence_score(surface.get("confidence")),
+    }
+
+
+def _confidence_score(value: Any, default: float = 0.75) -> float:
+    if isinstance(value, dict):
+        value = value.get("score", default)
+    if value is None:
+        return default
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(1.0, score))
 
 
 def _component_fact(component: Dict[str, Any]) -> Dict[str, Any]:

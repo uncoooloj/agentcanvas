@@ -55,8 +55,8 @@ export function LandingPage() {
             Your app, in plain English.
           </h1>
           <p className="mx-auto mt-6 max-w-xl text-balance text-lg leading-relaxed text-muted-foreground sm:text-xl">
-            AgentCanvas turns the app your AI is building into a simple map of what actually
-            happens. See it, change it in your own words, and let your assistant make it real.
+            See what your app does, change it in your own words, and tell your AI coding agent —
+            Claude Code, Codex, Cursor — exactly what to build. All in plain English.
           </p>
           <div className="mt-9 flex flex-wrap justify-center gap-3">
             <Button type="button" size="lg" onClick={openDemo} className="h-12 rounded-full px-7 text-base">
@@ -121,8 +121,8 @@ export function LandingPage() {
             />
             <Value
               Icon={Sparkles}
-              title="Your assistant does the work"
-              body="Your changes become a clear request. Claude Code, Codex, Cursor, or any AI assistant builds it for you."
+              title="Work with your agent in plain English"
+              body="Describe a change like you'd tell a teammate. Claude Code, Codex, or Cursor gets a clear request — and builds it for you."
             />
           </div>
         </section>

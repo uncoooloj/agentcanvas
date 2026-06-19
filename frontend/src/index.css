@@ -1,74 +1,74 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 40 20% 99%;
-    --foreground: 240 10% 8%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 8%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 8%;
-    --primary: 250 60% 56%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 240 5% 96%;
-    --secondary-foreground: 240 6% 20%;
-    --muted: 240 5% 96%;
-    --muted-foreground: 240 4% 46%;
-    --accent: 250 60% 96%;
-    --accent-foreground: 250 50% 40%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 240 6% 90%;
-    --input: 240 6% 90%;
-    --ring: 250 60% 56%;
+    /* Warm cream surface, ink primary (agentation-inspired) */
+    --background: 42 40% 96.5%;
+    --foreground: 30 9% 12%;
+    --card: 44 50% 99%;
+    --card-foreground: 30 9% 12%;
+    --popover: 44 50% 99%;
+    --popover-foreground: 30 9% 12%;
+    --primary: 28 10% 13%;
+    --primary-foreground: 42 40% 97%;
+    --secondary: 40 26% 92.5%;
+    --secondary-foreground: 30 9% 22%;
+    --muted: 40 26% 92.5%;
+    --muted-foreground: 34 7% 42%;
+    --accent: 40 30% 90%;
+    --accent-foreground: 30 9% 18%;
+    --destructive: 6 68% 48%;
+    --destructive-foreground: 42 40% 98%;
+    --border: 38 22% 87%;
+    --input: 38 22% 87%;
+    --ring: 28 10% 13%;
     --radius: 0.7rem;
 
     /* Behavior-block roles: when (trigger), act (action), rule (decision) */
-    --when-bg: 38 92% 95%;
-    --when-fg: 28 80% 26%;
-    --when-accent: 35 92% 52%;
-    --act-bg: 162 60% 94%;
-    --act-fg: 168 72% 20%;
-    --act-accent: 165 70% 38%;
-    --rule-bg: 250 70% 96%;
-    --rule-fg: 250 52% 40%;
-    --rule-accent: 250 60% 62%;
+    --when-bg: 38 80% 92%;
+    --when-fg: 28 75% 28%;
+    --when-accent: 32 88% 50%;
+    --act-bg: 162 48% 91%;
+    --act-fg: 168 68% 22%;
+    --act-accent: 165 65% 38%;
+    --rule-bg: 250 55% 94%;
+    --rule-fg: 250 48% 42%;
+    --rule-accent: 250 55% 62%;
   }
 
   .dark {
-    --background: 240 10% 8%;
-    --foreground: 0 0% 96%;
-    --card: 240 9% 11%;
-    --card-foreground: 0 0% 96%;
-    --popover: 240 9% 11%;
-    --popover-foreground: 0 0% 96%;
-    --primary: 250 70% 68%;
-    --primary-foreground: 240 20% 10%;
-    --secondary: 240 5% 17%;
-    --secondary-foreground: 0 0% 92%;
-    --muted: 240 5% 17%;
-    --muted-foreground: 240 5% 64%;
-    --accent: 250 30% 22%;
-    --accent-foreground: 250 70% 86%;
-    --destructive: 0 62% 52%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5% 20%;
-    --input: 240 5% 22%;
-    --ring: 250 70% 68%;
+    /* Warm near-black; primary inverts to light (Vercel/Geist pattern) */
+    --background: 30 8% 9%;
+    --foreground: 40 20% 94%;
+    --card: 30 7% 12%;
+    --card-foreground: 40 20% 94%;
+    --popover: 30 7% 12%;
+    --popover-foreground: 40 20% 94%;
+    --primary: 40 32% 92%;
+    --primary-foreground: 30 10% 12%;
+    --secondary: 30 6% 18%;
+    --secondary-foreground: 40 18% 90%;
+    --muted: 30 6% 18%;
+    --muted-foreground: 38 8% 62%;
+    --accent: 30 7% 20%;
+    --accent-foreground: 40 24% 88%;
+    --destructive: 6 60% 50%;
+    --destructive-foreground: 40 20% 96%;
+    --border: 33 7% 20%;
+    --input: 33 7% 22%;
+    --ring: 40 30% 78%;
 
-    --when-bg: 30 40% 16%;
-    --when-fg: 38 90% 76%;
+    --when-bg: 30 38% 16%;
+    --when-fg: 38 88% 76%;
     --when-accent: 35 80% 56%;
-    --act-bg: 168 38% 14%;
-    --act-fg: 162 60% 70%;
-    --act-accent: 165 60% 46%;
-    --rule-bg: 250 32% 20%;
-    --rule-fg: 250 70% 82%;
-    --rule-accent: 250 60% 68%;
+    --act-bg: 168 36% 14%;
+    --act-fg: 162 58% 70%;
+    --act-accent: 165 58% 46%;
+    --rule-bg: 250 26% 22%;
+    --rule-fg: 250 64% 84%;
+    --rule-accent: 250 56% 68%;
   }
 }
 
@@ -78,7 +78,6 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }

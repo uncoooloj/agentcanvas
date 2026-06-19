@@ -64,12 +64,6 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
       <main>
         {/* Hero */}
         <section className="mx-auto max-w-3xl px-6 pb-12 pt-20 text-center sm:pt-28">
-          <Badge variant="secondary" className="mb-7 rounded-full px-3 py-1 font-normal text-muted-foreground">
-            <span>
-              Works with{" "}
-              <span className="font-medium text-foreground">Claude Code, Codex, Cursor</span> &amp; more
-            </span>
-          </Badge>
           <h1 className="text-balance text-[2.75rem] font-semibold leading-[1.03] tracking-[-0.02em] sm:text-[4.25rem]">
             Your app, in plain English.
             <br />

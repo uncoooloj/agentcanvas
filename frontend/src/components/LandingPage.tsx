@@ -85,10 +85,6 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
           </div>
         </section>
 
-        <section className="mx-auto max-w-5xl px-6 pb-24">
-          <HeroDemo />
-        </section>
-
         <HowItWorks />
 
         <AgentPrompt />
@@ -169,24 +165,16 @@ const STEPS = [
   },
 ]
 
-function HeroDemo() {
-  const { step } = useDemo()
-  return <DemoFrame step={step} />
-}
-
 function HowItWorks() {
   const { step, setStep } = useDemo()
   return (
     <section id="how" className="border-t border-border/60 bg-secondary/30">
       <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
-        <div className="max-w-2xl">
+        <div className="text-center">
           <p className="text-sm font-medium uppercase tracking-wide text-clay">How it works</p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
             No code. Just what your app does.
           </h2>
-          <p className="mt-3 max-w-md text-muted-foreground">
-            Five plain steps, playing live. Click any step to jump to it.
-          </p>
         </div>
 
         <div className="mt-12 grid items-start gap-10 lg:grid-cols-[300px_1fr]">

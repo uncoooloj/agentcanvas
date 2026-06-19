@@ -183,8 +183,10 @@ export default function App() {
     setSelectedId(null)
   }
 
+  const [peekLanding, setPeekLanding] = useState(false)
   const inJourney = view !== HOME && !!activeJourney
-  const landing = !contextLoading && context.mode === "landing"
+  const appAvailable = !contextLoading && context.mode !== "landing"
+  const landing = (!contextLoading && context.mode === "landing") || peekLanding
 
   if (contextLoading) {
     return (
@@ -196,7 +198,7 @@ export default function App() {
   }
 
   if (landing) {
-    return <LandingPage />
+    return <LandingPage onEnterApp={appAvailable ? () => setPeekLanding(false) : undefined} />
   }
 
   return (
@@ -213,9 +215,15 @@ export default function App() {
             {leftOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
           </Button>
         )}
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+        <button
+          type="button"
+          onClick={() => setPeekLanding(true)}
+          aria-label="Back to the AgentCanvas home page"
+          title="Home"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-85"
+        >
           <Sparkles className="h-4 w-4" />
-        </span>
+        </button>
         <div className="min-w-0 flex-1">
           <Provenance context={context} demoMode={model.isDemo || context.isDemo} />
         </div>

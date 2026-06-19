@@ -13,12 +13,19 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-export function LandingPage() {
+export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
+  // When opened from inside the app (logo → home), CTAs return you to the app.
+  // On a genuine first visit, they enter the demo by reloading with ?demo=1.
   function openDemo() {
+    if (onEnterApp) {
+      onEnterApp()
+      return
+    }
     const url = new URL(window.location.href)
     url.searchParams.set("demo", "1")
     window.location.href = url.toString()
   }
+  const ctaLabel = onEnterApp ? "Back to your app" : "Try the demo"
 
   return (
     <div className="min-h-screen bg-background text-foreground antialiased">
@@ -40,7 +47,7 @@ export function LandingPage() {
             </a>
           </nav>
           <Button type="button" size="sm" onClick={openDemo} className="ml-7 rounded-full">
-            Try the demo
+            {ctaLabel}
           </Button>
         </div>
       </header>
@@ -62,7 +69,7 @@ export function LandingPage() {
           </p>
           <div className="mt-9 flex flex-wrap justify-center gap-3">
             <Button type="button" size="lg" onClick={openDemo} className="h-12 rounded-full px-7 text-base">
-              Try the demo
+              {ctaLabel}
               <ArrowRight className="size-4" />
             </Button>
             <Button asChild variant="outline" size="lg" className="h-12 rounded-full px-7 text-base">
@@ -139,7 +146,7 @@ export function LandingPage() {
             </p>
             <Button type="button" size="lg" onClick={openDemo} className="mt-7 h-12 rounded-full px-7 text-base">
               <Play className="size-4" />
-              Open the demo
+              {onEnterApp ? "Back to your app" : "Open the demo"}
             </Button>
 
             <div className="mx-auto mt-14 max-w-md rounded-2xl border bg-card p-5 text-left">

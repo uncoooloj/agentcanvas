@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="%BASE_URL%apple-touch-icon.png" />
     <link rel="manifest" href="%BASE_URL%site.webmanifest" />
 
-    <title>AgentCanvas: see and steer your app in plain English</title>
+    <title>AgentCanvas: Your app, in plain English</title>
     <meta
       name="description"
       content="A friendlier way to steer the app an AI is building for you. AgentCanvas turns your app into a plain-English map of what it does. See it, edit it in your own words, and your AI coding agent (Claude Code, Codex, Cursor) builds the change. No code required."
@@ -20,23 +20,38 @@
       content="AgentCanvas, AI coding agent, Claude Code, Codex, Cursor, no-code app editing, plain English app builder, workflow canvas, app logic, non-technical"
     />
     <meta name="robots" content="index, follow" />
-    <link rel="canonical" href="https://agentcanvas.app/" />
+    <link rel="canonical" href="https://uncooloj.com/agentcanvas/" />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="AgentCanvas: see and steer your app in plain English" />
+    <meta property="og:url" content="https://uncooloj.com/agentcanvas/" />
+    <meta property="og:title" content="AgentCanvas: Your app, in plain English" />
     <meta
       property="og:description"
       content="A friendlier way to steer the app an AI is building for you. See what your app does as a plain-English map, change it in your own words, and your AI coding agent builds it."
     />
     <meta property="og:site_name" content="AgentCanvas" />
+    <meta property="og:image" content="https://uncooloj.com/agentcanvas/og-image.png" />
+    <meta property="og:image:secure_url" content="https://uncooloj.com/agentcanvas/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="AgentCanvas preview card: Your app, in plain English."
+    />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="AgentCanvas: see and steer your app in plain English" />
+    <meta name="twitter:title" content="AgentCanvas: Your app, in plain English" />
     <meta
       name="twitter:description"
       content="See what your app does in plain English, change it in your own words, and your AI coding agent builds it. Works with Claude Code, Codex, Cursor."
+    />
+    <meta name="twitter:image" content="https://uncooloj.com/agentcanvas/og-image.png" />
+    <meta
+      name="twitter:image:alt"
+      content="AgentCanvas preview card: Your app, in plain English."
     />
 
     <!-- Structured data: what we are, what we do, how to use us (for crawlers & agents) -->
@@ -45,6 +60,8 @@
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "AgentCanvas",
+        "url": "https://uncooloj.com/agentcanvas/",
+        "image": "https://uncooloj.com/agentcanvas/og-image.png",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "macOS, Windows, Linux",
         "description": "AgentCanvas is a local, agent-agnostic tool that turns any app/codebase into a plain-English map of what it does: its user journeys shown as simple When / Do / If flows with branches. Non-technical people can read the map and change how the app works by editing steps in their own words. Each edit becomes a structured request written to .agentcanvas/pending, which an AI coding agent (Claude Code, Codex, Cursor, Antigravity, or any agent that can read files and run commands) implements. Run it with `agentcanvas start --workspace <path>`; it serves a local web canvas and writes change requests an agent can act on.",

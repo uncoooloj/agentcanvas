@@ -45,10 +45,10 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
             AgentCanvas
           </span>
           <nav className="ml-auto hidden items-center gap-7 text-sm text-muted-foreground sm:flex">
-            <a href="#how" className="transition-colors hover:text-foreground">
+            <a href="#how" className="font-semibold transition-colors hover:text-foreground">
               How it works
             </a>
-            <a href="#agent" className="transition-colors hover:text-foreground">
+            <a href="#agent" className="font-semibold transition-colors hover:text-foreground">
               For your agent
             </a>
             <a href="#try" className="transition-colors hover:text-foreground">
@@ -63,11 +63,11 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
 
       <main>
         {/* Hero */}
-        <section className="mx-auto max-w-3xl px-6 pb-12 pt-20 text-center sm:pt-28">
-          <h1 className="text-balance text-[2.75rem] font-semibold leading-[1.03] tracking-[-0.02em] sm:text-[4.25rem]">
-            Your app, in plain English.
+        <section className="mx-auto max-w-5xl px-6 pb-12 pt-20 text-center sm:pt-28">
+          <h1 className="text-balance text-[2.75rem] font-bold leading-[1.03] tracking-[-0.02em] sm:text-[4.25rem]">
+            <span className="lg:whitespace-nowrap">Your app, in plain English.</span>
             <br />
-            <span className="text-foreground/55">Your AI agent, too.</span>
+            <span className="text-clay">Your AI agent, too.</span>
           </h1>
           <p className="mx-auto mt-6 max-w-xl text-balance text-lg leading-relaxed text-muted-foreground sm:text-xl">
             A friendlier way to steer the app an AI is building for you. See what it does, change it
@@ -247,7 +247,7 @@ function HowItWorks() {
     <section ref={ref} id="how" className="scroll-mt-20 border-t border-border/60 bg-secondary/30">
       <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
         <div className="text-center">
-          <p className="text-sm font-medium uppercase tracking-wide text-clay">How it works</p>
+          <p className="text-sm font-semibold uppercase tracking-wide text-clay">How it works</p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
             No code. Just what your app does.
           </h2>
@@ -581,7 +581,7 @@ Keep checking \`.agentcanvas/pending/\` for new requests while we work.`
 function AgentPrompt() {
   return (
     <section id="agent" className="mx-auto max-w-3xl scroll-mt-20 px-6 py-24 text-center">
-      <p className="text-sm font-medium uppercase tracking-wide text-clay">For your agent</p>
+      <p className="text-sm font-semibold uppercase tracking-wide text-clay">For your agent</p>
       <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
         Already chatting with an AI coding agent?
       </h2>

@@ -8,6 +8,10 @@ export default {
       fontFamily: {
         sans: ["Plus Jakarta Sans Variable", "system-ui", "sans-serif"],
       },
+      fontWeight: {
+        semibold: "700",
+        bold: "800",
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

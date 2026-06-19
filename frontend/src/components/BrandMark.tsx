@@ -19,17 +19,17 @@ export function BrandMark({
         role="img"
       >
         <path
-          d="M18 47.5 32 14.5 46 47.5M24 34.5H40"
+          d="M18 48 32 15 46 48"
           stroke="currentColor"
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth="7"
+          strokeWidth="5"
         />
-        <circle cx="32" cy="14.5" r="7" fill="currentColor" />
-        <circle cx="18" cy="47.5" r="7" fill="currentColor" />
-        <circle cx="46" cy="47.5" r="7" fill="currentColor" />
+        <circle cx="32" cy="15" r="6" fill="var(--logo-fill, hsl(var(--background)))" stroke="currentColor" strokeWidth="4.5" />
+        <circle cx="18" cy="48" r="6" fill="var(--logo-fill, hsl(var(--background)))" stroke="currentColor" strokeWidth="4.5" />
+        <circle cx="46" cy="48" r="6" fill="var(--logo-fill, hsl(var(--background)))" stroke="currentColor" strokeWidth="4.5" />
         <path
-          d="m43.5 15.5 4-2.2 1.3-4.3 1.3 4.3 4 2.2-4 2.2-1.3 4.3-1.3-4.3-4-2.2Z"
+          d="m43.5 12.5 4.4-2.1 2-4.4 2 4.4 4.4 2.1-4.4 2.1-2 4.4-2-4.4-4.4-2.1Z"
           fill="currentColor"
         />
       </svg>

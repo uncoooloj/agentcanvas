@@ -91,7 +91,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
         <AgentPrompt />
 
         {/* Try it */}
-        <section id="try" className="border-t border-border/60 bg-secondary/30">
+        <section id="try" className="scroll-mt-20 border-t border-border/60 bg-secondary/30">
           <div className="mx-auto max-w-2xl px-6 py-24 text-center">
             <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Have a look around.</h2>
             <p className="mx-auto mt-3 max-w-md text-muted-foreground">
@@ -171,13 +171,49 @@ function WorksWith() {
 
 const STEP_MS = [2000, 2000, 2900, 2200, 2900]
 
-function useDemo() {
+function useHasEnteredView() {
+  const ref = useRef<HTMLElement | null>(null)
+  const [hasEntered, setHasEntered] = useState(false)
+
+  useEffect(() => {
+    const node = ref.current
+    if (!node || hasEntered) return
+    if (!("IntersectionObserver" in window)) {
+      setHasEntered(true)
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return
+        setHasEntered(true)
+        observer.disconnect()
+      },
+      { threshold: 0.35, rootMargin: "-12% 0px -18% 0px" }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [hasEntered])
+
+  return { ref, hasEntered }
+}
+
+function useDemo(active: boolean) {
   const [step, setStepRaw] = useState(0)
   const timer = useRef<number | undefined>(undefined)
+  const started = useRef(false)
+
   useEffect(() => {
+    if (!active || started.current) return
+    started.current = true
+    setStepRaw(0)
+  }, [active])
+
+  useEffect(() => {
+    if (!active) return
     timer.current = window.setTimeout(() => setStepRaw((s) => (s + 1) % STEP_MS.length), STEP_MS[step])
     return () => window.clearTimeout(timer.current)
-  }, [step])
+  }, [active, step])
   return { step, setStep: setStepRaw }
 }
 
@@ -205,9 +241,10 @@ const STEPS = [
 ]
 
 function HowItWorks() {
-  const { step, setStep } = useDemo()
+  const { ref, hasEntered } = useHasEnteredView()
+  const { step, setStep } = useDemo(hasEntered)
   return (
-    <section id="how" className="border-t border-border/60 bg-secondary/30">
+    <section ref={ref} id="how" className="scroll-mt-20 border-t border-border/60 bg-secondary/30">
       <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
         <div className="text-center">
           <p className="text-sm font-medium uppercase tracking-wide text-clay">How it works</p>
@@ -543,7 +580,7 @@ Keep checking \`.agentcanvas/pending/\` for new requests while we work.`
 
 function AgentPrompt() {
   return (
-    <section id="agent" className="mx-auto max-w-3xl px-6 py-24 text-center">
+    <section id="agent" className="mx-auto max-w-3xl scroll-mt-20 px-6 py-24 text-center">
       <p className="text-sm font-medium uppercase tracking-wide text-clay">For your agent</p>
       <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
         Already chatting with an AI coding agent?

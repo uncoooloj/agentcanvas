@@ -1,32 +1,49 @@
 # AgentCanvas
 
-AgentCanvas is an agent-agnostic local workflow canvas for AI coding agents.
+AgentCanvas is a small local canvas for working with coding agents.
 
-It indexes a workspace into `.agentcanvas/workflow.ir.json`, serves a local editable canvas, and turns canvas edits into `.agentcanvas/pending/*.md` and `.json` change requests that Codex, Claude Code, Cursor, Antigravity, or a generic terminal agent can consume.
+It looks at a repo, draws the important workflow pieces, lets you mark what
+should change, then turns that into a clear request an agent can implement.
 
-AgentCanvas is not another coding agent. It is the local coordination layer between a repo, a visual workflow map, and whichever agent you trust to implement the next change.
+The product direction is simple: do not make the user guess what the agent is
+doing. Every request should be visible, copyable, and trackable from "not sent"
+to "done".
 
-## Why This Exists
+## The Story
 
-Most coding agents work well when the request is precise. Real products are rarely precise at first: logic is spread across routes, services, UI states, tests, scripts, and docs. AgentCanvas gives that workflow shape before an agent starts editing.
+Coding agents are good at editing code once the task is clear. The hard part is
+often getting from "this flow feels wrong" to "change these files and prove it."
 
-Use it to:
+AgentCanvas sits in that gap.
 
-- map a workspace into a reviewable workflow graph
-- inspect app logic, user journeys, integrations, automations, and test coverage
-- edit the workflow locally in a browser
-- turn canvas edits into concrete implementation requests
-- hand those requests to any coding agent without locking into one vendor
+1. Point it at a workspace.
+2. It indexes the code into `.agentcanvas/workflow.ir.json`.
+3. The browser canvas shows the flow in plain language.
+4. You ask for a change from the canvas.
+5. AgentCanvas writes a pending request under `.agentcanvas/pending/`.
+6. Codex, Claude Code, Cursor, Antigravity, or another agent implements it.
+7. The agent updates the request status so the canvas shows the truth.
 
-## Quick Start
+The Agentation-inspired part is the loop: work is not a vague chat message that
+disappears. It becomes an item with a status, files, notes, and a copy fallback.
 
-From this repository:
+## Install
+
+From this repo:
 
 ```bash
 python3 -m pip install -e .
 ```
 
-Index a workspace:
+Check the CLI:
+
+```bash
+agentcanvas --help
+```
+
+## Start With A Real Workspace
+
+Index a project:
 
 ```bash
 agentcanvas index --workspace /path/to/your/project
@@ -38,145 +55,147 @@ Start the local canvas:
 agentcanvas start --workspace /path/to/your/project --port 8765
 ```
 
-Open the printed local URL, usually:
+Open the printed URL, usually:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-After editing the canvas, review the generated requests:
+After you edit the canvas, requests appear here:
 
-```bash
-ls /path/to/your/project/.agentcanvas/pending
+```text
+/path/to/your/project/.agentcanvas/pending/
 ```
 
-Give one pending request to your coding agent, let it implement the change, run the relevant tests, then re-index:
+Each request has:
+
+- a `.md` file an agent or human can read
+- a `.json` file tools can read
+- a status such as `pending`, `in_progress`, `needs_input`, `blocked`, or `done`
+
+## Start With No Workspace
+
+If you do not have a project selected yet, start AgentCanvas without a
+workspace:
+
+```bash
+agentcanvas start --port 8765
+```
+
+That should show the no-workspace landing first. From there the product should
+offer three plain choices:
+
+- open a local workspace by running the exact command to use
+- paste or clone a GitHub repo once that path is wired
+- enter demo mode
+
+Use the demo directly when you want the bundled sample project:
+
+```bash
+agentcanvas start --demo --port 8765
+```
+
+Demo mode must be obvious in the UI. The user should never think the demo is
+their repo or that a live agent is connected when it is not.
+
+## Give Work To An Agent
+
+An agent can poll for new requests:
+
+```bash
+agentcanvas pending --workspace /path/to/your/project
+```
+
+When it starts work:
+
+```bash
+agentcanvas status --workspace /path/to/your/project <pending-id> --status in_progress
+```
+
+When it needs the user:
+
+```bash
+agentcanvas status --workspace /path/to/your/project <pending-id> --status needs_input --note "I need one decision before editing."
+```
+
+When it has implemented and verified the change:
 
 ```bash
 agentcanvas index --workspace /path/to/your/project
+agentcanvas status --workspace /path/to/your/project <pending-id> --status done --note "Implemented and verified."
 ```
 
-## MVP Command Contract
+The important part is that the status comes from the agent or CLI, not from a
+browser timer pretending work happened.
 
-The MVP centers on two commands:
+## Copy Fallback
+
+Copy mode is a core feature.
+
+If no live agent/session is connected, AgentCanvas should still create the
+pending files and show a clean prompt the user can paste into any coding agent.
+That prompt should name the request, workspace, files, acceptance criteria, and
+the status commands above.
+
+This keeps the product useful before deeper integrations exist.
+
+## Integration Paths
+
+AgentCanvas should stay agent-agnostic. There are four paths:
+
+- **Skill**: install `skill/agentcanvas/` into an agent that supports skills.
+  This gives the agent the workflow for indexing, reading requests, updating
+  status, testing, and re-indexing.
+- **Local API**: the browser uses token-protected local endpoints such as
+  `/api/context`, `/api/graph`, `/api/pending`, `/api/changes`, `/api/status`,
+  and `/api/reindex`.
+- **MCP**: planned path for agents that prefer tools over shell commands. It
+  should expose the same small actions: get context, list pending, create
+  request, update status, and re-index.
+- **Webhooks**: planned path for outside tools to report back. A webhook should
+  be able to update request status, attach a note, or send a reply without
+  pretending to be the browser.
+
+See [docs/adapters.md](docs/adapters.md) for the adapter map and prompt
+snippets.
+
+## Projection
+
+AgentCanvas can use an LLM or coding agent to translate grounded code facts into
+a cleaner human canvas. The package does not call a model by itself.
+
+The safe path is:
 
 ```bash
-agentcanvas index --workspace <workspace>
-agentcanvas start --workspace <workspace> --port <port>
+agentcanvas apply-query --workspace /path/to/your/project --query canvas-query.json --dry-run
+agentcanvas apply-query --workspace /path/to/your/project --query canvas-query.json
 ```
 
-`index` scans the workspace and writes:
+Validate first, then write.
 
-```text
-<workspace>/.agentcanvas/workflow.ir.json
-```
+See [docs/projection.md](docs/projection.md).
 
-`start` serves the local browser UI for that workspace and writes canvas-generated change requests under:
-
-```text
-<workspace>/.agentcanvas/pending/
-```
-
-Each pending request should have:
-
-- a Markdown file for humans and coding agents
-- a JSON file for tools that want structured fields
-
-The file contract matters more than the agent. If an agent can read Markdown, inspect JSON, edit code, and run tests, it can use AgentCanvas.
-
-## Architecture
-
-```text
-workspace
-  |
-  | agentcanvas index
-  v
-.agentcanvas/workflow.ir.json
-  |
-  | agentcanvas start
-  v
-local browser canvas
-  |
-  | user edits workflow
-  v
-.agentcanvas/pending/<request>.md
-.agentcanvas/pending/<request>.json
-  |
-  | Codex / Claude Code / Cursor / Antigravity / terminal agent
-  v
-implemented code change + tests + re-index
-```
-
-The main pieces are:
-
-- **Indexer**: reads a workspace and emits a typed workflow IR.
-- **Workflow IR**: the local JSON contract used by the server, canvas, and adapters.
-- **Local server**: serves the browser UI against one explicit workspace.
-- **Canvas UI**: lets a human inspect and edit the workflow.
-- **Pending requests**: durable Markdown and JSON change requests generated from canvas edits.
-- **Adapters**: optional prompt or tool wrappers that hand pending requests to different agents.
-
-## Agent-Agnostic Adapter Model
-
-AgentCanvas does not require a Codex account, Claude account, Cursor install, or Antigravity install. Those tools are optional consumers of the same local request files.
-
-An adapter can be as small as this:
-
-1. Find `.agentcanvas/pending/*.md`.
-2. Ask the agent to implement one request.
-3. Point the agent at the matching `.json` file when structured context is useful.
-4. Run the project tests.
-5. Re-run `agentcanvas index --workspace <workspace>`.
-
-That is the whole model. Deeper integrations can add IDE buttons, terminal commands, or agent-specific prompt templates, but the base workflow stays portable.
-
-See [docs/adapters.md](docs/adapters.md) for small prompt snippets for Codex, Claude Code, Cursor, Antigravity, and generic terminal agents.
-
-## Safety Model
+## Safety
 
 AgentCanvas is local-first and file-based.
 
-- It writes workflow state under `.agentcanvas/`.
-- It creates pending requests instead of directly modifying source files.
-- It serves a local URL for the selected workspace.
-- It keeps agent execution separate from canvas editing.
-- It makes implementation requests inspectable before any coding agent acts.
+- It writes state under `.agentcanvas/`.
+- It creates requests instead of directly editing application code.
+- It keeps the canvas separate from the agent that edits code.
+- It makes every request inspectable before work starts.
+- It should never show "done" unless the request status says `done`.
 
-Recommended practice:
+Good practice:
 
-- Commit or stash important work before running any agent.
+- Commit or stash important work before asking an agent to edit.
 - Review pending requests before implementation.
-- Ask before running migrations, seeds, deploys, or other mutating commands.
-- Run the smallest relevant test command after each implemented request.
-- Re-index after implementation so the canvas reflects the new code.
-
-## Current Limitations
-
-AgentCanvas is early.
-
-- The workflow IR is an approximation, not a complete proof of runtime behavior.
-- Large monorepos may need scoped indexing before full-repo indexing is practical.
-- Generated requests still need human or agent review.
-- Agent adapters are intentionally lightweight prompt/file workflows today.
-- The local server is designed for local development, not hosted multi-user collaboration.
-- Canvas edits produce requests; they do not automatically patch application code.
-
-## Roadmap
-
-Planned directions:
-
-- richer language and framework indexers
-- first-class route, test, job, workflow, and integration nodes
-- request status tracking from pending to implemented
-- diff previews before handing work to an agent
-- adapter packages for popular coding agents and IDEs
-- CI/test result overlays on the canvas
-- import/export for sharing workflow maps without sharing private code
-- stronger schema validation for `workflow.ir.json` and pending request JSON
+- Ask before migrations, seeds, deploys, or destructive commands.
+- Run the closest relevant test or smoke check.
+- Re-index after implementation.
 
 ## Development
 
-Run the current test suite:
+Run tests:
 
 ```bash
 python3 -m unittest discover
@@ -189,10 +208,10 @@ python3 -m pip install -e .
 agentcanvas index --workspace examples/sample-js-app
 agentcanvas start --workspace examples/sample-js-app --port 8765
 python3 -m unittest discover
-python3 scripts/smoke_mvp.py
 ```
 
-Keep generated workspace state out of source commits unless a fixture is intentional:
+Keep generated workspace state out of source commits unless it is an intentional
+fixture:
 
 ```text
 .agentcanvas/
@@ -200,10 +219,13 @@ Keep generated workspace state out of source commits unless a fixture is intenti
 
 ## Skill Wrapper
 
-The repository includes a standalone skill wrapper at:
+The repo includes a standalone skill wrapper at:
 
 ```text
-skill/agentcanvas/SKILL.md
+skill/agentcanvas/
 ```
 
-Install or copy that skill into your agent's skill directory if your agent supports skills. The skill tells the agent how to launch AgentCanvas, inspect pending requests, implement a request, run tests, and re-index without assuming Codex-only behavior.
+Install that folder into your agent's skill directory if the agent supports
+skills. The skill is intentionally self-contained: it explains how to launch
+AgentCanvas, inspect pending requests, implement one request, update status,
+test, re-index, and use copy fallback.

@@ -1,103 +1,101 @@
 # Demo Mode
 
-Demo mode is the empty-state path for opening AgentCanvas without an agent and
-without a workspace. It should use the bundled real fixture at
-`demo_projects/agentcanvas-demo` through the same indexer and server pipeline as
-any other workspace. It should not use frontend hard-coded workflow data.
+Demo mode is the safe way to try AgentCanvas without pointing it at your own
+repo.
 
-## Trigger
+It should feel like the real product, not a fake frontend mock. It should also
+be clearly labeled so nobody mistakes it for their workspace.
 
-Start demo mode only when no workspace was supplied and no launching agent was
-identified.
+## How To Start It
 
-- No workspace means neither positional `path` nor `--workspace` was provided.
-- No agent means no explicit `--agent` and no recognized agent environment hint.
-- If a workspace is supplied, index and serve that workspace normally.
-- If an agent is supplied but no workspace is supplied, prefer asking for a
-  workspace or offering demo mode explicitly instead of silently pretending the
-  demo fixture is the agent's project.
+Explicit demo:
 
-## Runtime Behavior
+```bash
+agentcanvas start --demo --port 8765
+```
 
-Use a writable copy of the fixture, not frontend mock data.
+No-workspace landing:
 
-1. Resolve the bundled fixture path relative to the installed AgentCanvas package
-   or repository root.
-2. Copy `demo_projects/agentcanvas-demo` into a writable demo workspace, such as
-   a cache or temp directory.
-3. Run `index_workspace(demo_workspace)` to create
-   `.agentcanvas/workflow.ir.json` from the copied source files.
-4. Start the normal server against that demo workspace.
-5. Let canvas edits write pending requests under the demo workspace's
-   `.agentcanvas/pending/` directory.
+```bash
+agentcanvas start --port 8765
+```
 
-The demo copy can be reset between launches. The source fixture should stay
-pristine so package installs and repository checkouts remain clean.
+The landing page may offer "Try demo". The direct demo command should skip the
+landing page.
 
-## Nav Highlight
+## Product Rules
 
-Demo mode must be visible in the top nav, especially around the pill that
-currently shows the assistant.
+- Demo mode uses a bundled sample project.
+- Demo mode runs through the same indexer and server as a real workspace.
+- Canvas edits create normal pending requests under the demo workspace.
+- Status updates use the same `agentcanvas status` and `/api/status` paths.
+- Re-index uses the same `agentcanvas index` and `/api/reindex` paths.
+- The source demo fixture stays clean.
 
-Recommended behavior:
+## Context Contract
 
-- Add `isDemo: true` and `demoFixture: "agentcanvas-demo"` to `/api/context`
-  when serving the fixture.
-- Render a clear `Demo mode` pill adjacent to, or replacing, the assistant pill.
-- If no agent is connected, the assistant-area text should say
-  `No agent connected` rather than implying Codex, Claude Code, Cursor, or any
-  other assistant is active.
-- Include the demo workspace name/path in the hover title or secondary context,
-  so users can tell generated pending requests are going to the demo copy.
-- Use a distinct visual treatment for demo mode, but keep it local and calm:
-  this is an orientation state, not an error.
+`/api/context` should make demo mode obvious:
 
-## Fixture Scenarios
+```json
+{
+  "mode": "demo",
+  "isDemo": true,
+  "demoFixture": "agentcanvas-demo",
+  "assistant": "No agent connected"
+}
+```
 
-The bundled fixture exercises the current AgentCanvas pipeline with:
+If an agent was explicitly supplied, the assistant label can use that agent.
+If not, do not imply Codex, Claude Code, Cursor, Antigravity, or any other agent
+is attached.
 
-- Routes: `POST /orders`, `GET /orders/:orderId`, `POST /returns`,
-  `POST /events/inventory-restocked`, and `POST /events/delivery-delayed`.
-- Services: cart normalization, delivery-area conditions, inventory reservation,
-  pricing, and delivery-plan decisions.
-- Actions: order creation, customer notification, return decisions, and
-  fulfillment queueing.
-- Background/event behavior: inventory restock events enqueue a waitlist
-  notification job, and delivery delay events send a customer alert.
-- Tests: `tests/order-flow.test.js` covers the order branches, return route, and
-  event routes without external dependencies.
+## UI Copy
 
-The order flow intentionally contains When/Do/If/Else If/Else behavior:
+Use direct labels:
 
-- When a shopper posts to `POST /orders`.
-- Do normalization, delivery checks, inventory reservation, pricing, customer
-  notification, and fulfillment enqueueing.
-- If the cart is empty, reject it.
-- Else if the delivery area is unsupported, request a different address.
-- Else if inventory is unavailable, waitlist the customer.
-- Else if the customer is gold tier, create a priority order.
-- Else create a standard order.
+- `Demo mode`
+- `No agent connected`
+- `Create request`
+- `Copy prompt`
+- `Open a real workspace`
 
-## Integration Points
+Avoid labels that imply real work happened:
 
-Expected code changes when wiring this in:
+- `Sent to agent` when no agent received it
+- `Working` from a timer
+- `Done` before the pending request is marked done
 
-- `agentcanvas/cli.py`: distinguish an omitted workspace from the current
-  default of `"."`, so `agentcanvas start` can enter demo mode only when the
-  user truly supplied no workspace.
-- `agentcanvas/server.py`: carry demo metadata into `/api/context` and serve the
-  normal `/api/graph` response from the indexed demo workspace.
-- `agentcanvas/indexer.py`: no special demo behavior should be required. The
-  fixture is ordinary source code and should index like any other workspace.
-- `frontend/src/App.tsx` and nav/context components: stop using hard-coded demo
-  workflow data for the no-workspace path. Read the indexed graph from
-  `/api/graph`, read `isDemo` from `/api/context`, and highlight demo mode near
-  the assistant pill.
-- Packaging: include `demo_projects/agentcanvas-demo` in source distributions
-  and installed packages, or copy it from the repository root in editable/dev
-  installs.
+## Fixture Behavior
 
-Manual verification command:
+The bundled fixture should exercise a believable app flow:
+
+- routes
+- services
+- actions
+- events or webhook-like handlers
+- tests
+- at least one branch path such as `if`, `else if`, and `else`
+
+The demo should teach the loop:
+
+1. inspect the flow
+2. create a request
+3. copy or hand it to an agent
+4. update status
+5. re-index
+
+## Implementation Notes
+
+Expected code areas when wiring or reviewing demo mode:
+
+- `agentcanvas/cli.py`: keep `--demo` explicit and keep bare `start` as landing.
+- `agentcanvas/server.py`: report demo state through `/api/context`.
+- `agentcanvas/indexer.py`: treat the fixture like ordinary source code.
+- UI: read `/api/context` and `/api/graph`; do not use hard-coded demo graph
+  data when the indexed fixture is available.
+- Packaging: include the fixture in source and installed builds.
+
+Manual verification:
 
 ```bash
 python3 scripts/smoke_mvp.py demo_projects/agentcanvas-demo

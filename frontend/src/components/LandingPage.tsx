@@ -7,6 +7,7 @@ import {
   Clipboard,
   GitBranch,
   Loader2,
+  MousePointer2,
   Play,
   Send,
   Sparkles,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { BrandMark } from "@/components/BrandMark"
 import { cn } from "@/lib/utils"
 
 export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
@@ -35,9 +37,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-5xl items-center px-6">
           <span className="flex items-center gap-2 font-semibold">
-            <span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Sparkles className="size-4" />
-            </span>
+            <BrandMark />
             AgentCanvas
           </span>
           <nav className="ml-auto hidden items-center gap-7 text-sm text-muted-foreground sm:flex">
@@ -61,7 +61,8 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
         {/* Hero */}
         <section className="mx-auto max-w-3xl px-6 pb-12 pt-20 text-center sm:pt-28">
           <Badge variant="secondary" className="mb-7 rounded-full px-3 py-1 font-normal text-muted-foreground">
-            Works with Claude Code, Codex, Cursor &amp; more
+            Works with{" "}
+            <span className="font-medium text-foreground">Claude Code, Codex, Cursor</span> &amp; more
           </Badge>
           <h1 className="text-balance text-[2.75rem] font-semibold leading-[1.03] tracking-[-0.02em] sm:text-[4.25rem]">
             Your app, in plain English.
@@ -69,7 +70,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
             <span className="text-foreground/55">Your AI agent, too.</span>
           </h1>
           <p className="mx-auto mt-6 max-w-xl text-balance text-lg leading-relaxed text-muted-foreground sm:text-xl">
-            A friendlier way to steer the app an AI is building for you — see what it does, change it
+            A friendlier way to steer the app an AI is building for you. See what it does, change it
             in plain English, and tell your coding agent exactly what to build.
           </p>
           <div className="mt-9 flex flex-wrap justify-center gap-3">
@@ -84,7 +85,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
         </section>
 
         <section className="mx-auto max-w-3xl px-6 pb-24">
-          <BrowserFrame />
+          <AnimatedHero />
         </section>
 
         <Walkthrough />
@@ -118,9 +119,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
       <footer className="border-t border-border/60">
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-3 px-6 py-12 text-center">
           <span className="flex items-center gap-2 text-sm font-semibold">
-            <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Sparkles className="size-3.5" />
-            </span>
+            <BrandMark className="size-6" iconClassName="size-4" />
             AgentCanvas
           </span>
           <p className="max-w-sm text-sm text-muted-foreground">
@@ -167,20 +166,16 @@ function Walkthrough() {
   const refs = useRef<(HTMLDivElement | null)[]>([])
 
   useEffect(() => {
-    document.documentElement.style.scrollSnapType = "y proximity"
     const obs = new IntersectionObserver(
       (entries) => {
         entries.forEach((e) => {
           if (e.isIntersecting) setActive(Number((e.target as HTMLElement).dataset.index))
         })
       },
-      { rootMargin: "-45% 0px -45% 0px" }
+      { rootMargin: "-50% 0px -50% 0px" }
     )
     refs.current.forEach((el) => el && obs.observe(el))
-    return () => {
-      obs.disconnect()
-      document.documentElement.style.scrollSnapType = ""
-    }
+    return () => obs.disconnect()
   }, [])
 
   return (
@@ -233,8 +228,7 @@ function Walkthrough() {
                     refs.current[i] = el
                   }}
                   data-index={i}
-                  className="flex scroll-mt-24 flex-col justify-center lg:min-h-[80vh]"
-                  style={{ scrollSnapAlign: "center" }}
+                  className="flex scroll-mt-28 flex-col justify-center py-8 lg:min-h-[54vh]"
                 >
                   <p className="text-sm font-medium text-clay">Step {i + 1}</p>
                   <h3 className="mt-2 text-2xl font-semibold tracking-tight">{s.title}</h3>
@@ -376,9 +370,41 @@ function VisualBuilt() {
   )
 }
 
-// ---- Hero browser frame + shared bits ----
+// ---- Animated hero: a self-playing loop of the edit → send → built flow ----
 
-function BrowserFrame() {
+function AnimatedHero() {
+  const HERO_SEQ = [1200, 1100, 2300, 1600, 2000, 1500]
+  const [phase, setPhase] = useState(0)
+  useEffect(() => {
+    const t = window.setTimeout(() => setPhase((p) => (p + 1) % HERO_SEQ.length), HERO_SEQ[phase])
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase])
+
+  const FULL = "Text them the delivery date"
+  const [typed, setTyped] = useState("")
+  useEffect(() => {
+    if (phase < 2) {
+      setTyped("")
+      return
+    }
+    if (phase > 2) {
+      setTyped(FULL)
+      return
+    }
+    setTyped("")
+    let i = 0
+    const id = window.setInterval(() => {
+      i += 1
+      setTyped(FULL.slice(0, i))
+      if (i >= FULL.length) window.clearInterval(id)
+    }, 1900 / FULL.length)
+    return () => window.clearInterval(id)
+  }, [phase])
+
+  const highlight = phase >= 1 && phase <= 3
+  const showNew = phase >= 4
+
   return (
     <div className="overflow-hidden rounded-2xl border bg-card shadow-2xl shadow-primary/5">
       <div className="flex items-center gap-2 border-b bg-secondary/50 px-4 py-3">
@@ -389,21 +415,119 @@ function BrowserFrame() {
           <Sparkles className="size-3 text-clay" /> your-app · what your app does
         </span>
       </div>
-      <div className="p-6 sm:p-8">
+      <div className="p-6 sm:p-7">
         <p className="text-sm font-medium">Placing an order</p>
-        <p className="mb-5 text-xs text-muted-foreground">What happens when someone checks out</p>
+        <p className="mb-4 text-xs text-muted-foreground">What happens when someone checks out</p>
         <div className="space-y-2.5">
-          <FlowStep tone="when" label="When" text="Someone places an order" />
-          <FlowStep tone="act" label="Do" text="Check the items are in stock" />
-          <div className="flex justify-center py-1">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-rule-bg px-3.5 py-1.5 text-[13px] font-medium text-rule-fg">
-              <GitBranch className="size-3.5" /> If everything is in stock
+          <HeroRow tone="when" label="When" text="Someone places an order" />
+          <HeroRow tone="act" label="Do" text="Check the items are in stock" />
+          <div className="flex justify-center py-0.5">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-rule-bg px-3 py-1 text-xs font-medium text-rule-fg">
+              <GitBranch className="size-3" /> If everything is in stock
             </span>
           </div>
-          <FlowStep tone="act" label="Do" text="Charge their card" indent />
-          <FlowStep tone="act" label="Do" text="Send them a confirmation email" indent />
+          <HeroRow
+            tone="act"
+            label="Do"
+            text="Charge their card"
+            indent
+            highlight={highlight}
+            cursor={phase === 1}
+          />
+          <div
+            className={cn(
+              "grid transition-all duration-500 ease-out",
+              showNew ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+            )}
+          >
+            <div className="overflow-hidden">
+              <div className="pt-2.5">
+                <HeroRow tone="act" label="Do" text="Text them the delivery date" indent fresh />
+              </div>
+            </div>
+          </div>
+          <HeroRow tone="act" label="Do" text="Send them a confirmation email" indent />
+        </div>
+
+        <div className="relative mt-4 min-h-[58px]">
+          {phase === 2 && (
+            <div className="flex animate-fade-in items-center gap-2 rounded-xl border bg-background px-3 py-2">
+              <Badge variant="secondary" className="shrink-0 rounded-md text-[11px]">
+                Add a step
+              </Badge>
+              <span className="min-w-0 flex-1 truncate text-sm">
+                {typed}
+                <span className="ml-px inline-block h-3.5 w-px translate-y-[2px] animate-pulse bg-foreground/60 align-middle" />
+              </span>
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                <ArrowUp className="size-4" />
+              </span>
+            </div>
+          )}
+          {phase === 3 && (
+            <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-2.5 text-sm">
+              <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
+              <span className="text-muted-foreground">Claude Code is making your change…</span>
+            </div>
+          )}
+          {phase >= 4 && (
+            <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-2.5 text-sm">
+              <CircleCheck className="size-4 shrink-0 text-act-fg" />
+              <span className="font-medium">All set — your change is live</span>
+            </div>
+          )}
+          {(phase === 2 || phase === 3) && (
+            <span className="pointer-events-none absolute right-2.5 top-1/2 z-10 animate-fade-in">
+              <MousePointer2 className="size-4 fill-foreground text-foreground" />
+            </span>
+          )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function HeroRow({
+  tone,
+  label,
+  text,
+  indent,
+  highlight,
+  cursor,
+  fresh,
+}: {
+  tone: "when" | "act"
+  label: string
+  text: string
+  indent?: boolean
+  highlight?: boolean
+  cursor?: boolean
+  fresh?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        "relative flex items-center gap-3 rounded-xl border bg-background p-3 transition-all duration-300",
+        indent && "ml-6",
+        highlight && "border-primary/50 ring-2 ring-primary/15",
+        fresh && "border-act-accent/50"
+      )}
+    >
+      <span
+        className={cn(
+          "flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium",
+          tone === "when" ? "bg-when-bg text-when-fg" : "bg-act-bg text-act-fg"
+        )}
+      >
+        {tone === "when" ? <Zap className="size-3" /> : <Play className="size-3" />}
+        {label}
+      </span>
+      <span className="min-w-0 truncate text-sm">{text}</span>
+      {cursor && (
+        <span className="pointer-events-none absolute right-3 top-1/2 z-10 animate-fade-in">
+          <MousePointer2 className="size-4 fill-foreground text-foreground" />
+        </span>
+      )}
     </div>
   )
 }

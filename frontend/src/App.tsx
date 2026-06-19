@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { BrandMark } from "@/components/BrandMark"
 import { FlowColumn, type FlowAction } from "@/components/FlowCanvas"
 import { Overview } from "@/components/Overview"
 import { Inspector } from "@/components/Inspector"
@@ -227,9 +228,9 @@ export default function App() {
           onClick={() => go("/welcome")}
           aria-label="Back to the AgentCanvas home page"
           title="Home"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-85"
+          className="shrink-0 transition-opacity hover:opacity-85"
         >
-          <Sparkles className="h-4 w-4" />
+          <BrandMark />
         </button>
         <div className="min-w-0 flex-1">
           <Provenance context={context} demoMode={model.isDemo || context.isDemo} />

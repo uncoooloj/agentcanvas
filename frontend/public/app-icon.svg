@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AgentCanvas app icon">
+  <rect width="512" height="512" rx="112" fill="#faf7f1"/>
+  <path d="M144 382 256 116 368 382M192 278H320" fill="none" stroke="#171310" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="256" cy="116" r="56" fill="#171310"/>
+  <circle cx="144" cy="382" r="56" fill="#171310"/>
+  <circle cx="368" cy="382" r="56" fill="#171310"/>
+  <path d="m348 124 32-18 10-34 10 34 32 18-32 18-10 34-10-34-32-18Z" fill="#171310"/>
+</svg>

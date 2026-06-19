@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { useLocation, useNavigate } from "react-router-dom"
 import {
   ChevronLeft,
   Lightbulb,
@@ -29,9 +30,18 @@ import { findNode, type AppModel, type FlowNode, type Journey } from "@/lib/type
 const HOME = "__home__"
 
 export default function App() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const path = location.pathname
+  const onWelcome = path === "/welcome"
+  const journeyMatch = path.match(/^\/flows\/(.+?)\/?$/)
+  const routeJourneyId = journeyMatch ? decodeURIComponent(journeyMatch[1]) : null
+  const view = routeJourneyId ?? HOME
+  // Preserve the query (token, demo) across navigations so deep links + reloads work.
+  const go = (to: string) => navigate({ pathname: to, search: location.search })
+
   const { context, loading: contextLoading } = useAppContext()
   const [model, setModel] = useState<AppModel>(DEMO_MODEL)
-  const [view, setView] = useState<string>(HOME)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editRequest, setEditRequest] = useState<EditRequest | null>(null)
   const [leftOpen, setLeftOpen] = useState(true)
@@ -69,7 +79,6 @@ export default function App() {
     // Edits still write real pending requests via /api/changes.
     if (context.mode === "demo") {
       setModel((current) => preserveLocalJourneyRecency(DEMO_MODEL, current))
-      setView(HOME)
       setSelectedId(null)
       setLoading(false)
       return
@@ -81,7 +90,6 @@ export default function App() {
     } catch {
       setModel((current) => preserveLocalJourneyRecency(DEMO_MODEL, current))
     } finally {
-      setView(HOME)
       setSelectedId(null)
       setLoading(false)
     }
@@ -140,7 +148,7 @@ export default function App() {
   function selectChange(change: ChangeEntry) {
     const { journey, node } = locateChange(change)
     if (!journey || !node) return
-    setView(journey.id)
+    go(`/flows/${encodeURIComponent(journey.id)}`)
     setSelectedId(node.id)
     setEditRequest(null)
   }
@@ -148,7 +156,7 @@ export default function App() {
   function modifyChange(change: ChangeEntry) {
     const { journey, node } = locateChange(change)
     if (!journey || !node) return
-    setView(journey.id)
+    go(`/flows/${encodeURIComponent(journey.id)}`)
     setSelectedId(node.id)
     setEditRequest({
       action: change.action,
@@ -183,10 +191,9 @@ export default function App() {
     setSelectedId(null)
   }
 
-  const [peekLanding, setPeekLanding] = useState(false)
   const inJourney = view !== HOME && !!activeJourney
   const appAvailable = !contextLoading && context.mode !== "landing"
-  const landing = (!contextLoading && context.mode === "landing") || peekLanding
+  const landing = onWelcome || (!contextLoading && context.mode === "landing")
 
   if (contextLoading) {
     return (
@@ -198,7 +205,7 @@ export default function App() {
   }
 
   if (landing) {
-    return <LandingPage onEnterApp={appAvailable ? () => setPeekLanding(false) : undefined} />
+    return <LandingPage onEnterApp={appAvailable ? () => go("/") : undefined} />
   }
 
   return (
@@ -217,7 +224,7 @@ export default function App() {
         )}
         <button
           type="button"
-          onClick={() => setPeekLanding(true)}
+          onClick={() => go("/welcome")}
           aria-label="Back to the AgentCanvas home page"
           title="Home"
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-85"
@@ -247,11 +254,11 @@ export default function App() {
             activity={journeyActivity}
             activeId={view}
             onHome={() => {
-              setView(HOME)
+              go("/")
               setSelectedId(null)
             }}
             onSelect={(id) => {
-              setView(id)
+              go(`/flows/${encodeURIComponent(id)}`)
               setSelectedId(null)
             }}
           />
@@ -265,7 +272,7 @@ export default function App() {
               selectedId={selectedId}
               locked={locked}
               onBack={() => {
-                setView(HOME)
+                go("/")
                 setSelectedId(null)
               }}
               onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))}
@@ -277,7 +284,7 @@ export default function App() {
               journeys={orderedJourneys}
               changes={localChanges}
               activity={journeyActivity}
-              onOpen={(id) => setView(id)}
+              onOpen={(id) => go(`/flows/${encodeURIComponent(id)}`)}
             />
           )}
         </main>

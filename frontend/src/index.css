@@ -6,13 +6,13 @@
   :root {
     /* Warm cream surface, ink primary (agentation-inspired) */
     --background: 42 40% 96.5%;
-    --foreground: 30 9% 12%;
+    --foreground: 30 10% 9%;
     --card: 44 50% 99%;
-    --card-foreground: 30 9% 12%;
+    --card-foreground: 30 10% 9%;
     --popover: 44 50% 99%;
-    --popover-foreground: 30 9% 12%;
-    --primary: 28 10% 13%;
-    --primary-foreground: 42 40% 97%;
+    --popover-foreground: 30 10% 9%;
+    --primary: 30 10% 9%;
+    --primary-foreground: 42 44% 97%;
     --secondary: 40 26% 92.5%;
     --secondary-foreground: 30 9% 22%;
     --muted: 40 26% 92.5%;
@@ -23,7 +23,7 @@
     --destructive-foreground: 42 40% 98%;
     --border: 38 22% 87%;
     --input: 38 22% 87%;
-    --ring: 28 10% 13%;
+    --ring: 30 10% 9%;
     --radius: 0.7rem;
 
     /* Behavior-block roles: when (trigger), act (action), rule (decision) */

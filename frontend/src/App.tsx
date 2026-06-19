@@ -227,7 +227,7 @@ export default function App() {
           onClick={() => go("/welcome")}
           aria-label="Back to the AgentCanvas home page"
           title="Home"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-clay text-white transition-opacity hover:opacity-85"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-85"
         >
           <Sparkles className="h-4 w-4" />
         </button>

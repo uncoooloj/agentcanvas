@@ -33,7 +33,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-5xl items-center px-6">
           <span className="flex items-center gap-2 font-medium">
-            <span className="flex size-7 items-center justify-center rounded-md bg-clay text-white">
+            <span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <Sparkles className="size-4" />
             </span>
             AgentCanvas
@@ -163,7 +163,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
       <footer className="border-t border-border/60">
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-3 px-6 py-12 text-center">
           <span className="flex items-center gap-2 text-sm font-medium">
-            <span className="flex size-6 items-center justify-center rounded-md bg-clay text-white">
+            <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <Sparkles className="size-3.5" />
             </span>
             AgentCanvas

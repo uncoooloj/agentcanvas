@@ -107,7 +107,7 @@ function StepCard({
         <span className={cn("flex min-w-0 flex-col gap-1", stacked ? "w-full pr-1" : "pt-0.5 pr-16")}>
           <span
             className={cn(
-              "text-[15px] leading-snug text-foreground",
+              "text-[13px] leading-snug text-foreground",
               removing && "line-through text-muted-foreground"
             )}
           >
@@ -170,7 +170,7 @@ function BranchCard({
           <Split className="h-3.5 w-3.5 text-rule-fg" />
           <span
             className={cn(
-              "text-[14px] font-medium text-rule-fg",
+              "text-[13px] font-medium text-rule-fg",
               badge === "removing" && "line-through"
             )}
           >

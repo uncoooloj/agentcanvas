@@ -228,7 +228,7 @@ function Walkthrough() {
                     refs.current[i] = el
                   }}
                   data-index={i}
-                  className="flex scroll-mt-28 flex-col justify-center py-8 lg:min-h-[54vh]"
+                  className="flex scroll-mt-28 flex-col justify-start py-6 lg:min-h-[54vh] lg:pt-10"
                 >
                   <p className="text-sm font-medium text-clay">Step {i + 1}</p>
                   <h3 className="mt-2 text-2xl font-semibold tracking-tight">{s.title}</h3>

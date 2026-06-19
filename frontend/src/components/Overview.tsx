@@ -55,7 +55,7 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
   return (
     <div className="mx-auto max-w-5xl px-6 pb-36">
       <header className="pt-12 text-center">
-        <h1 className="text-2xl font-medium tracking-tight sm:text-[28px]">
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-[28px]">
           What {displayName.toLowerCase()} does
         </h1>
         <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-muted-foreground">

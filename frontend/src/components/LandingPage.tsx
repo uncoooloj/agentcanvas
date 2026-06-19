@@ -51,8 +51,10 @@ export function LandingPage() {
           <Badge variant="secondary" className="mb-7 rounded-full px-3 py-1 font-normal text-muted-foreground">
             Works with Claude Code, Codex, Cursor &amp; more
           </Badge>
-          <h1 className="text-balance text-[2.75rem] font-medium leading-[1.04] tracking-tight sm:text-[4.25rem]">
+          <h1 className="text-balance text-[2.75rem] font-semibold leading-[1.03] tracking-[-0.02em] sm:text-[4.25rem]">
             Your app, in plain English.
+            <br />
+            <span className="text-foreground/55">Your AI agent, too.</span>
           </h1>
           <p className="mx-auto mt-6 max-w-xl text-balance text-lg leading-relaxed text-muted-foreground sm:text-xl">
             See what your app does, change it in your own words, and tell your AI coding agent —
@@ -79,7 +81,7 @@ export function LandingPage() {
           <div className="mx-auto max-w-5xl px-6 py-24">
             <div className="mx-auto max-w-2xl text-center">
               <p className="text-sm font-medium uppercase tracking-wide text-primary">How you use it</p>
-              <h2 className="mt-3 text-3xl font-medium tracking-tight sm:text-4xl">
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
                 No code. Just what your app does.
               </h2>
               <p className="mx-auto mt-3 max-w-md text-muted-foreground">
@@ -130,7 +132,7 @@ export function LandingPage() {
         {/* Try it */}
         <section id="try" className="border-t border-border/60 bg-secondary/30">
           <div className="mx-auto max-w-2xl px-6 py-24 text-center">
-            <h2 className="text-3xl font-medium tracking-tight sm:text-4xl">Have a look around.</h2>
+            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Have a look around.</h2>
             <p className="mx-auto mt-3 max-w-md text-muted-foreground">
               The demo is a small online shop. Nothing to install — click through it and try
               changing a step.

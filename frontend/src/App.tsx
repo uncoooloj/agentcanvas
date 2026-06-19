@@ -519,7 +519,7 @@ function JourneyView({
         <ChevronLeft className="h-4 w-4" /> All flows
       </button>
       <div className="mb-5">
-        <h1 className="text-xl font-medium">{journey.title}</h1>
+        <h1 className="text-xl font-semibold tracking-tight">{journey.title}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{journey.summary}</p>
         <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground">
           <Lightbulb className="h-3.5 w-3.5" />

@@ -11,6 +11,7 @@ import {
   Play,
   Send,
   Sparkles,
+  X,
   Zap,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -84,7 +85,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
           </div>
         </section>
 
-        <section className="mx-auto max-w-3xl px-6 pb-24">
+        <section className="mx-auto max-w-5xl px-6 pb-24">
           <AnimatedHero />
         </section>
 
@@ -228,7 +229,7 @@ function Walkthrough() {
                     refs.current[i] = el
                   }}
                   data-index={i}
-                  className="flex scroll-mt-28 flex-col justify-start py-6 lg:min-h-[54vh] lg:pt-10"
+                  className="flex scroll-mt-28 flex-col py-8 lg:py-12"
                 >
                   <p className="text-sm font-medium text-clay">Step {i + 1}</p>
                   <h3 className="mt-2 text-2xl font-semibold tracking-tight">{s.title}</h3>
@@ -373,7 +374,8 @@ function VisualBuilt() {
 // ---- Animated hero: a self-playing loop of the edit → send → built flow ----
 
 function AnimatedHero() {
-  const HERO_SEQ = [1200, 1100, 2300, 1600, 2000, 1500]
+  // phases: 0 idle · 1 point · 2 compose · 3 staged(tray) · 4 working · 5 done · 6 hold
+  const HERO_SEQ = [1100, 1100, 2200, 1800, 1600, 2100, 1400]
   const [phase, setPhase] = useState(0)
   useEffect(() => {
     const t = window.setTimeout(() => setPhase((p) => (p + 1) % HERO_SEQ.length), HERO_SEQ[phase])
@@ -384,26 +386,20 @@ function AnimatedHero() {
   const FULL = "Text them the delivery date"
   const [typed, setTyped] = useState("")
   useEffect(() => {
-    if (phase < 2) {
-      setTyped("")
-      return
-    }
-    if (phase > 2) {
-      setTyped(FULL)
-      return
-    }
+    if (phase < 2) return setTyped("")
+    if (phase > 2) return setTyped(FULL)
     setTyped("")
     let i = 0
     const id = window.setInterval(() => {
       i += 1
       setTyped(FULL.slice(0, i))
       if (i >= FULL.length) window.clearInterval(id)
-    }, 1900 / FULL.length)
+    }, 1800 / FULL.length)
     return () => window.clearInterval(id)
   }, [phase])
 
-  const highlight = phase >= 1 && phase <= 3
-  const showNew = phase >= 4
+  const highlight = phase >= 1 && phase <= 4
+  const showNew = phase >= 5
 
   return (
     <div className="overflow-hidden rounded-2xl border bg-card shadow-2xl shadow-primary/5">
@@ -411,79 +407,177 @@ function AnimatedHero() {
         <span className="size-2.5 rounded-full bg-muted-foreground/25" />
         <span className="size-2.5 rounded-full bg-muted-foreground/25" />
         <span className="size-2.5 rounded-full bg-muted-foreground/25" />
-        <span className="ml-3 inline-flex items-center gap-1.5 rounded-md bg-background px-3 py-1 text-xs text-muted-foreground">
+        <span className="ml-2 inline-flex items-center gap-1.5 rounded-md bg-background px-3 py-1 text-xs text-muted-foreground">
           <Sparkles className="size-3 text-clay" /> your-app · what your app does
         </span>
+        <span className="ml-auto hidden items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-[11px] text-muted-foreground sm:inline-flex">
+          <Sparkles className="size-3 text-clay" /> Assistant: <span className="font-medium text-foreground">Claude Code</span>
+        </span>
       </div>
-      <div className="p-6 sm:p-7">
-        <p className="text-sm font-medium">Placing an order</p>
-        <p className="mb-4 text-xs text-muted-foreground">What happens when someone checks out</p>
-        <div className="space-y-2.5">
-          <HeroRow tone="when" label="When" text="Someone places an order" />
-          <HeroRow tone="act" label="Do" text="Check the items are in stock" />
-          <div className="flex justify-center py-0.5">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-rule-bg px-3 py-1 text-xs font-medium text-rule-fg">
-              <GitBranch className="size-3" /> If everything is in stock
-            </span>
-          </div>
-          <HeroRow
-            tone="act"
-            label="Do"
-            text="Charge their card"
-            indent
-            highlight={highlight}
-            cursor={phase === 1}
-          />
-          <div
-            className={cn(
-              "grid transition-all duration-500 ease-out",
-              showNew ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-            )}
-          >
-            <div className="overflow-hidden">
-              <div className="pt-2.5">
-                <HeroRow tone="act" label="Do" text="Text them the delivery date" indent fresh />
-              </div>
-            </div>
-          </div>
-          <HeroRow tone="act" label="Do" text="Send them a confirmation email" indent />
-        </div>
 
-        <div className="relative mt-4 min-h-[58px]">
-          {phase === 2 && (
-            <div className="flex animate-fade-in items-center gap-2 rounded-xl border bg-background px-3 py-2">
-              <Badge variant="secondary" className="shrink-0 rounded-md text-[11px]">
-                Add a step
-              </Badge>
-              <span className="min-w-0 flex-1 truncate text-sm">
-                {typed}
-                <span className="ml-px inline-block h-3.5 w-px translate-y-[2px] animate-pulse bg-foreground/60 align-middle" />
-              </span>
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                <ArrowUp className="size-4" />
-              </span>
-            </div>
-          )}
-          {phase === 3 && (
-            <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-2.5 text-sm">
-              <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
-              <span className="text-muted-foreground">Claude Code is making your change…</span>
-            </div>
-          )}
-          {phase >= 4 && (
-            <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-2.5 text-sm">
-              <CircleCheck className="size-4 shrink-0 text-act-fg" />
-              <span className="font-medium">All set — your change is live</span>
-            </div>
-          )}
-          {(phase === 2 || phase === 3) && (
-            <span className="pointer-events-none absolute right-2.5 top-1/2 z-10 animate-fade-in">
-              <MousePointer2 className="size-4 fill-foreground text-foreground" />
+      <div className="flex">
+        {/* Mini sidebar */}
+        <aside className="hidden w-44 shrink-0 flex-col gap-0.5 border-r bg-secondary/20 p-3 md:flex">
+          <span className="mb-1 inline-flex items-center gap-2 rounded-lg bg-background px-2.5 py-1.5 text-xs font-medium shadow-sm">
+            <Sparkles className="size-3.5 text-clay" /> All flows
+          </span>
+          <p className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Journeys
+          </p>
+          {[
+            { t: "Placing an order", active: true },
+            { t: "Signing in", active: false },
+            { t: "Refunds & returns", active: false },
+          ].map((j) => (
+            <span
+              key={j.t}
+              className={cn(
+                "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs",
+                j.active ? "bg-background font-medium shadow-sm" : "text-muted-foreground"
+              )}
+            >
+              <span className={cn("size-1.5 rounded-full", j.active ? "bg-clay" : "bg-muted-foreground/35")} />
+              {j.t}
             </span>
-          )}
+          ))}
+        </aside>
+
+        {/* Main */}
+        <div className="min-w-0 flex-1 p-5 sm:p-6">
+          <p className="text-sm font-medium">Placing an order</p>
+          <p className="mb-4 text-xs text-muted-foreground">What happens when someone checks out</p>
+
+          <div className="space-y-2.5">
+            <HeroRow tone="when" label="When" text="Someone places an order" />
+            <HeroRow tone="act" label="Do" text="Check the items are in stock" />
+            <div className="flex justify-center py-0.5">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-rule-bg px-3 py-1 text-xs font-medium text-rule-fg">
+                <GitBranch className="size-3" /> If everything is in stock
+              </span>
+            </div>
+
+            {/* if / else lanes */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Lane tone="yes" label="If yes — in stock">
+                <HeroRow tone="act" label="Do" text="Work out the total" compact />
+                <HeroRow
+                  tone="act"
+                  label="Do"
+                  text="Charge their card"
+                  compact
+                  highlight={highlight}
+                  cursor={phase === 1}
+                />
+                <div
+                  className={cn(
+                    "grid transition-all duration-500 ease-out",
+                    showNew ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+                  )}
+                >
+                  <div className="overflow-hidden">
+                    <div className="pt-2">
+                      <HeroRow tone="act" label="Do" text="Text them the delivery date" compact fresh />
+                    </div>
+                  </div>
+                </div>
+              </Lane>
+              <Lane tone="no" label="Otherwise">
+                <HeroRow tone="act" label="Do" text="Tell them what's sold out" compact />
+                <HeroRow tone="act" label="Do" text="Save their cart for later" compact />
+              </Lane>
+            </div>
+          </div>
+
+          {/* Bottom dock: composer → changes ready → working → done */}
+          <div className="relative mt-4 min-h-[66px]">
+            {phase === 2 && (
+              <div className="relative flex animate-fade-in items-center gap-2 rounded-xl border bg-background px-3 py-2">
+                <Badge variant="secondary" className="shrink-0 rounded-md text-[11px]">
+                  Add a step
+                </Badge>
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {typed}
+                  <span className="ml-px inline-block h-3.5 w-px translate-y-[2px] animate-pulse bg-foreground/60 align-middle" />
+                </span>
+                <span className="relative flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                  <ArrowUp className="size-4" />
+                  <Cursor className="-bottom-1 -right-1" />
+                </span>
+              </div>
+            )}
+            {phase === 3 && (
+              <div className="animate-fade-in rounded-xl border bg-background p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-medium">1 change ready</span>
+                  <span className="relative inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground">
+                    <Send className="size-3" /> Send to Claude Code
+                    <Cursor className="-bottom-1.5 -right-1.5" />
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <Badge className="shrink-0 rounded-md bg-act-bg text-act-fg hover:bg-act-bg">New</Badge>
+                  <span className="truncate text-muted-foreground">
+                    Text the delivery date after charging the card
+                  </span>
+                </div>
+              </div>
+            )}
+            {phase === 4 && (
+              <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-3 text-sm">
+                <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
+                <span className="text-muted-foreground">Claude Code is making your change…</span>
+              </div>
+            )}
+            {phase >= 5 && (
+              <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-3 text-sm">
+                <CircleCheck className="size-4 shrink-0 text-act-fg" />
+                <span className="font-medium">All set — your change is live</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
+  )
+}
+
+function Lane({
+  tone,
+  label,
+  children,
+}: {
+  tone: "yes" | "no"
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl border border-dashed p-2.5",
+        tone === "yes" ? "border-act-accent/40 bg-act-bg/20" : "border-border bg-secondary/30"
+      )}
+    >
+      <div className="mb-2 flex items-center gap-1.5 px-0.5">
+        <span
+          className={cn(
+            "flex size-3.5 items-center justify-center rounded-full text-white",
+            tone === "yes" ? "bg-act-accent" : "bg-muted-foreground"
+          )}
+        >
+          {tone === "yes" ? <Check className="size-2.5" /> : <X className="size-2.5" />}
+        </span>
+        <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+      </div>
+      <div className="space-y-2">{children}</div>
+    </div>
+  )
+}
+
+function Cursor({ className }: { className?: string }) {
+  return (
+    <span className={cn("pointer-events-none absolute z-10 animate-fade-in", className)}>
+      <MousePointer2 className="size-4 fill-foreground text-foreground drop-shadow-sm" />
+    </span>
   )
 }
 
@@ -492,6 +586,7 @@ function HeroRow({
   label,
   text,
   indent,
+  compact,
   highlight,
   cursor,
   fresh,
@@ -500,6 +595,7 @@ function HeroRow({
   label: string
   text: string
   indent?: boolean
+  compact?: boolean
   highlight?: boolean
   cursor?: boolean
   fresh?: boolean
@@ -507,27 +603,24 @@ function HeroRow({
   return (
     <div
       className={cn(
-        "relative flex items-center gap-3 rounded-xl border bg-background p-3 transition-all duration-300",
+        "relative flex items-center gap-2.5 rounded-lg border bg-background transition-all duration-300",
+        compact ? "p-2" : "rounded-xl p-3",
         indent && "ml-6",
         highlight && "border-primary/50 ring-2 ring-primary/15",
-        fresh && "border-act-accent/50"
+        fresh && "border-act-accent/60"
       )}
     >
       <span
         className={cn(
-          "flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium",
+          "flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
           tone === "when" ? "bg-when-bg text-when-fg" : "bg-act-bg text-act-fg"
         )}
       >
         {tone === "when" ? <Zap className="size-3" /> : <Play className="size-3" />}
         {label}
       </span>
-      <span className="min-w-0 truncate text-sm">{text}</span>
-      {cursor && (
-        <span className="pointer-events-none absolute right-3 top-1/2 z-10 animate-fade-in">
-          <MousePointer2 className="size-4 fill-foreground text-foreground" />
-        </span>
-      )}
+      <span className="min-w-0 truncate text-[13px]">{text}</span>
+      {cursor && <Cursor className="right-2.5 top-1/2" />}
     </div>
   )
 }

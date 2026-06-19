@@ -64,6 +64,16 @@ export default function App() {
   }, [view])
 
   async function load({ refresh = false }: { refresh?: boolean } = {}) {
+    // Demo mode shows the curated, hand-authored flows (great first impression);
+    // the heuristic projection over real code isn't good enough to lead with yet.
+    // Edits still write real pending requests via /api/changes.
+    if (context.mode === "demo") {
+      setModel((current) => preserveLocalJourneyRecency(DEMO_MODEL, current))
+      setView(HOME)
+      setSelectedId(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const graph = refresh ? await reindex() : await fetchGraph()

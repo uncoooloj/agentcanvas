@@ -1,5 +1,8 @@
 # AgentCanvas
 
+[![PyPI](https://img.shields.io/pypi/v/use-agentcanvas.svg)](https://pypi.org/project/use-agentcanvas/)
+[![Python](https://img.shields.io/pypi/pyversions/use-agentcanvas.svg)](https://pypi.org/project/use-agentcanvas/)
+
 AgentCanvas is a local visual workspace for giving coding agents better work.
 
 It looks at a repo, turns the important app flows into a plain-language canvas,
@@ -70,8 +73,10 @@ agentcanvas --help
 
 The package name is `use-agentcanvas`, but the command is `agentcanvas`.
 
-For development, or if you are working from the private source repo, install an
-authenticated checkout:
+The public package page is
+[pypi.org/project/use-agentcanvas](https://pypi.org/project/use-agentcanvas/).
+
+For development, install from the public source repo:
 
 ```bash
 gh repo clone uncoooloj/agentcanvas
@@ -79,11 +84,10 @@ cd agentcanvas
 python3 -m pip install -e .
 ```
 
-You can also install directly from the private repo when your machine has
-GitHub SSH access:
+You can also install directly from GitHub:
 
 ```bash
-python3 -m pip install "use-agentcanvas @ git+ssh://git@github.com/uncoooloj/agentcanvas.git"
+python3 -m pip install "use-agentcanvas @ git+https://github.com/uncoooloj/agentcanvas.git"
 ```
 
 You can also run it directly from the source checkout:

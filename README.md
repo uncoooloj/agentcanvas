@@ -1,47 +1,65 @@
 # AgentCanvas
 
-AgentCanvas is a small local canvas for working with coding agents.
+AgentCanvas is a local visual workspace for giving coding agents better work.
 
-It looks at a repo, draws the important workflow pieces, lets you mark what
-should change, then turns that into a clear request an agent can implement.
+It looks at a repo, turns the important app flows into a plain-language canvas,
+lets you mark what should change, then turns that into a clear request a coding
+agent can actually implement.
 
-The product direction is simple: do not make the user guess what the agent is
-doing. Every request should be visible, copyable, and trackable from "not sent"
-to "done".
+The point is simple: stop handing agents vague chat messages and hoping they
+guess correctly. AgentCanvas makes the work visible, copyable, and trackable.
 
-## The Story
+## What It Does
 
-Coding agents are good at editing code once the task is clear. The hard part is
-often getting from "this flow feels wrong" to "change these files and prove it."
+AgentCanvas helps with the messy part between "this flow is wrong" and "make
+this exact code change."
 
-AgentCanvas sits in that gap.
+- It indexes your repo.
+- It shows the main workflows, routes, actions, services, jobs, and app surfaces.
+- It lets you create small change requests from the canvas.
+- It writes those requests into `.agentcanvas/pending/`.
+- A coding agent reads the request, implements it, verifies it, updates status,
+  and re-indexes the workspace.
 
-1. Point it at a workspace.
-2. It indexes the code into `.agentcanvas/workflow.ir.json`.
-3. The browser canvas shows the flow in plain language.
-4. You ask for a change from the canvas.
-5. AgentCanvas writes a pending request under `.agentcanvas/pending/`.
-6. Codex, Claude Code, Cursor, Antigravity, or another agent implements it.
-7. The agent updates the request status so the canvas shows the truth.
+AgentCanvas is not trying to replace Codex, Claude Code, Cursor, Antigravity, or
+any other coding agent. It is the layer that makes the task clear before an
+agent starts editing.
 
-The Agentation-inspired part is the loop: work is not a vague chat message that
-disappears. It becomes an item with a status, files, notes, and a copy fallback.
+## Screenshots
 
-## What It Looks Like
-
-No workspace selected:
+Landing mode:
 
 ![AgentCanvas landing page](docs/assets/agentcanvas-landing.png)
 
-Demo mode / all flows:
+Demo mode:
 
 ![AgentCanvas demo flows](docs/assets/agentcanvas-demo-flows.png)
+
+## How It Works
+
+The core loop is intentionally small:
+
+1. Point AgentCanvas at a workspace.
+2. It writes a local index to `.agentcanvas/workflow.ir.json`.
+3. The browser shows a canvas built from that index.
+4. You describe the change you want.
+5. AgentCanvas creates a Markdown brief and a JSON brief in
+   `.agentcanvas/pending/`.
+6. A coding agent picks up the request.
+7. The agent marks the request `in_progress`, `needs_input`, `blocked`, or
+   `done`.
+8. The agent re-indexes after implementation so the canvas reflects the latest
+   code.
+
+Canvas edits do not directly patch your app. They become requests first. That is
+the safety boundary.
 
 ## Install
 
 From this repo:
 
 ```bash
+cd /Users/ojima/Desktop/experiments/agentcanvas
 python3 -m pip install -e .
 ```
 
@@ -51,17 +69,30 @@ Check the CLI:
 agentcanvas --help
 ```
 
-## Start With A Real Workspace
+You can also run it directly from the source checkout:
 
-Index a project:
+```bash
+python3 -m agentcanvas --help
+```
+
+## Run It
+
+Start with the landing page when you do not have a workspace selected yet:
+
+```bash
+agentcanvas start --port 8765
+```
+
+Try the bundled demo project:
+
+```bash
+agentcanvas start --demo --port 8765
+```
+
+Use a real workspace:
 
 ```bash
 agentcanvas index --workspace /path/to/your/project
-```
-
-Start the local canvas:
-
-```bash
 agentcanvas start --workspace /path/to/your/project --port 8765
 ```
 
@@ -71,61 +102,63 @@ Open the printed URL, usually:
 http://127.0.0.1:8765
 ```
 
-After you edit the canvas, requests appear here:
+If an agent is launching AgentCanvas, it can pass its name and session id:
+
+```bash
+agentcanvas start --workspace /path/to/your/project --agent codex --session-id <session-id>
+```
+
+## Landing And Demo Mode
+
+Landing mode is what you see when no workspace is selected. It should make the
+next step obvious: open a real workspace or try the demo.
+
+Demo mode uses a bundled sample app, but it still runs through the real indexer,
+server, pending-request files, and status loop. The UI should always make demo
+mode obvious so nobody thinks the sample app is their own repo or that a live
+agent is connected when it is not.
+
+See [docs/demo-mode.md](docs/demo-mode.md) for the product rules.
+
+## Workspace Mode
+
+Workspace mode is the real use case.
+
+AgentCanvas writes all local state under the selected repo:
 
 ```text
-/path/to/your/project/.agentcanvas/pending/
+<workspace>/.agentcanvas/workflow.ir.json
+<workspace>/.agentcanvas/pending/*.md
+<workspace>/.agentcanvas/pending/*.json
 ```
 
-Each request has:
+The Markdown file is the human-readable task. The JSON file is the structured
+version for tools and agents.
 
-- a `.md` file an agent or human can read
-- a `.json` file tools can read
-- a status such as `pending`, `in_progress`, `needs_input`, `blocked`, or `done`
+## Send Changes To A Coding Agent
 
-## Start With No Workspace
-
-If you do not have a project selected yet, start AgentCanvas without a
-workspace:
-
-```bash
-agentcanvas start --port 8765
-```
-
-That should show the no-workspace landing first. From there the product should
-offer three plain choices:
-
-- open a local workspace by running the exact command to use
-- paste or clone a GitHub repo once that path is wired
-- enter demo mode
-
-Use the demo directly when you want the bundled sample project:
-
-```bash
-agentcanvas start --demo --port 8765
-```
-
-Demo mode must be obvious in the UI. The user should never think the demo is
-their repo or that a live agent is connected when it is not.
-
-## Give Work To An Agent
-
-An agent can poll for new requests:
+An agent can list pending requests:
 
 ```bash
 agentcanvas pending --workspace /path/to/your/project
 ```
 
-When it starts work:
+When it starts:
 
 ```bash
 agentcanvas status --workspace /path/to/your/project <pending-id> --status in_progress
 ```
 
-When it needs the user:
+When it needs the user before it can safely continue:
 
 ```bash
-agentcanvas status --workspace /path/to/your/project <pending-id> --status needs_input --note "I need one decision before editing."
+agentcanvas status --workspace /path/to/your/project <pending-id> --status needs_input --note "Should this apply only to checkout, or to every order flow?"
+```
+
+When it is blocked:
+
+```bash
+agentcanvas status --workspace /path/to/your/project <pending-id> --status blocked --note "I need access to the missing service config before continuing."
 ```
 
 When it has implemented and verified the change:
@@ -135,73 +168,108 @@ agentcanvas index --workspace /path/to/your/project
 agentcanvas status --workspace /path/to/your/project <pending-id> --status done --note "Implemented and verified."
 ```
 
-The important part is that the status comes from the agent or CLI, not from a
-browser timer pretending work happened.
+The important part is that status comes from the agent or CLI. The browser
+should not pretend work happened.
 
-## Copy Fallback
+## The Clarification Loop
 
-Copy mode is a core feature.
+Agents should not guess when the request is unclear.
 
-If no live agent/session is connected, AgentCanvas should still create the
-pending files and show a clean prompt the user can paste into any coding agent.
-That prompt should name the request, workspace, files, acceptance criteria, and
-the status commands above.
+Before execution, the agent should read the pending Markdown and JSON, check the
+current workspace state, and decide whether the request is specific enough. If
+not, it should mark the request `needs_input` with one clear question. That
+question flows back to the user instead of becoming a random code change.
 
-This keeps the product useful before deeper integrations exist.
+That loop matters because the product is not just "send work to an agent." It is
+"send clear work, let the agent ask before it edits, then track what actually
+happened."
 
-## Integration Paths
+## Copy-Prompt Fallback
 
-AgentCanvas should stay agent-agnostic. There are four paths:
+Copy mode is a core feature, not a backup plan.
+
+If no live agent or adapter is connected, AgentCanvas still creates the pending
+files and shows a clean prompt the user can paste into any coding agent. The
+prompt includes the workspace, pending file paths, acceptance details, status
+commands, and the reminder to test and re-index.
+
+This keeps AgentCanvas useful before deeper integrations exist.
+
+## Agent-Agnostic By Design
+
+AgentCanvas should work with any coding agent.
+
+Current and planned integration paths:
 
 - **Skill**: install `skill/agentcanvas/` into an agent that supports skills.
-  This gives the agent the workflow for indexing, reading requests, updating
-  status, testing, and re-indexing.
-- **Local API**: the browser uses token-protected local endpoints such as
-  `/api/context`, `/api/graph`, `/api/pending`, `/api/changes`, `/api/status`,
-  and `/api/reindex`.
-- **MCP**: planned path for agents that prefer tools over shell commands. It
-  should expose the same small actions: get context, list pending, create
-  request, update status, and re-index.
-- **Webhooks**: planned path for outside tools to report back. A webhook should
-  be able to update request status, attach a note, or send a reply without
-  pretending to be the browser.
+- **Local API**: the browser/server path uses `/api/context`, `/api/graph`,
+  `/api/pending`, `/api/changes`, `/api/status`, and `/api/reindex`.
+- **MCP**: planned tool path for agents that prefer structured tools over shell
+  commands.
+- **Webhooks**: planned callback path for outside tools to report status,
+  questions, or completion.
+- **Copy prompt**: always available, even with no adapter installed.
 
-See [docs/adapters.md](docs/adapters.md) for the adapter map and prompt
-snippets.
+The file contract stays the same across all of them: `.agentcanvas/` is the
+shared source of truth.
+
+See [docs/adapters.md](docs/adapters.md) for adapter notes and prompt snippets.
+
+## Language And Monorepo Support
+
+AgentCanvas now has a broader core indexing layer.
+
+Built-in MVP language modules:
+
+- JavaScript and TypeScript
+- Python
+- Go
+- PHP/Laravel
+- Ruby/Rails
+- Dart/Flutter
+- Swift
+- Kotlin
+
+The goal is not to perfectly compile every language on day one. The goal is to
+collect grounded facts with file paths and evidence, then let the projection
+layer turn those facts into a canvas a person can read.
+
+For monorepos, AgentCanvas keeps app surfaces separate instead of flattening
+everything into one generic graph. A repo with `apps/customer-web`,
+`apps/admin`, and `services/api` should keep those surfaces visible.
+
+See [docs/language-support.md](docs/language-support.md) for the language module
+contract.
 
 ## Projection
 
-AgentCanvas can use an LLM or coding agent to translate grounded code facts into
-a cleaner human canvas. The package does not call a model by itself.
+AgentCanvas can use an LLM or coding agent to turn source facts into a cleaner
+human canvas, but the package does not call a model by itself.
 
-The safe path is:
+Validate a projected canvas first:
 
 ```bash
 agentcanvas apply-query --workspace /path/to/your/project --query canvas-query.json --dry-run
+```
+
+Write only after validation passes:
+
+```bash
 agentcanvas apply-query --workspace /path/to/your/project --query canvas-query.json
 ```
 
-Validate first, then write.
-
 See [docs/projection.md](docs/projection.md).
 
-## Safety
+## Safety Rules
 
-AgentCanvas is local-first and file-based.
-
-- It writes state under `.agentcanvas/`.
-- It creates requests instead of directly editing application code.
-- It keeps the canvas separate from the agent that edits code.
-- It makes every request inspectable before work starts.
-- It should never show "done" unless the request status says `done`.
-
-Good practice:
-
-- Commit or stash important work before asking an agent to edit.
-- Review pending requests before implementation.
-- Ask before migrations, seeds, deploys, or destructive commands.
-- Run the closest relevant test or smoke check.
-- Re-index after implementation.
+- AgentCanvas creates requests before source code changes.
+- Agents should read the request before editing.
+- Agents should ask with `needs_input` when the request is unclear.
+- Agents should run the closest relevant test or smoke check.
+- Agents should re-index after implementation.
+- Agents should not mark a request `done` until the work is verified.
+- Migrations, seeds, deploys, and destructive commands still need explicit user
+  permission.
 
 ## Development
 
@@ -226,16 +294,3 @@ fixture:
 ```text
 .agentcanvas/
 ```
-
-## Skill Wrapper
-
-The repo includes a standalone skill wrapper at:
-
-```text
-skill/agentcanvas/
-```
-
-Install that folder into your agent's skill directory if the agent supports
-skills. The skill is intentionally self-contained: it explains how to launch
-AgentCanvas, inspect pending requests, implement one request, update status,
-test, re-index, and use copy fallback.

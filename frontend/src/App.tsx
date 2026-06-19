@@ -539,7 +539,7 @@ function JourneyView({
         <p className="mt-1 text-sm text-muted-foreground">{journey.summary}</p>
         <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-gold/10 px-3 py-1 text-xs text-muted-foreground">
           <Lightbulb className="h-3.5 w-3.5 text-gold" />
-          Click a step to change it — or hover a step to add, branch, or remove right there.
+          Click a step to change it, or hover a step to add, branch, or remove right there.
         </p>
       </div>
       <div className={cn("transition-opacity", locked && "pointer-events-none opacity-60")}>
@@ -553,7 +553,7 @@ function DemoBanner({ thin }: { thin?: boolean }) {
   return (
     <div className="border-b bg-accent/40 px-6 py-2.5 text-center text-xs text-accent-foreground">
       {thin
-        ? "We're still learning your app — here's what we can see so far."
+        ? "We're still learning your app. Here's what we can see so far."
         : "This is an example. Open AgentCanvas inside your own project to see what your app does."}
     </div>
   )

@@ -86,10 +86,10 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
         </section>
 
         <section className="mx-auto max-w-5xl px-6 pb-24">
-          <AnimatedHero />
+          <HeroDemo />
         </section>
 
-        <Walkthrough />
+        <HowItWorks />
 
         <AgentPrompt />
 
@@ -98,7 +98,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
           <div className="mx-auto max-w-2xl px-6 py-24 text-center">
             <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Have a look around.</h2>
             <p className="mx-auto mt-3 max-w-md text-muted-foreground">
-              The demo is a small online shop. Nothing to install — click through it and try changing
+              The demo is a small online shop. Nothing to install. Click through it and try changing
               a step.
             </p>
             <Button type="button" size="lg" onClick={openDemo} className="mt-7 h-12 rounded-full px-7 text-base">
@@ -109,7 +109,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
             <div className="mx-auto mt-14 max-w-md rounded-2xl border bg-card p-5 text-left">
               <p className="text-sm font-medium">Already have a project?</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Point AgentCanvas at it from your terminal — or ask whoever set it up to run:
+                Point AgentCanvas at it from your terminal, or ask whoever set it up to run:
               </p>
               <CopyBox text="agentcanvas start --workspace ./your-project" oneLine />
             </div>
@@ -132,114 +132,102 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
   )
 }
 
-// ---- Walkthrough: sticky sidebar + scroll-snapping panels (agentation-style) ----
+// ---- Demo timeline (5 steps, auto-advancing + looping, jumpable) ----
 
-const WSTEPS: { title: string; body: string; visual: () => ReactNode }[] = [
+const STEP_MS = [2000, 2000, 2900, 2200, 2900]
+
+function useDemo() {
+  const [step, setStepRaw] = useState(0)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    timer.current = window.setTimeout(() => setStepRaw((s) => (s + 1) % STEP_MS.length), STEP_MS[step])
+    return () => window.clearTimeout(timer.current)
+  }, [step])
+  return { step, setStep: setStepRaw }
+}
+
+const STEPS = [
   {
     title: "Open your app",
-    body: "Point AgentCanvas at your project — or just try the demo. It reads everything and lays it out for you.",
-    visual: VisualOpen,
+    body: "Point AgentCanvas at your project. It reads everything and lays your app out as plain flows.",
   },
   {
     title: "See what it does",
-    body: "Every part of your app, written as plain steps you can actually read — grouped by what people do.",
-    visual: VisualFlow,
+    body: "Every part of your app, written as plain steps you can read: when this happens, do that, with the branches in between.",
   },
   {
     title: "Change a step",
-    body: "Click anything and say what you want instead, in your own words. Add a step, add a rule, or remove one.",
-    visual: VisualCompose,
+    body: "Click any step and say what you want instead, in your own words.",
   },
   {
     title: "Send it off",
-    body: "Your changes become one clear request for your AI agent — no technical handoff needed.",
-    visual: VisualSend,
+    body: "Your changes line up, then go to your agent as one clear request.",
   },
   {
     title: "Watch it happen",
-    body: "Your agent builds it, and the map updates to match. You always see what changed.",
-    visual: VisualBuilt,
+    body: "Your agent builds it, and the map updates to match.",
   },
 ]
 
-function Walkthrough() {
-  const [active, setActive] = useState(0)
-  const refs = useRef<(HTMLDivElement | null)[]>([])
+function HeroDemo() {
+  const { step } = useDemo()
+  return <DemoFrame step={step} />
+}
 
-  useEffect(() => {
-    const obs = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((e) => {
-          if (e.isIntersecting) setActive(Number((e.target as HTMLElement).dataset.index))
-        })
-      },
-      { rootMargin: "-50% 0px -50% 0px" }
-    )
-    refs.current.forEach((el) => el && obs.observe(el))
-    return () => obs.disconnect()
-  }, [])
-
+function HowItWorks() {
+  const { step, setStep } = useDemo()
   return (
     <section id="how" className="border-t border-border/60 bg-secondary/30">
-      <div className="mx-auto max-w-5xl px-6 py-20 sm:py-24">
+      <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
         <div className="max-w-2xl">
-          <p className="text-sm font-medium uppercase tracking-wide text-clay">How you use it</p>
+          <p className="text-sm font-medium uppercase tracking-wide text-clay">How it works</p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
             No code. Just what your app does.
           </h2>
           <p className="mt-3 max-w-md text-muted-foreground">
-            Five plain steps — from opening your app to watching a change get built.
+            Five plain steps, playing live. Click any step to jump to it.
           </p>
         </div>
 
-        <div className="mt-12 grid gap-12 lg:grid-cols-[220px_1fr] lg:gap-16">
-          {/* Sticky stepper */}
-          <nav className="sticky top-24 hidden h-fit flex-col gap-1 self-start lg:flex">
-            {WSTEPS.map((s, i) => (
-              <button
-                key={s.title}
-                type="button"
-                onClick={() => refs.current[i]?.scrollIntoView({ behavior: "smooth", block: "center" })}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors",
-                  active === i ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <span
+        <div className="mt-12 grid items-start gap-10 lg:grid-cols-[300px_1fr]">
+          <nav className="flex flex-col gap-1.5">
+            {STEPS.map((s, i) => {
+              const active = i === step
+              return (
+                <button
+                  key={s.title}
+                  type="button"
+                  onClick={() => setStep(i)}
                   className={cn(
-                    "flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium",
-                    active === i ? "bg-clay text-white" : "bg-clay/12 text-clay"
+                    "flex items-start gap-3 rounded-xl border px-4 py-3 text-left transition-all",
+                    active ? "border-clay/30 bg-card shadow-sm" : "border-transparent hover:bg-card/60"
                   )}
                 >
-                  {i + 1}
-                </span>
-                {s.title}
-              </button>
-            ))}
-          </nav>
-
-          {/* Panels */}
-          <div className="flex flex-col gap-16 lg:gap-0">
-            {WSTEPS.map((s, i) => {
-              const Visual = s.visual
-              return (
-                <div
-                  key={s.title}
-                  ref={(el) => {
-                    refs.current[i] = el
-                  }}
-                  data-index={i}
-                  className="flex scroll-mt-28 flex-col py-8 lg:py-12"
-                >
-                  <p className="text-sm font-medium text-clay">Step {i + 1}</p>
-                  <h3 className="mt-2 text-2xl font-semibold tracking-tight">{s.title}</h3>
-                  <p className="mt-2 max-w-md text-[15px] leading-relaxed text-muted-foreground">{s.body}</p>
-                  <div className="mt-7">
-                    <Visual />
-                  </div>
-                </div>
+                  <span
+                    className={cn(
+                      "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors",
+                      active ? "bg-clay text-white" : "bg-clay/12 text-clay"
+                    )}
+                  >
+                    {i + 1}
+                  </span>
+                  <span>
+                    <span className={cn("text-sm font-medium", !active && "text-muted-foreground")}>
+                      {s.title}
+                    </span>
+                    {active && (
+                      <span className="mt-1 block text-[13px] leading-relaxed text-muted-foreground">
+                        {s.body}
+                      </span>
+                    )}
+                  </span>
+                </button>
               )
             })}
+          </nav>
+
+          <div className="lg:sticky lg:top-24">
+            <DemoFrame step={step} />
           </div>
         </div>
       </div>
@@ -247,159 +235,45 @@ function Walkthrough() {
   )
 }
 
-// ---- Agent prompt section ----
+// ---- The animated product frame, driven by `step` (0..4) ----
 
-const AGENT_PROMPT = `Use AgentCanvas to help me change this app.
-
-1. Start it: run \`agentcanvas start --workspace .\` (if it isn't installed, run \`pip install agentcanvas\` first). Open the local URL it prints so I can see and edit my app's flows in plain English.
-2. When I make a change there, AgentCanvas writes it to \`.agentcanvas/pending/\` as a plain-English request (a .md and a .json per change).
-3. For each pending request: read it, make the change in the code, run the relevant tests, then re-index with \`agentcanvas index --workspace .\` and tell me what changed.
-
-Keep checking \`.agentcanvas/pending/\` for new requests while we work.`
-
-function AgentPrompt() {
-  return (
-    <section id="agent" className="mx-auto max-w-3xl px-6 py-24 text-center">
-      <p className="text-sm font-medium uppercase tracking-wide text-clay">For your agent</p>
-      <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-        Already chatting with an AI coding agent?
-      </h2>
-      <p className="mx-auto mt-3 max-w-lg text-muted-foreground">
-        Paste this into Claude Code, Codex, or Cursor and it'll launch AgentCanvas and pick up the
-        changes you make — no setup from you.
-      </p>
-      <CopyBox text={AGENT_PROMPT} className="mt-8 text-left" />
-    </section>
-  )
-}
-
-// ---- Visuals ----
-
-function MockCard({ children }: { children: ReactNode }) {
-  return <div className="rounded-2xl border bg-card p-4 shadow-lg sm:p-5">{children}</div>
-}
-
-function VisualOpen() {
-  return (
-    <MockCard>
-      <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
-        <Sparkles className="size-3.5 text-clay" /> your-app · what your app does
-      </div>
-      <div className="grid grid-cols-2 gap-2.5">
-        {["Placing an order", "Signing in", "Refunds & returns", "Sending emails"].map((t) => (
-          <div key={t} className="rounded-xl border bg-background p-3 text-sm font-medium">
-            {t}
-          </div>
-        ))}
-      </div>
-    </MockCard>
-  )
-}
-
-function VisualFlow() {
-  return (
-    <MockCard>
-      <div className="space-y-2.5">
-        <FlowStep tone="when" label="When" text="Someone places an order" />
-        <FlowStep tone="act" label="Do" text="Check the items are in stock" />
-        <div className="flex justify-center py-0.5">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-rule-bg px-3 py-1 text-xs font-medium text-rule-fg">
-            <GitBranch className="size-3" /> If the card is approved
-          </span>
-        </div>
-        <FlowStep tone="act" label="Do" text="Send them a confirmation email" indent />
-      </div>
-    </MockCard>
-  )
-}
-
-function VisualCompose() {
-  return (
-    <MockCard>
-      <div className="mb-2 flex items-center gap-2">
-        <Badge variant="secondary" className="rounded-md">Add a step</Badge>
-        <span className="text-xs text-muted-foreground">after “Charge their card”</span>
-      </div>
-      <div className="flex items-center gap-2 rounded-xl border bg-background px-3 py-2">
-        <span className="flex-1 text-sm">Text them the delivery date</span>
-        <span className="flex size-7 items-center justify-center rounded-full bg-primary text-primary-foreground">
-          <ArrowUp className="size-4" />
-        </span>
-      </div>
-    </MockCard>
-  )
-}
-
-function VisualSend() {
-  return (
-    <MockCard>
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-sm font-medium">2 changes ready</span>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground">
-          <Send className="size-3" /> Send to Claude Code
-        </span>
-      </div>
-      <div className="space-y-2 text-sm">
-        <div className="flex items-center gap-2">
-          <Badge className="rounded-md bg-act-bg text-act-fg hover:bg-act-bg">New</Badge>
-          <span className="truncate text-muted-foreground">Text the delivery date after the order ships</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge className="rounded-md bg-when-bg text-when-fg hover:bg-when-bg">Edited</Badge>
-          <span className="truncate text-muted-foreground">Charge the card — also apply loyalty points</span>
-        </div>
-      </div>
-    </MockCard>
-  )
-}
-
-function VisualBuilt() {
-  return (
-    <MockCard>
-      <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-        <CircleCheck className="size-4 text-act-fg" /> All set — your changes are live
-      </div>
-      <div className="space-y-2 text-sm text-muted-foreground">
-        <div className="flex items-center gap-2">
-          <CircleCheck className="size-3.5 text-act-fg" /> Added the delivery text message
-        </div>
-        <div className="flex items-center gap-2">
-          <Loader2 className="size-3.5 animate-spin text-primary" /> Updating how the card is charged…
-        </div>
-      </div>
-    </MockCard>
-  )
-}
-
-// ---- Animated hero: a self-playing loop of the edit → send → built flow ----
-
-function AnimatedHero() {
-  // phases: 0 idle · 1 point · 2 compose · 3 staged(tray) · 4 working · 5 done · 6 hold
-  const HERO_SEQ = [1100, 1100, 2200, 1800, 1600, 2100, 1400]
-  const [phase, setPhase] = useState(0)
-  useEffect(() => {
-    const t = window.setTimeout(() => setPhase((p) => (p + 1) % HERO_SEQ.length), HERO_SEQ[phase])
-    return () => window.clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase])
-
+function DemoFrame({ step }: { step: number }) {
   const FULL = "Text them the delivery date"
   const [typed, setTyped] = useState("")
   useEffect(() => {
-    if (phase < 2) return setTyped("")
-    if (phase > 2) return setTyped(FULL)
+    if (step < 2) {
+      setTyped("")
+      return
+    }
+    if (step > 2) {
+      setTyped(FULL)
+      return
+    }
     setTyped("")
     let i = 0
     const id = window.setInterval(() => {
       i += 1
       setTyped(FULL.slice(0, i))
       if (i >= FULL.length) window.clearInterval(id)
-    }, 1800 / FULL.length)
+    }, 1700 / FULL.length)
     return () => window.clearInterval(id)
-  }, [phase])
+  }, [step])
 
-  const highlight = phase >= 1 && phase <= 4
-  const showNew = phase >= 5
+  // step 4 plays "working" then "done"
+  const [done, setDone] = useState(false)
+  useEffect(() => {
+    if (step !== 4) {
+      setDone(false)
+      return
+    }
+    setDone(false)
+    const t = window.setTimeout(() => setDone(true), 1200)
+    return () => window.clearTimeout(t)
+  }, [step])
+
+  const overview = step === 0
+  const highlight = step === 2 || step === 3 || (step === 4 && !done)
+  const showNew = step === 4 && done
 
   return (
     <div className="overflow-hidden rounded-2xl border bg-card shadow-2xl shadow-primary/5">
@@ -411,21 +285,26 @@ function AnimatedHero() {
           <Sparkles className="size-3 text-clay" /> your-app · what your app does
         </span>
         <span className="ml-auto hidden items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-[11px] text-muted-foreground sm:inline-flex">
-          <Sparkles className="size-3 text-clay" /> Assistant: <span className="font-medium text-foreground">Claude Code</span>
+          <Sparkles className="size-3 text-clay" /> Assistant:{" "}
+          <span className="font-medium text-foreground">Claude Code</span>
         </span>
       </div>
 
       <div className="flex">
-        {/* Mini sidebar */}
         <aside className="hidden w-44 shrink-0 flex-col gap-0.5 border-r bg-secondary/20 p-3 md:flex">
-          <span className="mb-1 inline-flex items-center gap-2 rounded-lg bg-background px-2.5 py-1.5 text-xs font-medium shadow-sm">
-            <Sparkles className="size-3.5 text-clay" /> All flows
+          <span
+            className={cn(
+              "mb-1 inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium",
+              overview ? "bg-background shadow-sm" : "text-muted-foreground"
+            )}
+          >
+            <Sparkles className={cn("size-3.5", overview ? "text-clay" : "opacity-60")} /> All flows
           </span>
           <p className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
             Journeys
           </p>
           {[
-            { t: "Placing an order", active: true },
+            { t: "Placing an order", active: !overview },
             { t: "Signing in", active: false },
             { t: "Refunds & returns", active: false },
           ].map((j) => (
@@ -442,114 +321,117 @@ function AnimatedHero() {
           ))}
         </aside>
 
-        {/* Main */}
-        <div className="min-w-0 flex-1 p-5 sm:p-6">
-          <p className="text-sm font-medium">Placing an order</p>
-          <p className="mb-4 text-xs text-muted-foreground">What happens when someone checks out</p>
+        <div className="min-h-[360px] min-w-0 flex-1 p-5 sm:p-6">
+          {overview ? (
+            <>
+              <p className="text-sm font-medium">What your app does</p>
+              <p className="mb-4 text-xs text-muted-foreground">Each card is a moment someone uses your app</p>
+              <div className="grid grid-cols-2 gap-2.5">
+                {["Placing an order", "Signing in", "Refunds & returns", "Sending emails"].map((t) => (
+                  <div key={t} className="rounded-xl border bg-background p-3 text-[13px] font-medium">
+                    {t}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-medium">Placing an order</p>
+              <p className="mb-4 text-xs text-muted-foreground">What happens when someone checks out</p>
+              <div className="space-y-2.5">
+                <HeroRow tone="when" label="When" text="Someone places an order" />
+                <HeroRow tone="act" label="Do" text="Check the items are in stock" />
+                <div className="flex justify-center py-0.5">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-rule-bg px-3 py-1 text-xs font-medium text-rule-fg">
+                    <GitBranch className="size-3" /> If everything is in stock
+                  </span>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Lane tone="yes" label="If yes">
+                    <HeroRow tone="act" label="Do" text="Work out the total" compact />
+                    <HeroRow
+                      tone="act"
+                      label="Do"
+                      text="Charge their card"
+                      compact
+                      highlight={highlight}
+                      cursor={step === 2 && typed.length === 0}
+                    />
+                    <div
+                      className={cn(
+                        "grid transition-all duration-500 ease-out",
+                        showNew ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+                      )}
+                    >
+                      <div className="overflow-hidden">
+                        <div className="pt-2">
+                          <HeroRow tone="act" label="Do" text="Text them the delivery date" compact fresh />
+                        </div>
+                      </div>
+                    </div>
+                  </Lane>
+                  <Lane tone="no" label="Otherwise">
+                    <HeroRow tone="act" label="Do" text="Tell them what's sold out" compact />
+                    <HeroRow tone="act" label="Do" text="Save their cart for later" compact />
+                  </Lane>
+                </div>
+              </div>
 
-          <div className="space-y-2.5">
-            <HeroRow tone="when" label="When" text="Someone places an order" />
-            <HeroRow tone="act" label="Do" text="Check the items are in stock" />
-            <div className="flex justify-center py-0.5">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-rule-bg px-3 py-1 text-xs font-medium text-rule-fg">
-                <GitBranch className="size-3" /> If everything is in stock
-              </span>
-            </div>
-
-            {/* if / else lanes */}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Lane tone="yes" label="If yes — in stock">
-                <HeroRow tone="act" label="Do" text="Work out the total" compact />
-                <HeroRow
-                  tone="act"
-                  label="Do"
-                  text="Charge their card"
-                  compact
-                  highlight={highlight}
-                  cursor={phase === 1}
-                />
-                <div
-                  className={cn(
-                    "grid transition-all duration-500 ease-out",
-                    showNew ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                  )}
-                >
-                  <div className="overflow-hidden">
-                    <div className="pt-2">
-                      <HeroRow tone="act" label="Do" text="Text them the delivery date" compact fresh />
+              <div className="relative mt-4 min-h-[66px]">
+                {step === 2 && (
+                  <div className="flex animate-fade-in items-center gap-2 rounded-xl border bg-background px-3 py-2">
+                    <Badge variant="secondary" className="shrink-0 rounded-md text-[11px]">
+                      Add a step
+                    </Badge>
+                    <span className="min-w-0 flex-1 truncate text-sm">
+                      {typed}
+                      <span className="ml-px inline-block h-3.5 w-px translate-y-[2px] animate-pulse bg-foreground/60 align-middle" />
+                    </span>
+                    <span className="relative flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                      <ArrowUp className="size-4" />
+                      {typed.length >= FULL.length && <Cursor className="-bottom-1 -right-1" />}
+                    </span>
+                  </div>
+                )}
+                {step === 3 && (
+                  <div className="animate-fade-in rounded-xl border bg-background p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-sm font-medium">1 change ready</span>
+                      <span className="relative inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground">
+                        <Send className="size-3" /> Send to Claude Code
+                        <Cursor className="-bottom-1.5 -right-1.5" />
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      <Badge className="shrink-0 rounded-md bg-act-bg text-act-fg hover:bg-act-bg">New</Badge>
+                      <span className="truncate text-muted-foreground">
+                        Text the delivery date after charging the card
+                      </span>
                     </div>
                   </div>
-                </div>
-              </Lane>
-              <Lane tone="no" label="Otherwise">
-                <HeroRow tone="act" label="Do" text="Tell them what's sold out" compact />
-                <HeroRow tone="act" label="Do" text="Save their cart for later" compact />
-              </Lane>
-            </div>
-          </div>
-
-          {/* Bottom dock: composer → changes ready → working → done */}
-          <div className="relative mt-4 min-h-[66px]">
-            {phase === 2 && (
-              <div className="relative flex animate-fade-in items-center gap-2 rounded-xl border bg-background px-3 py-2">
-                <Badge variant="secondary" className="shrink-0 rounded-md text-[11px]">
-                  Add a step
-                </Badge>
-                <span className="min-w-0 flex-1 truncate text-sm">
-                  {typed}
-                  <span className="ml-px inline-block h-3.5 w-px translate-y-[2px] animate-pulse bg-foreground/60 align-middle" />
-                </span>
-                <span className="relative flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                  <ArrowUp className="size-4" />
-                  <Cursor className="-bottom-1 -right-1" />
-                </span>
+                )}
+                {step === 4 && !done && (
+                  <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-3 text-sm">
+                    <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
+                    <span className="text-muted-foreground">Claude Code is making your change…</span>
+                  </div>
+                )}
+                {step === 4 && done && (
+                  <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-3 text-sm">
+                    <CircleCheck className="size-4 shrink-0 text-act-fg" />
+                    <span className="font-medium">All set, your change is live</span>
+                  </div>
+                )}
               </div>
-            )}
-            {phase === 3 && (
-              <div className="animate-fade-in rounded-xl border bg-background p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-sm font-medium">1 change ready</span>
-                  <span className="relative inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground">
-                    <Send className="size-3" /> Send to Claude Code
-                    <Cursor className="-bottom-1.5 -right-1.5" />
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Badge className="shrink-0 rounded-md bg-act-bg text-act-fg hover:bg-act-bg">New</Badge>
-                  <span className="truncate text-muted-foreground">
-                    Text the delivery date after charging the card
-                  </span>
-                </div>
-              </div>
-            )}
-            {phase === 4 && (
-              <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-3 text-sm">
-                <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
-                <span className="text-muted-foreground">Claude Code is making your change…</span>
-              </div>
-            )}
-            {phase >= 5 && (
-              <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-3 text-sm">
-                <CircleCheck className="size-4 shrink-0 text-act-fg" />
-                <span className="font-medium">All set — your change is live</span>
-              </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
       </div>
     </div>
   )
 }
 
-function Lane({
-  tone,
-  label,
-  children,
-}: {
-  tone: "yes" | "no"
-  label: string
-  children: ReactNode
-}) {
+function Lane({ tone, label, children }: { tone: "yes" | "no"; label: string; children: ReactNode }) {
   return (
     <div
       className={cn(
@@ -585,7 +467,6 @@ function HeroRow({
   tone,
   label,
   text,
-  indent,
   compact,
   highlight,
   cursor,
@@ -594,7 +475,6 @@ function HeroRow({
   tone: "when" | "act"
   label: string
   text: string
-  indent?: boolean
   compact?: boolean
   highlight?: boolean
   cursor?: boolean
@@ -605,7 +485,6 @@ function HeroRow({
       className={cn(
         "relative flex items-center gap-2.5 rounded-lg border bg-background transition-all duration-300",
         compact ? "p-2" : "rounded-xl p-3",
-        indent && "ml-6",
         highlight && "border-primary/50 ring-2 ring-primary/15",
         fresh && "border-act-accent/60"
       )}
@@ -625,42 +504,33 @@ function HeroRow({
   )
 }
 
-function FlowStep({
-  tone,
-  label,
-  text,
-  indent,
-}: {
-  tone: "when" | "act"
-  label: string
-  text: string
-  indent?: boolean
-}) {
+// ---- Agent prompt section ----
+
+const AGENT_PROMPT = `Use AgentCanvas to help me change this app.
+
+1. Start it: run \`agentcanvas start --workspace .\` (if it isn't installed, run \`pip install agentcanvas\` first). Open the local URL it prints so I can see and edit my app's flows in plain English.
+2. When I make a change there, AgentCanvas writes it to \`.agentcanvas/pending/\` as a plain-English request (a .md and a .json per change).
+3. For each pending request: read it, make the change in the code, run the relevant tests, then re-index with \`agentcanvas index --workspace .\` and tell me what changed.
+
+Keep checking \`.agentcanvas/pending/\` for new requests while we work.`
+
+function AgentPrompt() {
   return (
-    <div className={cn("flex items-center gap-3 rounded-xl border bg-background p-3", indent && "ml-6")}>
-      <span
-        className={cn(
-          "flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium",
-          tone === "when" ? "bg-when-bg text-when-fg" : "bg-act-bg text-act-fg"
-        )}
-      >
-        {tone === "when" ? <Zap className="size-3" /> : <Play className="size-3" />}
-        {label}
-      </span>
-      <span className="min-w-0 truncate text-sm">{text}</span>
-    </div>
+    <section id="agent" className="mx-auto max-w-3xl px-6 py-24 text-center">
+      <p className="text-sm font-medium uppercase tracking-wide text-clay">For your agent</p>
+      <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+        Already chatting with an AI coding agent?
+      </h2>
+      <p className="mx-auto mt-3 max-w-lg text-muted-foreground">
+        Paste this into Claude Code, Codex, or Cursor and it'll launch AgentCanvas and pick up the
+        changes you make. No setup from you.
+      </p>
+      <CopyBox text={AGENT_PROMPT} className="mt-8 text-left" />
+    </section>
   )
 }
 
-function CopyBox({
-  text,
-  oneLine,
-  className,
-}: {
-  text: string
-  oneLine?: boolean
-  className?: string
-}) {
+function CopyBox({ text, oneLine, className }: { text: string; oneLine?: boolean; className?: string }) {
   const [copied, setCopied] = useState(false)
   async function copy() {
     await navigator.clipboard.writeText(text)
@@ -670,9 +540,7 @@ function CopyBox({
   return (
     <div className={cn("overflow-hidden rounded-xl border bg-card", className)}>
       <div className="flex items-center justify-between gap-3 border-b bg-secondary/40 px-3 py-2">
-        <span className="text-xs font-medium text-muted-foreground">
-          {oneLine ? "Terminal" : "Prompt"}
-        </span>
+        <span className="text-xs font-medium text-muted-foreground">{oneLine ? "Terminal" : "Prompt"}</span>
         <button
           type="button"
           onClick={copy}

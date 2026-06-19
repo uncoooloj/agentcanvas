@@ -199,7 +199,7 @@ function BranchCard({
       >
         <Lane
           tone="yes"
-          label={`If yes — ${node.condition}`.slice(0, 52)}
+          label={`If yes, ${node.condition}`.slice(0, 52)}
           empty="Nothing else happens"
           isEmpty={node.then.length === 0}
           onAdd={() => onAction("add_then", node)}
@@ -217,8 +217,8 @@ function BranchCard({
           tone="no"
           label={
             leadingElseIf
-              ? `Else if — ${leadingElseIf.condition}`.slice(0, 52)
-              : `Otherwise — if not ${node.condition}`.slice(0, 52)
+              ? `Else if ${leadingElseIf.condition}`.slice(0, 52)
+              : `Otherwise, if not ${node.condition}`.slice(0, 52)
           }
           empty="Nothing else happens"
           isEmpty={node.otherwise.length === 0}

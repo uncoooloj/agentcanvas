@@ -59,7 +59,7 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
           What {displayName.toLowerCase()} does
         </h1>
         <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-muted-foreground">
-          Each card is a moment someone uses your app. Open one to see exactly what happens — in
+          Each card is a moment someone uses your app. Open one to see exactly what happens, in
           plain language.
         </p>
       </header>

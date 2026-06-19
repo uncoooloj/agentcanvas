@@ -1,6 +1,6 @@
 ---
 name: agentcanvas
-description: Launch and use AgentCanvas, a local workflow canvas for AI coding agents. Use when a user wants to map a workspace, inspect or edit workflow logic, generate implementation requests, consume `.agentcanvas/pending` requests, update request status, use demo/no-workspace mode, or hand work between AgentCanvas and Codex, Claude Code, Cursor, Antigravity, MCP tools, APIs, webhooks, or a generic terminal agent.
+description: Launch and use AgentCanvas, a local workflow canvas for AI coding agents. Use when a user wants to map a workspace, inspect or edit workflow logic, generate implementation requests, consume `.agentcanvas/pending` requests, update request status, use demo/no-workspace mode, or hand work between AgentCanvas and any AI coding agent, MCP tools, APIs, webhooks, or a generic terminal agent.
 ---
 
 # AgentCanvas
@@ -8,8 +8,8 @@ description: Launch and use AgentCanvas, a local workflow canvas for AI coding a
 Use AgentCanvas to turn a workspace into a local workflow canvas and then into
 agent-ready implementation requests.
 
-Keep the workflow simple: index, inspect, create/request, implement, verify,
-update status, re-index.
+Keep the workflow simple: index, inspect, create/request, clarify, implement,
+verify, update status, re-index.
 
 ## Core Rules
 
@@ -18,6 +18,12 @@ update status, re-index.
 - Treat `.agentcanvas/pending/*.json` as structured context for tools.
 - Do not edit source code just because a canvas node changed; implement only an
   explicit pending request.
+- Before executing a pending request, inspect the request and current workspace
+  context.
+- Start implementation only when the requested change, affected flow or step,
+  acceptance criteria, and verification path are clear.
+- If anything is ambiguous, risky, incomplete, or contradicted by the current
+  workspace, ask concise plain-language clarifying questions and wait.
 - Do not mark a request done until the implementation was verified.
 - Do not run migrations, seeds, deploys, or destructive commands without
   explicit user permission.
@@ -86,19 +92,34 @@ List pending requests:
 agentcanvas pending --workspace <workspace>
 ```
 
-Read the selected `.md` first. Read the matching `.json` when structured ids,
-affected files, or acceptance criteria are useful.
+Read the selected `.md` first. Read the matching `.json` for structured ids,
+affected files, flow or step references, and acceptance criteria. Inspect the
+current workspace context before editing so you know whether the request still
+matches the code.
 
-Mark work in progress:
+Before entering execution mode, confirm these four things:
+
+- the requested change is specific enough to implement
+- the affected flow, journey, step, route, or behavior is identified
+- the acceptance criteria say what a good result looks like
+- the verification path is clear, such as a test, smoke check, or manual path
+
+If any item is missing, ambiguous, risky, incomplete, or contradicted by the
+current workspace, do not guess and do not mark the request `in_progress`. Ask
+the fewest useful clarifying questions in plain language:
+
+```bash
+agentcanvas status --workspace <workspace> <pending-id> --status needs_input --note "I need one decision before editing: should this change apply to checkout only, or to every order flow?"
+```
+
+Keep questions short enough for a non-technical user to answer. Ask about the
+user-visible behavior, affected flow or step, acceptance criteria, verification
+expectation, or safety permission that is blocking work.
+
+Only after the request is clear, mark work in progress:
 
 ```bash
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
-```
-
-Ask for input:
-
-```bash
-agentcanvas status --workspace <workspace> <pending-id> --status needs_input --note "Question for the user..."
 ```
 
 After implementation, run the relevant test or smoke check, then re-index:
@@ -126,10 +147,14 @@ Include:
 - pending Markdown path
 - pending JSON path
 - acceptance criteria
+- reminder to inspect the workspace context before editing
+- instruction to ask concise clarifying questions before execution if the
+  requested change, affected flow or step, acceptance criteria, or verification
+  path is unclear
 - exact status commands
 - reminder to test and re-index
 
-For agent-specific prompt snippets, read `references/agent-prompts.md`.
+For portable prompt snippets, read `references/agent-prompts.md`.
 
 ## Integration Paths
 

@@ -11,8 +11,8 @@ The stable file contract is:
 <workspace>/.agentcanvas/pending/*.json
 ```
 
-An adapter should do one job: help an agent pick up a pending request, implement
-it, verify it, update status, and re-index.
+An adapter should do one job: help an agent pick up a pending request, clarify
+anything unsafe or unclear, implement it, verify it, update status, and re-index.
 
 ## Four Paths
 
@@ -34,9 +34,12 @@ The skill tells the agent to:
 2. index or start the workspace
 3. read `.agentcanvas/pending/*.md`
 4. use `.json` for structured context
-5. update status with `agentcanvas status`
-6. run the relevant tests
-7. re-index with `agentcanvas index`
+5. inspect the current workspace context before editing
+6. ask concise clarifying questions if the request is ambiguous, risky, or
+   incomplete
+7. update status with `agentcanvas status`
+8. run the relevant tests
+9. re-index with `agentcanvas index`
 
 This is the best first integration because it stays portable and does not need a
 server-to-agent bridge.
@@ -102,41 +105,46 @@ The prompt should include:
 - selected pending `.md`
 - matching `.json`
 - acceptance criteria
+- reminder to inspect workspace context before editing
+- instruction to clarify before execution unless the requested change, affected
+  flow or step, acceptance criteria, and verification path are clear
 - status commands
 - reminder to test and re-index
 
 ## Prompt Snippets
 
 Use these snippets when the user wants to hand a request to a specific agent.
+They should work in any AI coding agent that can read files and run commands.
 
-### Codex
+### Portable Handoff
 
 ```text
-Use AgentCanvas for this workspace. Inspect .agentcanvas/pending, read the selected request's .md and matching .json, implement the request, run the relevant tests, update the request status, then run agentcanvas index --workspace . before summarizing what changed.
+Use AgentCanvas for this workspace. Inspect .agentcanvas/pending, read the selected request's .md, and read the matching .json for structured context. Before editing, inspect the current workspace context and confirm four things are clear: the requested change, the affected flow or step, the acceptance criteria, and the verification path.
+
+If any of those are ambiguous, risky, incomplete, or contradicted by the current workspace, do not enter execution mode yet. Ask the fewest useful clarifying questions in plain language, and update the request with needs_input plus the question.
+
+Once the request is clear, mark it in_progress, make the smallest change that satisfies the acceptance criteria, run the agreed test or smoke check, re-index with agentcanvas index --workspace ., update the request status, and summarize what changed and how it was verified.
 ```
 
-### Claude Code
+### Short Handoff
 
 ```text
-Work from the AgentCanvas request in .agentcanvas/pending. Read the Markdown brief first, use the JSON for structured context, make the smallest code change that satisfies the request, run the closest relevant tests, update status, and re-index with agentcanvas index --workspace ..
+Work from .agentcanvas/pending. Read the Markdown request and matching JSON, inspect the current workspace context, and clarify before editing unless the requested change, affected flow or step, acceptance criteria, and verification path are all clear. If clarification is needed, set status to needs_input with concise plain-language questions. Once clear, mark in_progress, implement the smallest focused change, verify it, re-index, and update status.
 ```
 
-### Cursor
+### Needs-Input Status Note
 
 ```text
-Implement .agentcanvas/pending/<request>.md. Use the matching JSON for affected files, workflow node IDs, and acceptance criteria. Keep the edit focused, verify it, update status, and run agentcanvas index --workspace . after implementation.
+I need one decision before editing: <short plain-language question about the requested behavior, affected flow or step, acceptance criteria, verification path, or safety permission>.
 ```
 
-### Antigravity
+### Status Commands
 
-```text
-Use .agentcanvas/pending/<request>.md as the task brief and .agentcanvas/pending/<request>.json as structured context. Apply the request, run a relevant test or smoke check, update status, then refresh AgentCanvas with agentcanvas index --workspace ..
-```
-
-### Generic Terminal Agent
-
-```text
-List .agentcanvas/pending, read the selected .md and matching .json, implement the acceptance criteria, run the relevant tests, update status, and re-run agentcanvas index --workspace . before reporting the result.
+```bash
+agentcanvas status --workspace <workspace> <pending-id> --status needs_input --note "I need one decision before editing: <question>"
+agentcanvas status --workspace <workspace> <pending-id> --status in_progress
+agentcanvas index --workspace <workspace>
+agentcanvas status --workspace <workspace> <pending-id> --status done --note "Implemented and verified: <test or smoke check>."
 ```
 
 ## Adapter Rules
@@ -145,6 +153,9 @@ List .agentcanvas/pending, read the selected .md and matching .json, implement t
 - Keep files and CLI commands usable without adapters.
 - Prefer the Markdown request as the readable source.
 - Use JSON for ids, files, node references, and acceptance criteria.
+- Require a clarification pass before execution. The requested change, affected
+  flow or step, acceptance criteria, and verification path must be clear before
+  implementation starts.
 - Do not require a specific agent vendor.
 - Do not bypass project safety rules.
 - Do not mark work done until implementation and verification happened.

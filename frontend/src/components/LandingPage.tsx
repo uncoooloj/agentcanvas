@@ -8,12 +8,15 @@ import {
   GitBranch,
   Loader2,
   MousePointer2,
+  Orbit,
   Play,
   Send,
   Sparkles,
+  SquareTerminal,
   X,
   Zap,
 } from "lucide-react"
+import { siClaudecode, siCursor, siGooglegemini } from "simple-icons"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { BrandMark } from "@/components/BrandMark"
@@ -62,8 +65,10 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
         {/* Hero */}
         <section className="mx-auto max-w-3xl px-6 pb-12 pt-20 text-center sm:pt-28">
           <Badge variant="secondary" className="mb-7 rounded-full px-3 py-1 font-normal text-muted-foreground">
-            Works with{" "}
-            <span className="font-medium text-foreground">Claude Code, Codex, Cursor</span> &amp; more
+            <span>
+              Works with{" "}
+              <span className="font-medium text-foreground">Claude Code, Codex, Cursor</span> &amp; more
+            </span>
           </Badge>
           <h1 className="text-balance text-[2.75rem] font-semibold leading-[1.03] tracking-[-0.02em] sm:text-[4.25rem]">
             Your app, in plain English.
@@ -84,6 +89,8 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
             </Button>
           </div>
         </section>
+
+        <WorksWith />
 
         <HowItWorks />
 
@@ -125,6 +132,44 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
         </div>
       </footer>
     </div>
+  )
+}
+
+// ---- "Works with" logo strip ----
+
+function SimpleLogo({ path }: { path: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="size-[18px] fill-current">
+      <path d={path} />
+    </svg>
+  )
+}
+
+function WorksWith() {
+  const tools = [
+    { name: "Claude Code", logo: <SimpleLogo path={siClaudecode.path} /> },
+    { name: "Codex", logo: <SquareTerminal className="size-[18px]" /> },
+    { name: "Cursor", logo: <SimpleLogo path={siCursor.path} /> },
+    { name: "Antigravity", logo: <Orbit className="size-[18px]" /> },
+    { name: "Gemini", logo: <SimpleLogo path={siGooglegemini.path} /> },
+  ]
+  return (
+    <section className="mx-auto max-w-4xl px-6 pb-16">
+      <p className="mb-7 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Works with your AI coding agent
+      </p>
+      <div className="flex flex-wrap items-center justify-center gap-x-9 gap-y-5">
+        {tools.map((t) => (
+          <span
+            key={t.name}
+            className="inline-flex items-center gap-2 text-[15px] font-medium text-foreground/70 transition-colors hover:text-foreground"
+          >
+            {t.logo}
+            {t.name}
+          </span>
+        ))}
+      </div>
+    </section>
   )
 }
 

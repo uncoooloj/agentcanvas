@@ -7,9 +7,14 @@ import App from "./App.tsx"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
+function routerBasename(baseUrl: string) {
+  if (!baseUrl || baseUrl === "/" || baseUrl === "./") return undefined
+  return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={routerBasename(import.meta.env.BASE_URL)}>
       <TooltipProvider delayDuration={300}>
         <App />
       </TooltipProvider>

@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agentcanvas",
+  "main": "deploy/cloudflare/agentcanvas-worker.js",
+  "compatibility_date": "2026-06-19",
+  "workers_dev": false,
+  "assets": {
+    "directory": "./dist/cloudflare-agentcanvas",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [
+    {
+      "pattern": "uncooloj.com/agentcanvas*",
+      "zone_name": "uncooloj.com"
+    }
+  ]
+}

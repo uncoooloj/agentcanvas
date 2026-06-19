@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:agentcanvas": "AGENTCANVAS_VITE_BASE=/agentcanvas/ AGENTCANVAS_VITE_OUT_DIR=../dist/cloudflare-agentcanvas npm run build",
     "lint": "eslint .",
     "preview": "vite preview"
   },

@@ -6,5 +6,6 @@ build/
 dist/
 *.egg-info/
 .venv/
+.venv-pypi/
 node_modules/
 .DS_Store

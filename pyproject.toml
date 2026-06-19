@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentcanvas"
+name = "agent-canvas"
 version = "0.1.0"
 description = "Local editable workflow canvas for AI coding agents."
 readme = "README.md"
@@ -15,6 +15,9 @@ dependencies = []
 
 [project.scripts]
 agentcanvas = "agentcanvas.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agentcanvas*"]
 
 [tool.setuptools.package-data]
 agentcanvas = [

@@ -1,0 +1,135 @@
+import json
+import unittest
+
+from agentcanvas.ir import SCHEMA as WORKFLOW_IR_SCHEMA
+from agentcanvas.projection import (
+    CANVAS_QUERY_SCHEMA,
+    PROJECTION_CONTRACT_SCHEMA,
+    SOURCE_FACTS_SCHEMA,
+    build_projection_contract,
+    build_projection_prompt,
+    facts_from_workflow_ir,
+    heuristic_project,
+    materialize_canvas_model,
+    validate_canvas_query,
+)
+from agentcanvas.projection.sample import SAMPLE_SOURCE_FACTS, build_sample_projection
+
+
+class ProjectionContractTests(unittest.TestCase):
+    maxDiff = None
+
+    def test_projection_contract_prefers_llm_assisted_grounded_projection(self):
+        contract = build_projection_contract(SAMPLE_SOURCE_FACTS)
+
+        self.assertEqual(contract["schema"], PROJECTION_CONTRACT_SCHEMA)
+        self.assertEqual(contract["primary_mode"], "llm-assisted")
+        self.assertEqual(contract["fallback_mode"], "heuristic")
+        self.assertEqual(
+            contract["language_module_role"]["purpose"],
+            "grounding_chunking_provenance",
+        )
+        self.assertIn(
+            "Treat LLM-assisted projection as the primary path.",
+            contract["instructions"],
+        )
+
+    def test_projection_prompt_is_provider_and_agent_agnostic(self):
+        prompt = build_projection_prompt(SAMPLE_SOURCE_FACTS)
+        prompt_text = json.dumps(prompt)
+
+        self.assertEqual(prompt["source_facts"]["schema"], SOURCE_FACTS_SCHEMA)
+        response_schema_name = prompt["response_schema"]["properties"]["schema"]["const"]
+        self.assertEqual(response_schema_name, CANVAS_QUERY_SCHEMA)
+        self.assertIn("grounding, chunking, and provenance providers", prompt_text)
+        self.assertNotIn("Codex", prompt_text)
+
+    def test_sample_facts_prompt_and_canvas_model_validate(self):
+        sample = build_sample_projection()
+        canvas_model = sample["canvas_model"]
+
+        self.assertEqual(sample["source_facts"]["schema"], SOURCE_FACTS_SCHEMA)
+        self.assertEqual(
+            sample["prompt_contract"]["schema"],
+            "agentcanvas.llm_projection_prompt.v1",
+        )
+        self.assertEqual(sample["llm_canvas_query"]["mode"], "llm-assisted")
+        self.assertEqual(canvas_model["schema"], WORKFLOW_IR_SCHEMA)
+        self.assertEqual(canvas_model["summary"]["nodes"], 3)
+        self.assertEqual(canvas_model["summary"]["edges"], 2)
+
+    def test_heuristic_projection_materializes_existing_canvas_facts(self):
+        workflow_ir = {
+            "schema": WORKFLOW_IR_SCHEMA,
+            "version": "0.1.0",
+            "workspace": {"root": "/tmp/example", "name": "example"},
+            "summary": {},
+            "package": {},
+            "git": {},
+            "focus": {},
+            "components": [],
+            "nodes": [
+                {
+                    "id": "file:src/a.js",
+                    "type": "file",
+                    "label": "a.js",
+                    "path": "src/a.js",
+                    "data": {},
+                },
+                {
+                    "id": "file:src/b.js",
+                    "type": "file",
+                    "label": "b.js",
+                    "path": "src/b.js",
+                    "data": {},
+                },
+            ],
+            "edges": [
+                {
+                    "id": "file:src/a.js->imports->file:src/b.js",
+                    "source": "file:src/a.js",
+                    "target": "file:src/b.js",
+                    "kind": "imports",
+                }
+            ],
+        }
+        source_facts = facts_from_workflow_ir(workflow_ir)
+        query = heuristic_project(source_facts)
+        model = materialize_canvas_model(
+            query,
+            source_facts["repo"],
+            source_facts=source_facts,
+        )
+
+        self.assertEqual(query["mode"], "heuristic")
+        self.assertEqual(model["summary"]["nodes"], 2)
+        self.assertEqual(model["summary"]["edges"], 1)
+
+    def test_canvas_query_rejects_unknown_fact_ids(self):
+        query = {
+            "schema": CANVAS_QUERY_SCHEMA,
+            "version": "0.1.0",
+            "mode": "llm-assisted",
+            "operations": [
+                {
+                    "op": "upsert_node",
+                    "node": {
+                        "id": "route:/ghost",
+                        "type": "route",
+                        "label": "Ghost route",
+                    },
+                    "fact_ids": ["fact:not-present"],
+                    "confidence": 0.5,
+                    "rationale": "Unsupported.",
+                }
+            ],
+            "warnings": [],
+        }
+
+        errors = validate_canvas_query(query, SAMPLE_SOURCE_FACTS)
+
+        self.assertTrue(any("unknown id fact:not-present" in error for error in errors))
+
+
+if __name__ == "__main__":
+    unittest.main()

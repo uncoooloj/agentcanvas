@@ -57,6 +57,12 @@ export default function App() {
     document.documentElement.classList.toggle("dark", dark)
   }, [dark])
 
+  // Switching flows (or returning to All Flows) clears any in-progress step
+  // edit, so the composer never lingers on a page where it has no context.
+  useEffect(() => {
+    setEditRequest(null)
+  }, [view])
+
   async function load({ refresh = false }: { refresh?: boolean } = {}) {
     setLoading(true)
     try {

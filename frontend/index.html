@@ -3,10 +3,75 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AgentCanvas — what your app does</title>
+    <meta name="theme-color" content="#faf7f1" />
+
+    <title>AgentCanvas — see and steer your app in plain English</title>
+    <meta
+      name="description"
+      content="A friendlier way to steer the app an AI is building for you. AgentCanvas turns your app into a plain-English map of what it does — see it, edit it in your own words, and your AI coding agent (Claude Code, Codex, Cursor) builds the change. No code required."
+    />
+    <meta
+      name="keywords"
+      content="AgentCanvas, AI coding agent, Claude Code, Codex, Cursor, no-code app editing, plain English app builder, workflow canvas, app logic, non-technical"
+    />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://agentcanvas.app/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="AgentCanvas — see and steer your app in plain English" />
+    <meta
+      property="og:description"
+      content="A friendlier way to steer the app an AI is building for you. See what your app does as a plain-English map, change it in your own words, and your AI coding agent builds it."
+    />
+    <meta property="og:site_name" content="AgentCanvas" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="AgentCanvas — see and steer your app in plain English" />
+    <meta
+      name="twitter:description"
+      content="See what your app does in plain English, change it in your own words, and your AI coding agent builds it. Works with Claude Code, Codex, Cursor."
+    />
+
+    <!-- Structured data: what we are, what we do, how to use us (for crawlers & agents) -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "AgentCanvas",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Windows, Linux",
+        "description": "AgentCanvas is a local, agent-agnostic tool that turns any app/codebase into a plain-English map of what it does — its user journeys shown as simple When / Do / If flows with branches. Non-technical people can read the map and change how the app works by editing steps in their own words. Each edit becomes a structured request written to .agentcanvas/pending, which an AI coding agent (Claude Code, Codex, Cursor, Antigravity, or any agent that can read files and run commands) implements. Run it with `agentcanvas start --workspace <path>`; it serves a local web canvas and writes change requests an agent can act on.",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "softwareHelp": "Tell your AI coding agent: run `agentcanvas start --workspace .`, open the local URL, then watch `.agentcanvas/pending` for plain-English change requests, implement each, run tests, and re-index with `agentcanvas index --workspace .`.",
+        "featureList": [
+          "Plain-English map of what an app does (When / Do / If flows)",
+          "Edit app behaviour in your own words — no code",
+          "Edits become structured pending change requests for an AI agent",
+          "Agent-agnostic: Claude Code, Codex, Cursor, Antigravity, or any file-based agent",
+          "Local-first; runs from the command line"
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <h1>AgentCanvas — see and steer your app in plain English</h1>
+      <p>
+        AgentCanvas is a friendlier way to steer the app an AI is building for you. It turns your
+        app into a plain-English map of what it does — user journeys shown as simple "When / Do / If"
+        flows. You change how the app works by editing steps in your own words, and your AI coding
+        agent (Claude Code, Codex, Cursor) builds the change.
+      </p>
+      <p>
+        How an AI agent uses AgentCanvas: run <code>agentcanvas start --workspace .</code>, open the
+        local URL it prints, then watch <code>.agentcanvas/pending</code> for plain-English change
+        requests, implement each one, run the relevant tests, and re-index with
+        <code>agentcanvas index --workspace .</code>.
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

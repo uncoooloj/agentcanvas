@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-canvas"
+name = "use-agentcanvas"
 version = "0.1.0"
 description = "Local editable workflow canvas for AI coding agents."
 readme = "README.md"

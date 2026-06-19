@@ -59,7 +59,7 @@ the safety boundary.
 Install AgentCanvas from PyPI:
 
 ```bash
-python3 -m pip install agent-canvas
+python3 -m pip install use-agentcanvas
 ```
 
 Then check the CLI:
@@ -68,7 +68,7 @@ Then check the CLI:
 agentcanvas --help
 ```
 
-The package name is `agent-canvas`, but the command is `agentcanvas`.
+The package name is `use-agentcanvas`, but the command is `agentcanvas`.
 
 For development, or if you are working from the private source repo, install an
 authenticated checkout:
@@ -83,7 +83,7 @@ You can also install directly from the private repo when your machine has
 GitHub SSH access:
 
 ```bash
-python3 -m pip install "agent-canvas @ git+ssh://git@github.com/uncoooloj/agentcanvas.git"
+python3 -m pip install "use-agentcanvas @ git+ssh://git@github.com/uncoooloj/agentcanvas.git"
 ```
 
 You can also run it directly from the source checkout:

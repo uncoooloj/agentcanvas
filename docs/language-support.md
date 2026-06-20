@@ -197,6 +197,16 @@ response must cite `fact_ids`, then AgentCanvas validates and materializes it:
 agentcanvas apply-query --workspace <workspace> --query canvas-query.json
 ```
 
+The projected canvas should be a human-readable journey, not a raw inventory of
+files. It should use AgentCanvas step language (`When`, `Do`, `If`, `ElseIf`,
+`Else`) with source provenance. `app_surfaces` should be treated as lanes or
+participants inside a journey unless the actor, outcome, or business rules truly
+differ.
+
+If the facts do not make the intended journey clear, the invoking agent should
+ask clarifying questions before applying a projection. Partial grounded mapping
+with warnings is better than unsupported inference.
+
 Use `--dry-run` first when integrating a new adapter:
 
 ```bash

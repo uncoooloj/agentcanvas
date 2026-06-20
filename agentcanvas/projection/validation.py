@@ -174,6 +174,7 @@ def materialize_canvas_model(
         op = operation["op"]
         if op == "upsert_node":
             node = deepcopy(operation["node"])
+            _attach_operation_provenance(node, operation)
             nodes[node["id"]] = node
         elif op == "delete_node":
             target = operation["target"]
@@ -183,6 +184,7 @@ def materialize_canvas_model(
                     edges.pop(edge_id, None)
         elif op == "upsert_edge":
             edge = deepcopy(operation["edge"])
+            _attach_operation_provenance(edge, operation)
             edge.setdefault("id", _edge_id(edge))
             edges[edge["id"]] = edge
         elif op == "delete_edge":
@@ -284,6 +286,36 @@ def _edge_id(edge: Dict[str, Any]) -> str:
     return f"{edge.get('source')}->{edge.get('kind')}->{edge.get('target')}"
 
 
+def _attach_operation_provenance(
+    item: Dict[str, Any],
+    operation: Dict[str, Any],
+) -> None:
+    data = item.setdefault("data", {})
+    if not isinstance(data, dict):
+        return
+
+    projection = data.get("projection")
+    if not isinstance(projection, dict):
+        projection = {}
+
+    fact_ids = operation.get("fact_ids")
+    if isinstance(fact_ids, list):
+        projection["fact_ids"] = [
+            fact_id for fact_id in fact_ids if isinstance(fact_id, str) and fact_id
+        ]
+
+    confidence = operation.get("confidence")
+    if isinstance(confidence, (int, float)):
+        projection["confidence"] = max(0.0, min(1.0, float(confidence)))
+
+    rationale = operation.get("rationale")
+    if isinstance(rationale, str) and rationale.strip():
+        projection["rationale"] = rationale.strip()
+
+    if projection:
+        data["projection"] = projection
+
+
 def _fact_ids(source_facts: Optional[Dict[str, Any]]) -> Set[str]:
     if not source_facts or source_facts.get("schema") != SOURCE_FACTS_SCHEMA:
         return set()
@@ -292,4 +324,3 @@ def _fact_ids(source_facts: Optional[Dict[str, Any]]) -> Set[str]:
         if isinstance(fact, dict) and isinstance(fact.get("id"), str):
             ids.add(fact["id"])
     return ids
-

@@ -24,6 +24,8 @@ verify, update status, re-index.
   acceptance criteria, and verification path are clear.
 - If anything is ambiguous, risky, incomplete, or contradicted by the current
   workspace, ask concise plain-language clarifying questions and wait.
+- Do not execute unclear changes blindly. Clarify first, then apply only the
+  clear request or validated projection.
 - Do not mark a request done until the implementation was verified.
 - Do not run migrations, seeds, deploys, or destructive commands without
   explicit user permission.
@@ -139,7 +141,8 @@ Use `blocked` when progress cannot continue without an external change.
 ## Copy Fallback
 
 When no adapter or live session is available, provide a copyable prompt instead
-of pretending to send work.
+of pretending to send work. Copy/manual mode is a supported fallback, not an
+error state.
 
 Include:
 
@@ -170,8 +173,37 @@ Keep every path aligned with the same pending request lifecycle.
 
 ## LLM Projection
 
-If a caller LLM generates `agentcanvas.canvas_query.v1` JSON from the projection
-contract, validate before writing:
+LLM-assisted projection is the intended path for turning source facts into a
+human-readable canvas. AgentCanvas prepares facts and a provider-neutral
+contract; the invoking agent or model reads them, asks for clarification if
+needed, generates an `agentcanvas.canvas_query.v1`, validates it, then applies
+it.
+
+Before generating or applying a projection, read:
+
+- `.agentcanvas/workflow.ir.json`
+- `source_facts`
+- `projection_contract`
+- `source_facts.repo.app_surfaces` when present
+
+Generate journeys in AgentCanvas language:
+
+- `When`: what starts the journey
+- `Do`: what the app does
+- `If`, `ElseIf`, `Else`: branches and outcomes
+
+Keep the canvas human-readable. Use `app_surfaces` as lanes, participants, or
+drilldowns inside a journey. Cite provenance with `fact_ids` on every operation
+and include useful evidence in node or edge data when it helps a person audit
+the result. Do not create top-level journeys from a raw file inventory; files,
+tests, services, and packages belong as supporting details.
+
+If the intended journey, actor, outcome, affected surface, or evidence is
+unclear, ask concise clarifying questions before applying the result. Progressive
+mapping is fine: return the flows that are grounded and leave warnings for the
+rest.
+
+Validate before writing:
 
 ```bash
 agentcanvas apply-query --workspace <workspace> --query <canvas-query.json> --dry-run
@@ -182,6 +214,10 @@ Apply only after validation passes and the user wants it:
 ```bash
 agentcanvas apply-query --workspace <workspace> --query <canvas-query.json>
 ```
+
+If no live model or adapter is available, use copy/manual mode: give the
+projection prompt, response schema, source facts, dry-run command, and apply
+command for the user or another agent to run.
 
 ## Adding Languages
 

@@ -6,16 +6,22 @@ AgentCanvas does not need to be the model provider. It should prepare grounded
 facts, ask a caller model or agent for a canvas query, validate the answer, and
 only then write it.
 
+The caller may be any coding agent, model wrapper, MCP tool, local API client, or
+manual copy/paste flow. The contract is the same in each path.
+
 ## Plain Version
 
 The safe flow is:
 
 1. Index the repo.
-2. Collect facts with file paths and evidence.
-3. Ask an LLM or agent to propose a canvas.
-4. Validate the JSON it returns.
-5. Materialize the canvas only if validation passes.
-6. Fall back to a simple grounded view if no LLM is available.
+2. Read `source_facts`, the projection contract, and any `app_surfaces`.
+3. Ask clarifying questions if the actor, outcome, affected flow, or evidence is
+   unclear.
+4. Ask an LLM or agent to propose a human-readable canvas query.
+5. Validate the JSON it returns.
+6. Materialize the canvas only if validation passes.
+7. Fall back to a simple grounded view or copy/manual mode if no live adapter is
+   available.
 
 ## Modes
 
@@ -23,6 +29,13 @@ The safe flow is:
   schema to its chosen model or agent.
 - `heuristic`: fallback path. AgentCanvas keeps grounded facts and simple
   nodes without inferring a richer story.
+- `copy/manual`: fallback handoff when no adapter or live session is available.
+  The user or invoking agent copies the prompt, validates the response, then
+  applies it with the same CLI gate.
+
+Progressive mapping is expected. A projection can cover the flows it can prove
+and leave warnings for the rest. It should not pretend the whole app is mapped
+when the facts only support one journey.
 
 ## Contracts
 
@@ -76,6 +89,30 @@ Facts should be grounded and cite evidence:
 The model or agent returns `agentcanvas.canvas_query.v1` operations. Those
 operations must reference known fact ids when they make claims about the repo.
 
+## What The Model Should Generate
+
+Generate human-readable AgentCanvas journeys, not a top-level file inventory.
+Use this vocabulary where the facts support it:
+
+- `When`: the user, system, job, event, route, screen, webhook, or schedule that
+  starts the journey
+- `Do`: work the app performs
+- `If`, `ElseIf`, `Else`: business or system branches
+
+Use `app_surfaces` as lanes, participants, or drilldowns inside a journey. For
+example, signup across mobile, web, and backend is usually one journey with
+multiple surfaces unless the actor, outcome, or business rules differ.
+
+Every operation should cite `fact_ids`. When useful, include human-auditable
+provenance in node or edge `data`, such as the source fact ids, source paths, or
+short evidence text. Files, tests, services, packages, and modules can appear as
+supporting details, but they should not become top-level journeys just because
+they were indexed.
+
+If the model cannot tell what journey a set of facts belongs to, it should omit
+that relationship and add a warning. If applying the result would be misleading,
+the invoking agent should ask concise clarifying questions before applying.
+
 ## Integration Paths
 
 - **Skill**: the AgentCanvas skill tells an agent how to validate and apply a
@@ -86,6 +123,8 @@ operations must reference known fact ids when they make claims about the repo.
   and "apply query".
 - **Webhooks**: planned webhooks can report projection success/failure or attach
   external analysis notes.
+- **Manual copy**: the same prompt and schema can be copied into any model or
+  coding agent, then applied only after `--dry-run` succeeds.
 
 ## Next Product Contract
 

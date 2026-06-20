@@ -7,6 +7,10 @@ Always keep the status loop in the prompt: inspect request, inspect workspace
 context, clarify if needed, implement only after the request is clear, verify,
 re-index, update status.
 
+For projection prompts, keep the same safety loop: inspect `source_facts` and
+`app_surfaces`, clarify before applying unclear output, generate grounded
+human-readable journeys, validate, then apply.
+
 ## Portable Handoff Prompt
 
 ```text
@@ -66,4 +70,27 @@ Once clear, mark the request in_progress, make the smallest change that satisfie
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
 agentcanvas index --workspace <workspace>
 agentcanvas status --workspace <workspace> <pending-id> --status done --note "Implemented and verified: <test or smoke check>."
+```
+
+## Portable Projection Prompt
+
+```text
+Use AgentCanvas projection for this workspace:
+<workspace>
+
+Read .agentcanvas/workflow.ir.json, especially source_facts, projection_contract, and source_facts.repo.app_surfaces.
+
+Generate agentcanvas.canvas_query.v1 JSON in llm-assisted mode. Use source_facts and app_surfaces as the only evidence. Create human-readable AgentCanvas journeys using When, Do, If, ElseIf, and Else. Use app_surfaces as lanes, participants, or drilldowns inside journeys. Cite fact_ids on every operation and include useful provenance in node or edge data.
+
+Do not create top-level journeys from a raw file inventory. Files, tests, services, packages, and modules should appear as supporting details, provenance, or supporting nodes.
+
+If the intended journey, actor, outcome, affected surface, or evidence is unclear, ask concise clarifying questions before applying the result. If only part of the app is grounded, return a partial projection with warnings instead of guessing.
+
+Validate first:
+
+agentcanvas apply-query --workspace <workspace> --query <canvas-query.json> --dry-run
+
+Apply only after validation passes and the user wants it:
+
+agentcanvas apply-query --workspace <workspace> --query <canvas-query.json>
 ```

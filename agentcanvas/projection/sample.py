@@ -83,7 +83,7 @@ SAMPLE_LLM_CANVAS_QUERY: Dict[str, Any] = {
     "schema": CANVAS_QUERY_SCHEMA,
     "version": "0.1.0",
     "mode": "llm-assisted",
-    "intent": "Show the checkout request flow with tests.",
+    "intent": "Show checkout as a human-readable AgentCanvas journey with tests.",
     "operations": [
         {
             "op": "upsert_node",
@@ -92,7 +92,14 @@ SAMPLE_LLM_CANVAS_QUERY: Dict[str, Any] = {
                 "type": "route",
                 "label": "Checkout route",
                 "path": "src/routes/checkout.js",
-                "data": {"flow_role": "entrypoint"},
+                "data": {
+                    "flow_role": "entrypoint",
+                    "journey_step": {
+                        "kind": "When",
+                        "text": "Someone submits checkout.",
+                        "provenance_fact_ids": ["fact:file:src/routes/checkout.js"],
+                    },
+                },
             },
             "fact_ids": ["fact:file:src/routes/checkout.js"],
             "confidence": 0.95,
@@ -105,7 +112,24 @@ SAMPLE_LLM_CANVAS_QUERY: Dict[str, Any] = {
                 "type": "flow",
                 "label": "Checkout orchestration",
                 "path": "src/checkout.js",
-                "data": {"flow_role": "domain_logic"},
+                "data": {
+                    "flow_role": "domain_logic",
+                    "journey": {
+                        "title": "Checkout",
+                        "steps": [
+                            {
+                                "kind": "When",
+                                "text": "Someone submits checkout.",
+                                "provenance_fact_ids": ["fact:file:src/routes/checkout.js"],
+                            },
+                            {
+                                "kind": "Do",
+                                "text": "Calculate totals and submit the order.",
+                                "provenance_fact_ids": ["fact:file:src/checkout.js"],
+                            },
+                        ],
+                    },
+                },
             },
             "fact_ids": ["fact:file:src/checkout.js"],
             "confidence": 0.95,

@@ -267,6 +267,21 @@ contract.
 AgentCanvas can use an LLM or coding agent to turn source facts into a cleaner
 human canvas, but the package does not call a model by itself.
 
+The intended flow is:
+
+1. Read the indexed `source_facts`, projection contract, and any `app_surfaces`.
+2. Ask concise clarifying questions if the intended journey, actor, outcome, or
+   evidence is unclear.
+3. Generate a human-readable `agentcanvas.canvas_query.v1` using AgentCanvas
+   journey language: `When`, `Do`, `If`, `ElseIf`, and `Else`.
+4. Cite `fact_ids` on every operation and keep files/tests/services as
+   provenance or supporting details, not top-level journeys.
+5. Validate, then apply.
+
+If no live model adapter is available, the same prompt can be copied into a
+manual agent/model flow. Progressive partial mapping is acceptable when only
+some flows are grounded.
+
 Validate a projected canvas first:
 
 ```bash

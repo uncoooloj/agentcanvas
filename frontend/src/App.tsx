@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import {
   ChevronLeft,
@@ -30,6 +30,7 @@ import type { EditRequest, StagedEdit } from "@/lib/edits"
 import { findNode, type AppModel, type FlowNode, type Journey } from "@/lib/types"
 
 const HOME = "__home__"
+const CANVAS_POLL_INTERVAL_MS = 2500
 const MAPPING_STAGES = [
   "Scanning workspace",
   "Finding app surfaces",
@@ -67,6 +68,8 @@ export default function App() {
   const [dark, setDark] = useState(false)
   const mappingActive = canvasState.kind === "loading" || canvasState.kind === "reindexing"
   const [mappingStage, setMappingStage] = useState(0)
+  const canvasSignatureRef = useRef<string | null>(null)
+  const pollBlockedRef = useRef(false)
 
   const phase = useChanges((s) => s.handoff.phase)
   const handoffItems = useChanges((s) => s.handoff.items)
@@ -78,6 +81,8 @@ export default function App() {
     [phase, queuedNext, stagedChanges]
   )
   const locked = phase === "sending" || phase === "working"
+  const hasLocalPendingChanges =
+    Boolean(editRequest) || stagedChanges.length > 0 || queuedNext.length > 0 || phase !== "composing"
   const journeyActivity = useMemo(
     () => getJourneyActivity(model.journeys, localChanges, orderingChanges, phase, handoffItems),
     [handoffItems, localChanges, model.journeys, orderingChanges, phase]
@@ -86,6 +91,10 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark)
   }, [dark])
+
+  useEffect(() => {
+    pollBlockedRef.current = hasLocalPendingChanges
+  }, [hasLocalPendingChanges])
 
   // Switching flows (or returning to All Flows) clears any in-progress step
   // edit, so the composer never lingers on a page where it has no context.
@@ -117,6 +126,7 @@ export default function App() {
     setCanvasState({ kind: refresh ? "reindexing" : "loading" })
     try {
       const result = await loadWorkspaceModel(refresh)
+      canvasSignatureRef.current = canvasSignature(result)
       if (!result.model.journeys.length) {
         setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
         setCanvasState({
@@ -145,6 +155,48 @@ export default function App() {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contextLoading, context.mode])
+
+  useEffect(() => {
+    if (contextLoading || context.mode !== "workspace" || onWelcome) return
+
+    let cancelled = false
+    let inFlight = false
+
+    async function pollCanvas() {
+      if (inFlight || pollBlockedRef.current) return
+      inFlight = true
+      try {
+        const result = await loadWorkspaceModel(false)
+        if (cancelled || pollBlockedRef.current) return
+
+        const signature = canvasSignature(result)
+        if (signature === canvasSignatureRef.current) return
+
+        canvasSignatureRef.current = signature
+        if (!result.model.journeys.length) {
+          setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
+          setCanvasState({
+            kind: "empty",
+            message: "Workspace map isn't ready yet",
+            detail: emptyWorkspaceDetail(result),
+          })
+        } else {
+          setModel((current) => preserveLocalJourneyRecency(result.model, current))
+          setCanvasState({ kind: "ready", notice: result.notice })
+        }
+      } catch {
+        // Polling is quiet; keep the current canvas visible through transient read errors.
+      } finally {
+        inFlight = false
+      }
+    }
+
+    const timer = window.setInterval(pollCanvas, CANVAS_POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [contextLoading, context.mode, context.workspace, onWelcome])
 
   const activeJourney: Journey | null = useMemo(
     () => (view === HOME ? null : model.journeys.find((j) => j.id === view) ?? null),
@@ -430,6 +482,13 @@ function mappingNotice(mapping?: CanvasMapping): string | undefined {
     return "This is the grounded starter map. The calling LLM can refine it with the projection contract."
   }
   return undefined
+}
+
+function canvasSignature(result: WorkspaceModelResult): string {
+  return JSON.stringify({
+    model: result.model,
+    notice: result.notice,
+  })
 }
 
 function WorkspaceNotice({ message }: { message: string }) {

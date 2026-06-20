@@ -127,7 +127,14 @@ export default function App() {
     try {
       const result = await loadWorkspaceModel(refresh)
       canvasSignatureRef.current = canvasSignature(result)
-      if (!result.model.journeys.length) {
+      if (isStarterMap(result.mapping)) {
+        setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
+        setCanvasState({
+          kind: "empty",
+          message: `Waiting for ${context.assistant || "your assistant"} to map this workspace`,
+          detail: starterMapDetail(result, context.assistant),
+        })
+      } else if (!result.model.journeys.length) {
         setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
         setCanvasState({
           kind: "empty",
@@ -173,7 +180,14 @@ export default function App() {
         if (signature === canvasSignatureRef.current) return
 
         canvasSignatureRef.current = signature
-        if (!result.model.journeys.length) {
+        if (isStarterMap(result.mapping)) {
+          setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
+          setCanvasState({
+            kind: "empty",
+            message: `Waiting for ${context.assistant || "your assistant"} to map this workspace`,
+            detail: starterMapDetail(result, context.assistant),
+          })
+        } else if (!result.model.journeys.length) {
           setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
           setCanvasState({
             kind: "empty",
@@ -482,6 +496,19 @@ function mappingNotice(mapping?: CanvasMapping): string | undefined {
     return "This is the grounded starter map. The calling LLM can refine it with the projection contract."
   }
   return undefined
+}
+
+function isStarterMap(mapping?: CanvasMapping): boolean {
+  return mapping?.mode === "deterministic" && mapping.primaryMode === "llm-assisted"
+}
+
+function starterMapDetail(result: WorkspaceModelResult, assistant?: string): string {
+  const agent = assistant || "your assistant"
+  const count = result.model.journeys.length
+  const starter = count
+    ? `AgentCanvas found ${count} starter entr${count === 1 ? "y" : "ies"}, but they are only indexed surfaces, not the finished human map.`
+    : "AgentCanvas refreshed the repo evidence, but no authored flows are ready yet."
+  return `${starter} ${agent} needs to translate the evidence into .agentcanvas/canvas.ir.json; this page will update when that file is written.`
 }
 
 function canvasSignature(result: WorkspaceModelResult): string {

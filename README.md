@@ -3,11 +3,13 @@
 [![PyPI](https://img.shields.io/pypi/v/use-agentcanvas.svg)](https://pypi.org/project/use-agentcanvas/)
 [![Python](https://img.shields.io/pypi/pyversions/use-agentcanvas.svg)](https://pypi.org/project/use-agentcanvas/)
 
-AgentCanvas is a local visual workspace for giving coding agents better work.
+AgentCanvas is a local visual workspace for giving coding agents a better map
+of the work.
 
-It looks at a repo, turns the important app flows into a plain-language canvas,
-lets you mark what should change, then turns that into a clear request a coding
-agent can actually implement.
+It looks at a repo, keeps the raw evidence in one file, and lets the invoking
+agent turn the important app behavior into a plain-language canvas. You can then
+edit the canvas as the shared plan, or explicitly ask for source-code changes
+when implementation is the goal.
 
 The point is simple: stop handing agents vague chat messages and hoping they
 guess correctly. AgentCanvas makes the work visible, copyable, and trackable.
@@ -17,12 +19,16 @@ guess correctly. AgentCanvas makes the work visible, copyable, and trackable.
 AgentCanvas helps with the messy part between "this flow is wrong" and "make
 this exact code change."
 
-- It indexes your repo.
-- It shows the main workflows, routes, actions, services, jobs, and app surfaces.
-- It lets you create small change requests from the canvas.
-- It writes those requests into `.agentcanvas/pending/`.
-- A coding agent reads the request, implements it, verifies it, updates status,
-  and re-indexes the workspace.
+- It indexes your repo into `.agentcanvas/workflow.ir.json`.
+- It lets the invoking agent turn that evidence into readable flows in
+  `.agentcanvas/canvas.ir.json`.
+- It shows the display canvas from `.agentcanvas/canvas.ir.json`.
+- It lets you add, remove, rename, or re-route canvas steps without changing
+  source code.
+- It creates implementation requests only when you explicitly ask for source
+  changes.
+- A coding agent can read an implementation request, change code, verify it,
+  update status, and re-index to refresh evidence.
 
 AgentCanvas is not trying to replace Codex, Claude Code, Cursor, Antigravity, or
 any other coding agent. It is the layer that makes the task clear before an
@@ -43,19 +49,19 @@ Demo mode:
 The core loop is intentionally small:
 
 1. Point AgentCanvas at a workspace.
-2. It writes a local index to `.agentcanvas/workflow.ir.json`.
-3. The browser shows a canvas built from that index.
-4. You describe the change you want.
-5. AgentCanvas creates a Markdown brief and a JSON brief in
-   `.agentcanvas/pending/`.
-6. A coding agent picks up the request.
-7. The agent marks the request `in_progress`, `needs_input`, `blocked`, or
-   `done`.
-8. The agent re-indexes after implementation so the canvas reflects the latest
-   code.
+2. It writes the raw evidence index to `.agentcanvas/workflow.ir.json`.
+3. The invoking agent translates repo behavior into readable flows and writes
+   `.agentcanvas/canvas.ir.json`.
+4. The browser shows `.agentcanvas/canvas.ir.json` as the display canvas.
+5. Canvas-only edits update `.agentcanvas/canvas.ir.json` progressively.
+6. If you ask for source-code changes, AgentCanvas creates a Markdown brief and
+   a JSON brief in `.agentcanvas/pending/`.
+7. A coding agent picks up that implementation request, verifies the change, and
+   marks it `in_progress`, `needs_input`, `blocked`, or `done`.
+8. The agent re-indexes after source-code implementation to refresh evidence.
 
-Canvas edits do not directly patch your app. They become requests first. That is
-the safety boundary.
+Canvas edits are plan edits unless you explicitly ask to change source code.
+Re-indexing refreshes evidence; it is not required after canvas-only edits.
 
 ## Install
 
@@ -149,14 +155,25 @@ AgentCanvas writes all local state under the selected repo:
 
 ```text
 <workspace>/.agentcanvas/workflow.ir.json
+<workspace>/.agentcanvas/canvas.ir.json
 <workspace>/.agentcanvas/pending/*.md
 <workspace>/.agentcanvas/pending/*.json
 ```
 
-The Markdown file is the human-readable task. The JSON file is the structured
-version for tools and agents.
+`workflow.ir.json` is the raw index and evidence grounding file.
+`canvas.ir.json` is the browser display canvas source of truth. Pending
+Markdown and JSON files are for implementation requests, not normal canvas-only
+edits.
+
+The invoking agent should keep translating repo behavior into human-readable
+flows and update `canvas.ir.json` as the user edits the canvas. Preserve evidence
+links where possible, and use plain language over file-inventory language.
 
 ## Send Changes To A Coding Agent
+
+Use this loop only when the user explicitly wants source-code implementation.
+Canvas edits like "add this step", "remove that branch", or "re-route this flow"
+should update `.agentcanvas/canvas.ir.json` instead.
 
 An agent can list pending requests:
 
@@ -189,6 +206,9 @@ agentcanvas index --workspace /path/to/your/project
 agentcanvas status --workspace /path/to/your/project <pending-id> --status done --note "Implemented and verified."
 ```
 
+`agentcanvas index` refreshes `.agentcanvas/workflow.ir.json` after code changes.
+It should not be treated as the way to save canvas-only edits.
+
 The important part is that status comes from the agent or CLI. The browser
 should not pretend work happened.
 
@@ -210,9 +230,10 @@ happened."
 Copy mode is a core feature, not a backup plan.
 
 If no live agent or adapter is connected, AgentCanvas still creates the pending
-files and shows a clean prompt the user can paste into any coding agent. The
-prompt includes the workspace, pending file paths, acceptance details, status
-commands, and the reminder to test and re-index.
+files for implementation requests and shows a clean prompt the user can paste
+into any coding agent. The prompt includes the workspace, pending file paths,
+acceptance details, status commands, and the reminder to test and re-index after
+code changes.
 
 This keeps AgentCanvas useful before deeper integrations exist.
 
@@ -231,8 +252,9 @@ Current and planned integration paths:
   questions, or completion.
 - **Copy prompt**: always available, even with no adapter installed.
 
-The file contract stays the same across all of them: `.agentcanvas/` is the
-shared source of truth.
+The file contract stays the same across all of them: `workflow.ir.json` grounds
+the repo evidence, `canvas.ir.json` is the display canvas, and pending files are
+for explicit implementation requests.
 
 See [docs/adapters.md](docs/adapters.md) for adapter notes and prompt snippets.
 
@@ -269,14 +291,15 @@ human canvas, but the package does not call a model by itself.
 
 The intended flow is:
 
-1. Read the indexed `source_facts`, projection contract, and any `app_surfaces`.
+1. Read `.agentcanvas/workflow.ir.json`, especially `source_facts`, the
+   projection contract, and any `app_surfaces`.
 2. Ask concise clarifying questions if the intended journey, actor, outcome, or
    evidence is unclear.
 3. Generate a human-readable `agentcanvas.canvas_query.v1` using AgentCanvas
    journey language: `When`, `Do`, `If`, `ElseIf`, and `Else`.
 4. Cite `fact_ids` on every operation and keep files/tests/services as
    provenance or supporting details, not top-level journeys.
-5. Validate, then apply.
+5. Validate, then apply the result to `.agentcanvas/canvas.ir.json`.
 
 If no live model adapter is available, the same prompt can be copied into a
 manual agent/model flow. Progressive partial mapping is acceptable when only
@@ -294,15 +317,19 @@ Write only after validation passes:
 agentcanvas apply-query --workspace /path/to/your/project --query canvas-query.json
 ```
 
+`apply-query` writes the display canvas. It does not overwrite
+`.agentcanvas/workflow.ir.json` or replace repo facts.
+
 See [docs/projection.md](docs/projection.md).
 
 ## Safety Rules
 
+- Canvas-only edits update `.agentcanvas/canvas.ir.json`.
 - AgentCanvas creates requests before source code changes.
 - Agents should read the request before editing.
 - Agents should ask with `needs_input` when the request is unclear.
 - Agents should run the closest relevant test or smoke check.
-- Agents should re-index after implementation.
+- Agents should re-index after implementation to refresh evidence.
 - Agents should not mark a request `done` until the work is verified.
 - Migrations, seeds, deploys, and destructive commands still need explicit user
   permission.

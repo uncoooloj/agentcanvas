@@ -7,12 +7,19 @@ The stable file contract is:
 
 ```text
 <workspace>/.agentcanvas/workflow.ir.json
+<workspace>/.agentcanvas/canvas.ir.json
 <workspace>/.agentcanvas/pending/*.md
 <workspace>/.agentcanvas/pending/*.json
 ```
 
-An adapter should do one job: help an agent pick up a pending request, clarify
-anything unsafe or unclear, implement it, verify it, update status, and re-index.
+`workflow.ir.json` is raw repo evidence. `canvas.ir.json` is the browser display
+canvas. Pending files are for explicit source-code implementation requests.
+
+An adapter should do two small jobs:
+
+- For canvas edits, help the agent update `.agentcanvas/canvas.ir.json`.
+- For implementation requests, help the agent clarify, implement, verify,
+  update status, and re-index to refresh evidence.
 
 ## Four Paths
 
@@ -32,14 +39,17 @@ The skill tells the agent to:
 
 1. run `agentcanvas --help`
 2. index or start the workspace
-3. read `.agentcanvas/pending/*.md`
-4. use `.json` for structured context
-5. inspect the current workspace context before editing
-6. ask concise clarifying questions if the request is ambiguous, risky, or
+3. treat `.agentcanvas/workflow.ir.json` as evidence
+4. treat `.agentcanvas/canvas.ir.json` as the display canvas source of truth
+5. update `.agentcanvas/canvas.ir.json` for canvas-only edits
+6. read `.agentcanvas/pending/*.md` and matching `.json` only for implementation
+   requests
+7. inspect the current workspace context before source-code editing
+8. ask concise clarifying questions if the request is ambiguous, risky, or
    incomplete
-7. update status with `agentcanvas status`
-8. run the relevant tests
-9. re-index with `agentcanvas index`
+9. update status with `agentcanvas status`
+10. run the relevant tests
+11. re-index with `agentcanvas index` after code changes
 
 This is the best first integration because it stays portable and does not need a
 server-to-agent bridge.
@@ -59,7 +69,8 @@ Current endpoints:
 - `POST /api/reindex`
 
 The API is local and token-protected. It should mirror the same state in
-`.agentcanvas/`; it should not become a separate source of truth.
+`.agentcanvas/`; it should not become a separate source of truth. Re-indexing
+refreshes `workflow.ir.json`; it should not be required for canvas-only edits.
 
 ### 3. MCP
 
@@ -68,6 +79,7 @@ Use this when an agent prefers tools instead of shell commands or raw HTTP.
 MCP is a planned path. It should expose the same simple actions:
 
 - get context
+- read or update the display canvas
 - list pending requests
 - create a request
 - update request status
@@ -89,32 +101,43 @@ Webhooks are a planned path. They should handle events like:
 - CI passed or failed
 - reply/note added
 
-Webhook events should update pending records. They should not patch source code.
+Webhook events should update pending records or display-canvas state. They
+should not patch source code.
 
 ## Copy Fallback
 
 Copy mode is always valid.
 
 If no adapter is installed and no live session is connected, AgentCanvas should
-create the pending request and show a prompt the user can paste into any coding
-agent.
+still keep canvas-only edits in `.agentcanvas/canvas.ir.json`. For source-code
+implementation, it should create the pending request and show a prompt the user
+can paste into any coding agent.
 
-The prompt should include:
+The implementation prompt should include:
 
 - workspace path
 - selected pending `.md`
 - matching `.json`
+- current `.agentcanvas/canvas.ir.json` when the canvas context matters
 - acceptance criteria
 - reminder to inspect workspace context before editing
 - instruction to clarify before execution unless the requested change, affected
   flow or step, acceptance criteria, and verification path are clear
 - status commands
-- reminder to test and re-index
+- reminder to test and re-index after code changes
 
 ## Prompt Snippets
 
 Use these snippets when the user wants to hand a request to a specific agent.
 They should work in any AI coding agent that can read files and run commands.
+
+### Canvas Edit Handoff
+
+```text
+Use AgentCanvas for this workspace. Read .agentcanvas/workflow.ir.json for evidence and .agentcanvas/canvas.ir.json for the current display canvas.
+
+Apply the requested canvas edit to .agentcanvas/canvas.ir.json only. Keep the flow human-readable, preserve evidence links where possible, and do not change source code unless the user explicitly asks for implementation. Do not re-index for a canvas-only edit.
+```
 
 ### Portable Handoff
 
@@ -123,13 +146,13 @@ Use AgentCanvas for this workspace. Inspect .agentcanvas/pending, read the selec
 
 If any of those are ambiguous, risky, incomplete, or contradicted by the current workspace, do not enter execution mode yet. Ask the fewest useful clarifying questions in plain language, and update the request with needs_input plus the question.
 
-Once the request is clear, mark it in_progress, make the smallest change that satisfies the acceptance criteria, run the agreed test or smoke check, re-index with agentcanvas index --workspace ., update the request status, and summarize what changed and how it was verified.
+Once the request is clear, mark it in_progress, make the smallest change that satisfies the acceptance criteria, run the agreed test or smoke check, re-index with agentcanvas index --workspace . to refresh evidence, update the request status, and summarize what changed and how it was verified.
 ```
 
 ### Short Handoff
 
 ```text
-Work from .agentcanvas/pending. Read the Markdown request and matching JSON, inspect the current workspace context, and clarify before editing unless the requested change, affected flow or step, acceptance criteria, and verification path are all clear. If clarification is needed, set status to needs_input with concise plain-language questions. Once clear, mark in_progress, implement the smallest focused change, verify it, re-index, and update status.
+Work from .agentcanvas/pending only for explicit source-code implementation. Read the Markdown request and matching JSON, inspect the current workspace context, and clarify before editing unless the requested change, affected flow or step, acceptance criteria, and verification path are all clear. If clarification is needed, set status to needs_input with concise plain-language questions. Once clear, mark in_progress, implement the smallest focused change, verify it, re-index to refresh evidence, and update status.
 ```
 
 ### Needs-Input Status Note
@@ -151,11 +174,13 @@ agentcanvas status --workspace <workspace> <pending-id> --status done --note "Im
 
 - Keep adapters optional.
 - Keep files and CLI commands usable without adapters.
-- Prefer the Markdown request as the readable source.
+- Prefer the Markdown request as the readable source for implementation work.
 - Use JSON for ids, files, node references, and acceptance criteria.
-- Require a clarification pass before execution. The requested change, affected
-  flow or step, acceptance criteria, and verification path must be clear before
-  implementation starts.
+- Update `.agentcanvas/canvas.ir.json` for canvas-only edits.
+- Do not require `agentcanvas index` after canvas-only edits.
+- Require a clarification pass before source-code execution. The requested
+  change, affected flow or step, acceptance criteria, and verification path must
+  be clear before implementation starts.
 - Do not require a specific agent vendor.
 - Do not bypass project safety rules.
 - Do not mark work done until implementation and verification happened.

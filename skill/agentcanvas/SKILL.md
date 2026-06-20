@@ -5,19 +5,32 @@ description: Launch and use AgentCanvas, a local workflow canvas for AI coding a
 
 # AgentCanvas
 
-Use AgentCanvas to turn a workspace into a local workflow canvas and then into
-agent-ready implementation requests.
+Use AgentCanvas to turn a workspace into a local workflow canvas, keep that
+canvas editable, and create implementation requests only when source-code work
+is explicitly needed.
 
-Keep the workflow simple: index, inspect, create/request, clarify, implement,
-verify, update status, re-index.
+Keep the workflow simple: index evidence, translate behavior into the display
+canvas, edit the canvas, and use pending requests only for code implementation.
 
 ## Core Rules
 
 - Treat `.agentcanvas/` as the shared contract.
-- Treat `.agentcanvas/pending/*.md` as the human-readable task brief.
-- Treat `.agentcanvas/pending/*.json` as structured context for tools.
-- Do not edit source code just because a canvas node changed; implement only an
-  explicit pending request.
+- Treat `.agentcanvas/workflow.ir.json` as the raw index and evidence grounding
+  file.
+- Treat `.agentcanvas/canvas.ir.json` as the browser display canvas source of
+  truth.
+- Treat `.agentcanvas/pending/*.md` as the human-readable implementation brief.
+- Treat `.agentcanvas/pending/*.json` as structured implementation context for
+  tools.
+- The invoking agent should translate repo behavior into human-readable flows
+  and write/update `.agentcanvas/canvas.ir.json` progressively.
+- Canvas edits, adds, removes, renames, and re-routes should update
+  `.agentcanvas/canvas.ir.json`.
+- Do not edit source code just because a canvas node changed. Implement source
+  code only when the user explicitly asks or when there is an explicit pending
+  implementation request.
+- Re-indexing refreshes `.agentcanvas/workflow.ir.json`; it is not required
+  after canvas-only edits.
 - Before executing a pending request, inspect the request and current workspace
   context.
 - Start implementation only when the requested change, affected flow or step,
@@ -54,6 +67,8 @@ Index the workspace:
 agentcanvas index --workspace <workspace>
 ```
 
+This writes or refreshes `.agentcanvas/workflow.ir.json`, the raw evidence file.
+
 Start the local canvas:
 
 ```bash
@@ -68,6 +83,10 @@ agentcanvas start --workspace <workspace> --port 8765 --session-id <session-id>
 
 Open the printed URL when your environment can open browsers. Otherwise give
 the URL to the user.
+
+After indexing, make sure `.agentcanvas/canvas.ir.json` exists or is updated
+from the grounded evidence. Keep the display canvas human-readable: use journeys,
+steps, branches, lanes, and provenance instead of a raw file inventory.
 
 ## No Workspace And Demo
 
@@ -87,6 +106,10 @@ In demo mode, keep saying that it is demo mode. Do not imply the demo is the
 user's own repo.
 
 ## Pending Request Loop
+
+Use this loop only for explicit source-code implementation work. For canvas-only
+requests like adding a step, removing a branch, renaming a journey, or re-routing
+a flow, update `.agentcanvas/canvas.ir.json` and do not re-index.
 
 List pending requests:
 
@@ -124,7 +147,8 @@ Only after the request is clear, mark work in progress:
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
 ```
 
-After implementation, run the relevant test or smoke check, then re-index:
+After implementation, run the relevant test or smoke check, then re-index to
+refresh evidence:
 
 ```bash
 agentcanvas index --workspace <workspace>
@@ -138,13 +162,32 @@ agentcanvas status --workspace <workspace> <pending-id> --status done --note "Im
 
 Use `blocked` when progress cannot continue without an external change.
 
+## Canvas Edit Loop
+
+For a canvas-only request:
+
+1. Read `.agentcanvas/workflow.ir.json` for evidence.
+2. Read `.agentcanvas/canvas.ir.json` for the current display canvas.
+3. Apply the edit to `.agentcanvas/canvas.ir.json`.
+4. Preserve evidence ids, source paths, or provenance where possible.
+5. Do not change source code.
+6. Do not run `agentcanvas index` unless the user asks to refresh evidence.
+
+If a requested canvas edit would make a repo behavior claim that is not grounded
+by the current evidence, ask a concise question or mark it as a planned canvas
+change rather than pretending the source already does it.
+
 ## Copy Fallback
 
 When no adapter or live session is available, provide a copyable prompt instead
 of pretending to send work. Copy/manual mode is a supported fallback, not an
 error state.
 
-Include:
+For canvas-only edits, the prompt should tell the agent to update
+`.agentcanvas/canvas.ir.json` and stop. For implementation requests, include the
+pending-request context and status loop.
+
+Implementation prompts should include:
 
 - workspace path
 - pending Markdown path
@@ -155,7 +198,7 @@ Include:
   requested change, affected flow or step, acceptance criteria, or verification
   path is unclear
 - exact status commands
-- reminder to test and re-index
+- reminder to test and re-index after source-code changes
 
 For portable prompt snippets, read `references/agent-prompts.md`.
 
@@ -165,23 +208,27 @@ For portable prompt snippets, read `references/agent-prompts.md`.
 - **Local API**: the browser/server path uses `/api/context`, `/api/graph`,
   `/api/pending`, `/api/changes`, `/api/status`, and `/api/reindex`.
 - **MCP**: if MCP tools exist, use them only as wrappers around the same actions:
-  get context, list pending, create request, update status, and re-index.
+  get context, read/update the display canvas, list pending, create request,
+  update status, and re-index.
 - **Webhooks**: if webhook support exists, use it for status/reply events, not
   direct source edits.
 
-Keep every path aligned with the same pending request lifecycle.
+Keep every path aligned with the same file contract: `workflow.ir.json` grounds
+evidence, `canvas.ir.json` displays the canvas, and pending files carry explicit
+implementation requests.
 
 ## LLM Projection
 
-LLM-assisted projection is the intended path for turning source facts into a
-human-readable canvas. AgentCanvas prepares facts and a provider-neutral
+LLM-assisted projection is the intended path for turning source facts into the
+human-readable display canvas. AgentCanvas prepares facts and a provider-neutral
 contract; the invoking agent or model reads them, asks for clarification if
 needed, generates an `agentcanvas.canvas_query.v1`, validates it, then applies
-it.
+it to `.agentcanvas/canvas.ir.json`.
 
 Before generating or applying a projection, read:
 
 - `.agentcanvas/workflow.ir.json`
+- `.agentcanvas/canvas.ir.json` when it already exists
 - `source_facts`
 - `projection_contract`
 - `source_facts.repo.app_surfaces` when present
@@ -209,11 +256,14 @@ Validate before writing:
 agentcanvas apply-query --workspace <workspace> --query <canvas-query.json> --dry-run
 ```
 
-Apply only after validation passes and the user wants it:
+Apply only after validation passes and the user wants the display canvas written:
 
 ```bash
 agentcanvas apply-query --workspace <workspace> --query <canvas-query.json>
 ```
+
+`apply-query` writes the display canvas. It does not overwrite
+`.agentcanvas/workflow.ir.json` or replace the raw facts.
 
 If no live model or adapter is available, use copy/manual mode: give the
 projection prompt, response schema, source facts, dry-run command, and apply

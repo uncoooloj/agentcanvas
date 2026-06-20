@@ -1,25 +1,51 @@
 # Projection Contract
 
-Projection is how AgentCanvas turns code facts into a canvas a person can read.
+Projection is how AgentCanvas turns repo evidence into a canvas a person can
+read.
 
-AgentCanvas does not need to be the model provider. It should prepare grounded
-facts, ask a caller model or agent for a canvas query, validate the answer, and
-only then write it.
+AgentCanvas does not need to be the model provider. It prepares grounded facts;
+the invoking agent or caller model turns those facts into human-readable flows,
+validates the result, and writes the display canvas.
 
 The caller may be any coding agent, model wrapper, MCP tool, local API client, or
 manual copy/paste flow. The contract is the same in each path.
+
+## File Contract
+
+The current contract separates raw evidence from the browser canvas:
+
+```text
+<workspace>/.agentcanvas/workflow.ir.json
+<workspace>/.agentcanvas/canvas.ir.json
+```
+
+`workflow.ir.json` is the raw index and evidence grounding file. Re-indexing
+refreshes this file from the repo.
+
+`canvas.ir.json` is the browser display canvas source of truth. The invoking
+agent should translate repo behavior into readable AgentCanvas flows and update
+this file progressively as the user edits the canvas.
+
+Canvas-only edits, such as adding a step, removing a branch, renaming a journey,
+or re-routing a flow, should update `canvas.ir.json`. They should not require
+re-indexing, because no repo evidence changed.
+
+`agentcanvas.canvas_query.v1` and `agentcanvas apply-query` are still useful as a
+validation and materialization path. Applying a query writes the display canvas.
+It does not overwrite `workflow.ir.json` or rewrite repo facts.
 
 ## Plain Version
 
 The safe flow is:
 
 1. Index the repo.
-2. Read `source_facts`, the projection contract, and any `app_surfaces`.
+2. Read `.agentcanvas/workflow.ir.json`, especially `source_facts`, the
+   projection contract, and any `app_surfaces`.
 3. Ask clarifying questions if the actor, outcome, affected flow, or evidence is
    unclear.
-4. Ask an LLM or agent to propose a human-readable canvas query.
+4. Ask an LLM or agent to propose human-readable canvas changes.
 5. Validate the JSON it returns.
-6. Materialize the canvas only if validation passes.
+6. Write `.agentcanvas/canvas.ir.json` only if validation passes.
 7. Fall back to a simple grounded view or copy/manual mode if no live adapter is
    available.
 
@@ -65,6 +91,9 @@ Write only after validation passes:
 agentcanvas apply-query --workspace <workspace> --query canvas-query.json
 ```
 
+This command materializes the display canvas. It should preserve the raw
+grounding file and should not be described as overwriting workflow facts.
+
 ## What Facts Should Look Like
 
 Facts should be grounded and cite evidence:
@@ -86,8 +115,10 @@ Facts should be grounded and cite evidence:
 }
 ```
 
-The model or agent returns `agentcanvas.canvas_query.v1` operations. Those
+The model or agent can return `agentcanvas.canvas_query.v1` operations. Those
 operations must reference known fact ids when they make claims about the repo.
+They are instructions for the display canvas, not a replacement for the raw
+index.
 
 ## What The Model Should Generate
 
@@ -116,27 +147,21 @@ the invoking agent should ask concise clarifying questions before applying.
 ## Integration Paths
 
 - **Skill**: the AgentCanvas skill tells an agent how to validate and apply a
-  canvas query instead of writing untrusted JSON straight into the workspace.
+  canvas query into `canvas.ir.json` instead of writing untrusted JSON straight
+  into the workspace.
 - **Local API**: later, the server can expose projection status and materialized
-  canvas files, but validation should stay the gate.
+  canvas files, but validation should stay the gate. Canvas-only edits should
+  update the display canvas, not force a re-index.
 - **MCP**: planned tools can call "build projection prompt", "validate query",
-  and "apply query".
+  and "apply query" for display-canvas writes.
 - **Webhooks**: planned webhooks can report projection success/failure or attach
   external analysis notes.
 - **Manual copy**: the same prompt and schema can be copied into any model or
   coding agent, then applied only after `--dry-run` succeeds.
 
-## Next Product Contract
+## Projection Status
 
-Store the raw and projected views separately:
-
-```text
-<workspace>/.agentcanvas/workflow.ir.json
-<workspace>/.agentcanvas/canvas.query.json
-<workspace>/.agentcanvas/canvas.ir.json
-```
-
-Track projection status:
+An implementation may track projection status:
 
 - `not_projected`
 - `projecting`

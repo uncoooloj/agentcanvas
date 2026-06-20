@@ -3,13 +3,30 @@
 Use these only when a user wants to copy an AgentCanvas request into a specific
 coding agent. The base workflow does not depend on any adapter or vendor.
 
-Always keep the status loop in the prompt: inspect request, inspect workspace
-context, clarify if needed, implement only after the request is clear, verify,
-re-index, update status.
+For canvas-only edits, tell the agent to update `.agentcanvas/canvas.ir.json`
+directly and not change source code.
+
+For source-code implementation, always keep the status loop in the prompt:
+inspect request, inspect workspace context, clarify if needed, implement only
+after the request is clear, verify, re-index to refresh evidence, update status.
 
 For projection prompts, keep the same safety loop: inspect `source_facts` and
 `app_surfaces`, clarify before applying unclear output, generate grounded
-human-readable journeys, validate, then apply.
+human-readable journeys, validate, then apply to `.agentcanvas/canvas.ir.json`.
+
+## Canvas Edit Prompt
+
+```text
+Use AgentCanvas for this workspace:
+<workspace>
+
+Read .agentcanvas/workflow.ir.json for evidence and .agentcanvas/canvas.ir.json for the current display canvas.
+
+Apply this canvas-only edit to .agentcanvas/canvas.ir.json:
+<canvas-edit>
+
+Keep the canvas human-readable. Preserve evidence ids, source paths, or provenance where possible. Do not edit source code, create a pending implementation request, or re-index unless the user explicitly asks for source-code implementation or evidence refresh.
+```
 
 ## Portable Handoff Prompt
 
@@ -18,13 +35,13 @@ Use AgentCanvas for this workspace. Inspect .agentcanvas/pending, read the selec
 
 If any of those are ambiguous, risky, incomplete, or contradicted by the current workspace, do not enter execution mode yet. Ask the fewest useful clarifying questions in plain language, and update the request with needs_input plus the question.
 
-Once the request is clear, mark it in_progress, make the smallest change that satisfies the acceptance criteria, run the agreed test or smoke check, re-index with agentcanvas index --workspace ., update the request status, and summarize what changed and how it was verified.
+Once the request is clear, mark it in_progress, make the smallest change that satisfies the acceptance criteria, run the agreed test or smoke check, re-index with agentcanvas index --workspace . to refresh evidence, update the request status, and summarize what changed and how it was verified.
 ```
 
 ## Short Handoff Prompt
 
 ```text
-Work from .agentcanvas/pending. Read the Markdown request and matching JSON, inspect the current workspace context, and clarify before editing unless the requested change, affected flow or step, acceptance criteria, and verification path are all clear. If clarification is needed, set status to needs_input with concise plain-language questions. Once clear, mark in_progress, implement the smallest focused change, verify it, re-index, and update status.
+Work from .agentcanvas/pending only for explicit source-code implementation. Read the Markdown request and matching JSON, inspect the current workspace context, and clarify before editing unless the requested change, affected flow or step, acceptance criteria, and verification path are all clear. If clarification is needed, set status to needs_input with concise plain-language questions. Once clear, mark in_progress, implement the smallest focused change, verify it, re-index to refresh evidence, and update status.
 ```
 
 ## Needs-Input Status Note
@@ -65,7 +82,7 @@ If anything is unclear, risky, incomplete, or contradicted by the workspace, ask
 
 agentcanvas status --workspace <workspace> <pending-id> --status needs_input --note "I need one decision before editing: <question>"
 
-Once clear, mark the request in_progress, make the smallest change that satisfies the acceptance criteria, run the relevant test or smoke check, re-index with agentcanvas index --workspace <workspace>, then mark the request done:
+Once clear, mark the request in_progress, make the smallest change that satisfies the acceptance criteria, run the relevant test or smoke check, re-index with agentcanvas index --workspace <workspace> to refresh evidence, then mark the request done:
 
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
 agentcanvas index --workspace <workspace>
@@ -78,9 +95,9 @@ agentcanvas status --workspace <workspace> <pending-id> --status done --note "Im
 Use AgentCanvas projection for this workspace:
 <workspace>
 
-Read .agentcanvas/workflow.ir.json, especially source_facts, projection_contract, and source_facts.repo.app_surfaces.
+Read .agentcanvas/workflow.ir.json, especially source_facts, projection_contract, and source_facts.repo.app_surfaces. If .agentcanvas/canvas.ir.json already exists, read it too so updates preserve the current display canvas.
 
-Generate agentcanvas.canvas_query.v1 JSON in llm-assisted mode. Use source_facts and app_surfaces as the only evidence. Create human-readable AgentCanvas journeys using When, Do, If, ElseIf, and Else. Use app_surfaces as lanes, participants, or drilldowns inside journeys. Cite fact_ids on every operation and include useful provenance in node or edge data.
+Generate agentcanvas.canvas_query.v1 JSON in llm-assisted mode. Use source_facts and app_surfaces as the only evidence. Create human-readable AgentCanvas journeys using When, Do, If, ElseIf, and Else. Use app_surfaces as lanes, participants, or drilldowns inside journeys. Cite fact_ids on every operation and include useful provenance in node or edge data. The query should materialize the display canvas in .agentcanvas/canvas.ir.json, not replace workflow facts.
 
 Do not create top-level journeys from a raw file inventory. Files, tests, services, packages, and modules should appear as supporting details, provenance, or supporting nodes.
 
@@ -90,7 +107,9 @@ Validate first:
 
 agentcanvas apply-query --workspace <workspace> --query <canvas-query.json> --dry-run
 
-Apply only after validation passes and the user wants it:
+Apply only after validation passes and the user wants the display canvas written:
 
 agentcanvas apply-query --workspace <workspace> --query <canvas-query.json>
+
+This writes .agentcanvas/canvas.ir.json. It does not overwrite .agentcanvas/workflow.ir.json.
 ```

@@ -121,7 +121,7 @@ export const DEMO_MODEL: AppModel = {
   ],
 }
 
-export function emptyAppModel(appName = "Your app", thin = true): AppModel {
+export function emptyAppModel(appName = "Your project", thin = true): AppModel {
   return {
     appName,
     journeys: [],

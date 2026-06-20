@@ -12,7 +12,7 @@ export type AppContext = {
 }
 
 const DEMO_CONTEXT: AppContext = {
-  workspace: "Your app",
+  workspace: "Your project",
   workspacePath: "",
   assistant: "Your assistant",
   assistantId: "generic",

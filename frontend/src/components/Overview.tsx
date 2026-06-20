@@ -48,7 +48,7 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
     })
   }, [journeys, query])
 
-  const displayName = appName.trim() || "your app"
+  const displayName = appName.trim() || "your project"
   const total = journeys.length
   const hasQuery = query.trim().length > 0
 
@@ -56,11 +56,10 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
     <div className="mx-auto max-w-5xl px-6 pb-36">
       <header className="pt-12 text-center">
         <h1 className="text-2xl font-semibold tracking-tight sm:text-[28px]">
-          What {displayName.toLowerCase()} does
+          What {displayName} does
         </h1>
         <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-muted-foreground">
-          Each card is a moment someone uses your app. Open one to see exactly what happens, in
-          plain language.
+          Each card is a plain-English flow. Open one to see what happens and why.
         </p>
       </header>
 

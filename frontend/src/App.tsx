@@ -749,8 +749,8 @@ function DemoBanner({ thin }: { thin?: boolean }) {
   return (
     <div className="border-b bg-accent/40 px-6 py-2.5 text-center text-xs text-accent-foreground">
       {thin
-        ? "We're still learning your app. Here's what we can see so far."
-        : "This is an example. Open AgentCanvas inside your own project to see what your app does."}
+        ? "We're still learning this project. Here's what we can see so far."
+        : "This is an example. Open AgentCanvas inside your own project to see what it does."}
     </div>
   )
 }

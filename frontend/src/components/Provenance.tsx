@@ -29,7 +29,7 @@ export function Provenance({
           {context.workspace}
         </span>
         <span className="text-sm text-muted-foreground hidden md:inline truncate">
-          · what your app does
+          · what this project does
         </span>
       </div>
 

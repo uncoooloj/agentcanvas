@@ -4,8 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from urllib.parse import urlparse
+from unittest.mock import patch
 
 from agentcanvas.core import build_behavior_canvas
+from agentcanvas import indexer
 from agentcanvas.indexer import build_workflow_ir, index_workspace
 from agentcanvas.server import make_handler
 
@@ -195,6 +197,46 @@ def main():
             refreshed_titles = [journey["title"] for journey in fake.response["payload"]["canvas"]["journeys"]]
 
             self.assertIn("`agentcanvas status`", refreshed_titles)
+
+    def test_manifest_surfaces_survive_source_file_truncation(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            source_path = (root / "src" / "main.ts").resolve()
+            _write(root, "src/main.ts", "export function main() {}\n")
+            _write(
+                root,
+                "sdk/typescript/package.json",
+                json.dumps(
+                    {
+                        "name": "@example/typescript-sdk",
+                        "scripts": {"build": "tsc -b", "test": "vitest run"},
+                        "dependencies": {"typescript": "latest"},
+                    }
+                ),
+            )
+            _write(
+                root,
+                "sdk/python/pyproject.toml",
+                "\n".join(["[project]", 'name = "example-python-sdk"', ""]),
+            )
+
+            with patch.object(indexer, "discover_files", return_value=([source_path], True)):
+                workflow_ir = build_workflow_ir(root)
+
+            manifests = {
+                manifest["path"]
+                for manifest in workflow_ir["package"]["manifests"]
+            }
+            surface_roots = {
+                surface["root"]
+                for surface in workflow_ir["app_surfaces"]
+            }
+
+            self.assertIn("sdk/typescript/package.json", manifests)
+            self.assertIn("sdk/typescript", surface_roots)
+            self.assertIn("sdk/python", surface_roots)
+            self.assertTrue(workflow_ir["summary"]["source_file_scan_truncated"])
+            self.assertGreaterEqual(workflow_ir["summary"]["manifest_files_seen"], 2)
 
 
 if __name__ == "__main__":

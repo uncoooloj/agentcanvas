@@ -17,6 +17,7 @@ from .core import (
     detect_app_surfaces,
     enrich_app_surfaces,
 )
+from .core.app_surface import SUPPORTED_MANIFESTS
 from .ir import SCHEMA, now_utc, resolve_workspace, save_ir, summarize_ir
 from .languages import (
     dart_lang,
@@ -132,9 +133,11 @@ def index_workspace(workspace: str | Path) -> Dict[str, Any]:
 def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
     root = resolve_workspace(workspace)
     discovered, truncated = discover_files(root)
-    package_info = collect_package_info(root, discovered)
+    manifest_files, manifest_truncated = discover_manifest_files(root)
+    catalog_files = sorted({*discovered, *manifest_files})
+    package_info = collect_package_info(root, catalog_files)
     git = collect_git_info(root)
-    app_surfaces = detect_app_surfaces(root, discovered)
+    app_surfaces = detect_app_surfaces(root, catalog_files)
 
     source_paths = [path for path in discovered if is_source_file(path)]
     source_set = {to_posix(path.relative_to(root)) for path in source_paths}
@@ -176,6 +179,7 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
         },
         "summary": {
             "files_seen": len(discovered),
+            "manifest_files_seen": len(manifest_files),
             "source_files": len(file_infos),
             "test_files": len(tests),
             "imports": import_count,
@@ -184,7 +188,9 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
             "app_surfaces": len(app_surfaces),
             "components": len(components),
             "changed_files": len(changed_path_set),
-            "truncated": truncated,
+            "truncated": truncated or manifest_truncated,
+            "source_file_scan_truncated": truncated,
+            "manifest_scan_truncated": manifest_truncated,
         },
         "package": package_info,
         "git": git,
@@ -236,6 +242,33 @@ def discover_files(root: Path) -> Tuple[List[Path], bool]:
                 continue
             files.append(path)
             if len(files) >= MAX_INDEXED_FILES:
+                return sorted(files), True
+
+    return sorted(files), truncated
+
+
+def discover_manifest_files(root: Path, *, max_manifests: int = 2000) -> Tuple[List[Path], bool]:
+    """Find project manifests without using the source-file analysis cap."""
+
+    files: List[Path] = []
+    truncated = False
+    ignore_patterns = load_ignore_patterns(root)
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            dirname
+            for dirname in dirnames
+            if should_descend_into(root, Path(dirpath) / dirname, ignore_patterns)
+        ]
+
+        for filename in filenames:
+            if filename not in SUPPORTED_MANIFESTS:
+                continue
+            path = Path(dirpath) / filename
+            if is_ignored_path(to_posix(path.relative_to(root)), ignore_patterns):
+                continue
+            files.append(path)
+            if len(files) >= max_manifests:
                 return sorted(files), True
 
     return sorted(files), truncated

@@ -13,8 +13,11 @@ can turn those facts into a cleaner canvas, but the facts need to be honest.
 The pipeline is:
 
 ```text
-language module -> source_facts.v1 -> projection contract -> canvas_query.v1 -> workflow.ir.json
+language module -> workflow.ir.json/source_facts.v1 -> projection contract -> canvas_query.v1 -> canvas.ir.json
 ```
+
+`workflow.ir.json` keeps raw repo evidence. `canvas.ir.json` is the display
+canvas the invoking agent updates for the browser.
 
 ## Checklist
 

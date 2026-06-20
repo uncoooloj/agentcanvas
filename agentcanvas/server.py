@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import mimetypes
 import os
@@ -24,7 +25,7 @@ from .ir import (
     update_pending_status,
     write_pending_change,
 )
-from .core.behavior_canvas import build_behavior_canvas
+from .core.behavior_canvas import BEHAVIOR_CANVAS_SCHEMA, build_behavior_canvas
 
 
 # Known coding-agent platforms that may launch AgentCanvas, with human labels.
@@ -115,8 +116,11 @@ def ensure_ir(workspace: Path) -> None:
 def load_or_build_canvas(workspace: Path, *, refresh: bool = False) -> Dict[str, Any]:
     if not refresh:
         try:
+            canvas = load_canvas_ir(workspace)
+            if is_agent_authored_canvas(canvas):
+                return preserve_agent_authored_canvas(workspace, canvas)
             if canvas_cache_is_fresh(workspace):
-                return load_canvas_ir(workspace)
+                return canvas
         except FileNotFoundError:
             pass
     try:
@@ -126,6 +130,46 @@ def load_or_build_canvas(workspace: Path, *, refresh: bool = False) -> Dict[str,
     canvas = build_behavior_canvas(graph, workspace=workspace)
     save_canvas_ir(workspace, canvas)
     return canvas
+
+
+def is_agent_authored_canvas(canvas: Dict[str, Any]) -> bool:
+    mapping = canvas.get("mapping") if isinstance(canvas.get("mapping"), dict) else {}
+    if mapping.get("mode") == "agent-authored":
+        return True
+    body = canvas.get("canvas") if isinstance(canvas.get("canvas"), dict) else canvas
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    projection = metadata.get("projection") if isinstance(metadata.get("projection"), dict) else {}
+    if projection.get("mode") == "agent-authored":
+        return True
+    return body.get("schema") == BEHAVIOR_CANVAS_SCHEMA and projection.get("mode") != "deterministic"
+
+
+def preserve_agent_authored_canvas(workspace: Path, canvas: Dict[str, Any]) -> Dict[str, Any]:
+    if canvas_cache_is_fresh(workspace):
+        return canvas
+    warning = (
+        "Workspace evidence was refreshed after this agent-authored canvas. "
+        "AgentCanvas kept the canvas file; ask the connected agent to refresh the map if behavior changed."
+    )
+    return with_canvas_warning(canvas, warning)
+
+
+def with_canvas_warning(canvas: Dict[str, Any], warning: str) -> Dict[str, Any]:
+    next_canvas = deepcopy(canvas)
+    mapping = next_canvas.setdefault("mapping", {})
+    if isinstance(mapping, dict):
+        warnings = mapping.setdefault("warnings", [])
+        if isinstance(warnings, list) and warning not in warnings:
+            warnings.append(warning)
+    body = next_canvas.get("canvas") if isinstance(next_canvas.get("canvas"), dict) else next_canvas
+    metadata = body.setdefault("metadata", {})
+    if isinstance(metadata, dict):
+        projection = metadata.setdefault("projection", {})
+        if isinstance(projection, dict):
+            warnings = projection.setdefault("warnings", [])
+            if isinstance(warnings, list) and warning not in warnings:
+                warnings.append(warning)
+    return next_canvas
 
 
 def canvas_cache_is_fresh(workspace: Path) -> bool:
@@ -250,8 +294,15 @@ def make_handler(
 
             if parsed.path == "/api/reindex":
                 graph = index_workspace(workspace)
-                canvas = build_behavior_canvas(graph, workspace=workspace)
-                save_canvas_ir(workspace, canvas)
+                try:
+                    existing_canvas = load_canvas_ir(workspace)
+                except FileNotFoundError:
+                    existing_canvas = None
+                if existing_canvas and is_agent_authored_canvas(existing_canvas):
+                    canvas = preserve_agent_authored_canvas(workspace, existing_canvas)
+                else:
+                    canvas = build_behavior_canvas(graph, workspace=workspace)
+                    save_canvas_ir(workspace, canvas)
                 self.write_json(
                     {
                         "ok": True,

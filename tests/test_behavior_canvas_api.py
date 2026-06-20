@@ -9,6 +9,7 @@ from unittest.mock import patch
 from agentcanvas.core import build_behavior_canvas
 from agentcanvas import indexer
 from agentcanvas.indexer import build_workflow_ir, index_workspace
+from agentcanvas.ir import save_canvas_ir
 from agentcanvas.server import make_handler
 
 
@@ -197,6 +198,72 @@ def main():
             refreshed_titles = [journey["title"] for journey in fake.response["payload"]["canvas"]["journeys"]]
 
             self.assertIn("`agentcanvas status`", refreshed_titles)
+
+    def test_reindex_preserves_agent_authored_canvas(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            _agentcanvas_like_workspace(root)
+            authored_canvas = {
+                "schema": "agentcanvas.behavior_canvas_response.v1",
+                "version": "0.1.0",
+                "canvas": {
+                    "schema": "agentcanvas.behavior_canvas.v1",
+                    "version": "0.1.0",
+                    "appName": "Use AgentCanvas",
+                    "journeys": [
+                        {
+                            "id": "agent-authored-signup",
+                            "title": "Signup",
+                            "summary": "Agent-authored signup map.",
+                            "entry": "Someone signs up",
+                            "nodes": [
+                                {
+                                    "kind": "step",
+                                    "id": "signup-when",
+                                    "role": "when",
+                                    "text": "Someone signs up",
+                                },
+                                {
+                                    "kind": "step",
+                                    "id": "signup-do",
+                                    "role": "do",
+                                    "text": "Create the account",
+                                },
+                            ],
+                        }
+                    ],
+                    "isDemo": False,
+                    "thin": True,
+                    "metadata": {"projection": {"mode": "agent-authored", "warnings": []}},
+                },
+                "mapping": {
+                    "schema": "agentcanvas.canvas_mapping.v1",
+                    "status": "ready",
+                    "mode": "agent-authored",
+                    "primaryMode": "agent-authored",
+                    "flowCount": 1,
+                    "warnings": [],
+                },
+            }
+            index_workspace(root)
+            save_canvas_ir(root, authored_canvas)
+            handler_cls = make_handler(
+                root,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_post(fake, urlparse("/api/reindex?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            payload = fake.response["payload"]
+            self.assertEqual("agent-authored", payload["mapping"]["mode"])
+            self.assertEqual("Signup", payload["canvas"]["journeys"][0]["title"])
+            with (root / ".agentcanvas" / "canvas.ir.json").open(encoding="utf-8") as handle:
+                persisted = json.load(handle)
+            self.assertEqual("Signup", persisted["canvas"]["journeys"][0]["title"])
 
     def test_manifest_surfaces_survive_source_file_truncation(self):
         with tempfile.TemporaryDirectory() as temp_root:

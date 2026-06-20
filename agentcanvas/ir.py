@@ -177,8 +177,17 @@ def _markdown_for_pending(record: Dict[str, Any]) -> str:
         "",
         "## Agent Handoff",
         "",
-        "Apply this request only after checking the current workspace state. "
-        "Prefer a small, reviewable change.",
+        "Read the current workspace state before acting. If anything about the "
+        "request is unclear, ask the user a focused clarification question before "
+        "moving into execution.",
+        "",
+        "If this is a canvas-authoring request, update "
+        "`.agentcanvas/canvas.ir.json` so the browser reflects the new map. Do "
+        "not re-index after a canvas-only edit.",
+        "",
+        "If the user explicitly asked for a source-code implementation, patch the "
+        "app code, run the relevant checks, then re-index so the evidence file "
+        "matches the implementation.",
         "",
         "If you are already running while the user edits AgentCanvas, poll for "
         "ready requests with:",
@@ -199,10 +208,11 @@ def _markdown_for_pending(record: Dict[str, Any]) -> str:
         f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status needs_input --note \"What I need from you...\"",
         "```",
         "",
-        "When finished, run the relevant tests, re-index, then mark it done:",
+        "When finished, mark it done. Only run `agentcanvas index` first if you "
+        "changed source code:",
         "",
         "```bash",
-        f"agentcanvas index --workspace {json.dumps(record.get('workspace') or '.')}",
+        f"# Source-code changes only: agentcanvas index --workspace {json.dumps(record.get('workspace') or '.')}",
         f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status done --note \"Implemented and verified.\"",
         "```",
         "",

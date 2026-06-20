@@ -9,6 +9,7 @@ from .app_surface import (
 )
 from .behavior_canvas import (
     BEHAVIOR_CANVAS_SCHEMA,
+    build_agent_authored_canvas,
     build_behavior_canvas,
     parse_pyproject_scripts,
     workflow_ir_to_behavior_canvas,
@@ -69,6 +70,7 @@ __all__ = [
     "app_surface_for_path",
     "app_surface_id_for_path",
     "all_fact_ids",
+    "build_agent_authored_canvas",
     "build_behavior_canvas",
     "detect_app_surfaces",
     "enrich_app_surfaces",

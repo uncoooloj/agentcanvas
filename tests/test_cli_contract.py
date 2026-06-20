@@ -298,10 +298,20 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             )
 
             with (workspace / ".agentcanvas" / "workflow.ir.json").open(encoding="utf-8") as handle:
-                materialized = json.load(handle)
-            self.assertEqual(materialized["projection"]["mode"], "llm-assisted")
-            self.assertEqual(len(materialized["nodes"]), 2)
-            self.assertIn("source_facts", materialized)
+                workflow_ir = json.load(handle)
+            with (workspace / ".agentcanvas" / "canvas.ir.json").open(encoding="utf-8") as handle:
+                canvas_ir = json.load(handle)
+
+            self.assertIn("source_facts", workflow_ir)
+            self.assertEqual(canvas_ir["schema"], "agentcanvas.behavior_canvas_response.v1")
+            self.assertEqual(canvas_ir["mapping"]["mode"], "agent-authored")
+            self.assertEqual(canvas_ir["mapping"]["flowCount"], 1)
+            journey = canvas_ir["canvas"]["journeys"][0]
+            self.assertEqual(journey["entry"], "Someone starts checkout")
+            self.assertEqual(
+                [node["text"] for node in journey["nodes"]],
+                ["Someone starts checkout", "Submit the order"],
+            )
 
 
 if __name__ == "__main__":

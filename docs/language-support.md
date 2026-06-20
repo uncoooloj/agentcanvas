@@ -22,14 +22,16 @@ LLM-assisted canvas_query.v1
   |
   | validation + materialization
   v
-workflow.ir.json
+canvas.ir.json
   |
   v
 AgentCanvas UI
 ```
 
-The indexer can also keep deterministic fallback graph nodes and edges, but the
-LLM-assisted path is expected to produce the best human-readable journeys.
+The indexer keeps deterministic fallback graph nodes and edges in
+`workflow.ir.json`, but the LLM-assisted path writes the browser display canvas
+to `canvas.ir.json`. Language modules ground evidence; they should not try to
+narrate the whole product on their own.
 
 ## What A Language Module Must Do
 
@@ -191,11 +193,15 @@ grounded facts with enough evidence for an LLM to safely translate:
 - "this queue/job/event can start behavior without a user request"
 
 The projection layer then asks the caller LLM to produce `canvas_query.v1`. The
-response must cite `fact_ids`, then AgentCanvas validates and materializes it:
+response must cite `fact_ids`, then AgentCanvas validates and materializes the
+display canvas:
 
 ```bash
 agentcanvas apply-query --workspace <workspace> --query canvas-query.json
 ```
+
+This writes `.agentcanvas/canvas.ir.json`. It does not overwrite
+`.agentcanvas/workflow.ir.json`.
 
 The projected canvas should be a human-readable journey, not a raw inventory of
 files. It should use AgentCanvas step language (`When`, `Do`, `If`, `ElseIf`,

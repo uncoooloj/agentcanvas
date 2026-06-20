@@ -227,6 +227,313 @@ def build_behavior_canvas(
     }
 
 
+def build_agent_authored_canvas(
+    canvas_model: Mapping[str, Any],
+    *,
+    workspace: Optional[str | Path] = None,
+    canvas_query: Optional[Mapping[str, Any]] = None,
+    is_demo: bool = False,
+) -> Dict[str, Any]:
+    """Build the persisted API response from an agent-authored canvas model.
+
+    ``canvas_model`` is the validated graph shape produced by ``apply-query``.
+    This converts that graph into the human-facing behavior canvas without
+    treating the graph as fresh index evidence.
+    """
+
+    canvas = _agent_authored_behavior_canvas(
+        canvas_model,
+        workspace=workspace,
+        canvas_query=canvas_query,
+        is_demo=is_demo,
+    )
+    warnings = (
+        (canvas.get("metadata") or {})
+        .get("projection", {})
+        .get("warnings", [])
+    )
+    return {
+        "schema": BEHAVIOR_CANVAS_WRAPPER_SCHEMA,
+        "version": "0.1.0",
+        "canvas": canvas,
+        "mapping": {
+            "schema": CANVAS_MAPPING_SCHEMA,
+            "status": "ready",
+            "mode": "agent-authored",
+            "primaryMode": "agent-authored",
+            "flowCount": len(canvas.get("journeys") or []),
+            "warnings": warnings,
+            "stages": [
+                {
+                    "id": "evidence",
+                    "label": "Read workspace evidence",
+                    "status": "done",
+                },
+                {
+                    "id": "agent-map",
+                    "label": "Agent wrote behavior canvas",
+                    "status": "done",
+                },
+                {
+                    "id": "canvas",
+                    "label": "Browser canvas ready",
+                    "status": "ready",
+                },
+            ],
+        },
+    }
+
+
+def _agent_authored_behavior_canvas(
+    canvas_model: Mapping[str, Any],
+    *,
+    workspace: Optional[str | Path] = None,
+    canvas_query: Optional[Mapping[str, Any]] = None,
+    is_demo: bool = False,
+) -> Dict[str, Any]:
+    workspace_info = canvas_model.get("workspace") if isinstance(canvas_model.get("workspace"), Mapping) else {}
+    workspace_name = str(
+        workspace_info.get("name")
+        or (Path(workspace).name if workspace is not None else "")
+        or "Your app"
+    )
+    journeys = _agent_annotation_journeys(canvas_model)
+    if not journeys:
+        journeys = _agent_graph_journeys(canvas_model)
+
+    ordered = sorted(journeys, key=lambda item: item.sort_key)[:MAX_JOURNEYS]
+    projection = canvas_model.get("projection") if isinstance(canvas_model.get("projection"), Mapping) else {}
+    query_mode = (
+        str(canvas_query.get("mode"))
+        if isinstance(canvas_query, Mapping) and canvas_query.get("mode")
+        else str(projection.get("mode") or "agent-authored")
+    )
+    raw_warnings = list(projection.get("warnings") or [])
+    if isinstance(canvas_query, Mapping):
+        raw_warnings.extend(canvas_query.get("warnings") or [])
+    warnings = [str(item) for item in raw_warnings if item]
+    if not ordered:
+        warnings.append("Agent-authored canvas had no displayable flows.")
+
+    return {
+        "schema": BEHAVIOR_CANVAS_SCHEMA,
+        "version": "0.1.0",
+        "appName": _human_title(workspace_name),
+        "journeys": [journey.to_dict() for journey in ordered],
+        "isDemo": bool(is_demo),
+        "thin": len(ordered) <= 2,
+        "metadata": {
+            "source_schema": canvas_model.get("schema"),
+            "workspace": str(workspace) if workspace is not None else workspace_info.get("root"),
+            "generated_at": canvas_model.get("generated_at"),
+            "summary": canvas_model.get("summary") or {},
+            "projection": {
+                "mode": "agent-authored",
+                "query_mode": query_mode,
+                "warnings": _dedupe(warnings),
+            },
+        },
+    }
+
+
+def _agent_annotation_journeys(canvas_model: Mapping[str, Any]) -> List[_Journey]:
+    journeys: Dict[str, _Journey] = {}
+    for node in canvas_model.get("nodes") or []:
+        if not isinstance(node, Mapping):
+            continue
+        data = node.get("data") if isinstance(node.get("data"), Mapping) else {}
+        journey_data = data.get("journey") if isinstance(data.get("journey"), Mapping) else None
+        if not journey_data:
+            continue
+
+        journey_id = str(journey_data.get("id") or node.get("id") or node.get("label") or "agent-flow")
+        title = str(journey_data.get("title") or node.get("label") or "Agent-authored flow")
+        entry = str(journey_data.get("entry") or title)
+        summary = str(journey_data.get("summary") or "Mapped by the connected agent from workspace evidence.")
+        raw_steps = journey_data.get("steps") if isinstance(journey_data.get("steps"), list) else []
+        refs = _agent_refs(node)
+        steps: List[Tuple[str, str, Iterable[str]]] = []
+        for index, raw_step in enumerate(raw_steps):
+            if not isinstance(raw_step, Mapping):
+                continue
+            role = _agent_step_role(raw_step, index)
+            text = _agent_step_text(raw_step, default=("Someone starts this flow" if index == 0 else "Do the next step"))
+            steps.append((role, text, [*refs, *_agent_refs(raw_step)]))
+        if not steps:
+            steps = [("when", entry, refs), ("do", title, refs)]
+
+        order = journey_data.get("order")
+        sort_index = int(order) if isinstance(order, int) else 20
+        journeys.setdefault(
+            journey_id,
+            _journey(
+                journey_id=f"agent:{journey_id}",
+                title=_sentence(title),
+                summary=summary,
+                entry=entry,
+                sort_key=(sort_index, title.lower()),
+                steps=steps,
+                refs=refs,
+                metadata={"projection": "agent-authored"},
+            ),
+        )
+    return list(journeys.values())
+
+
+def _agent_graph_journeys(canvas_model: Mapping[str, Any]) -> List[_Journey]:
+    nodes = [node for node in canvas_model.get("nodes") or [] if isinstance(node, Mapping)]
+    if not nodes:
+        return []
+
+    nodes_by_id = {str(node.get("id")): node for node in nodes if node.get("id")}
+    outgoing: Dict[str, List[Tuple[str, Mapping[str, Any]]]] = {}
+    incoming: set[str] = set()
+    for edge in canvas_model.get("edges") or []:
+        if not isinstance(edge, Mapping):
+            continue
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if source not in nodes_by_id or target not in nodes_by_id:
+            continue
+        outgoing.setdefault(source, []).append((target, edge))
+        incoming.add(target)
+
+    for edge_list in outgoing.values():
+        edge_list.sort(key=lambda item: (str(item[1].get("kind") or ""), item[0]))
+
+    start_ids = _dedupe(
+        [
+            str(node.get("id"))
+            for node in nodes
+            if node.get("id") and (str(node.get("id")) not in incoming or _agent_node_looks_like_start(node))
+        ]
+    )
+    if not start_ids:
+        start_ids = [str(nodes[0].get("id"))]
+
+    journeys: List[_Journey] = []
+    consumed: set[str] = set()
+    for start_id in start_ids:
+        if len(journeys) >= MAX_JOURNEYS or start_id in consumed:
+            continue
+        chain = _walk_agent_graph(start_id, nodes_by_id, outgoing)
+        if not chain:
+            continue
+        consumed.update(str(node.get("id")) for node in chain if node.get("id"))
+        journeys.append(_journey_from_agent_chain(chain, len(journeys)))
+
+    return journeys
+
+
+def _walk_agent_graph(
+    start_id: str,
+    nodes_by_id: Mapping[str, Mapping[str, Any]],
+    outgoing: Mapping[str, List[Tuple[str, Mapping[str, Any]]]],
+) -> List[Mapping[str, Any]]:
+    chain: List[Mapping[str, Any]] = []
+    current = start_id
+    seen: set[str] = set()
+    while current in nodes_by_id and current not in seen and len(chain) < 12:
+        seen.add(current)
+        chain.append(nodes_by_id[current])
+        next_edges = outgoing.get(current) or []
+        if not next_edges:
+            break
+        current = next_edges[0][0]
+    return chain
+
+
+def _journey_from_agent_chain(chain: Sequence[Mapping[str, Any]], index: int) -> _Journey:
+    first = chain[0]
+    title = _agent_journey_title(first)
+    entry = _agent_step_text(first, default="Someone starts this flow")
+    refs = _dedupe(ref for node in chain for ref in _agent_refs(node))
+    steps: List[Tuple[str, str, Iterable[str]]] = []
+    for step_index, node in enumerate(chain):
+        role = _agent_step_role(node, step_index)
+        text = _agent_step_text(node, default=("Someone starts this flow" if step_index == 0 else "Do the next step"))
+        steps.append((role, text, _agent_refs(node)))
+
+    return _journey(
+        journey_id=f"agent:{first.get('id') or title}",
+        title=title,
+        summary="Mapped by the connected agent from workspace evidence.",
+        entry=entry,
+        sort_key=(20 + index, title.lower()),
+        steps=steps,
+        refs=refs,
+        metadata={"projection": "agent-authored"},
+    )
+
+
+def _agent_journey_title(node: Mapping[str, Any]) -> str:
+    label = _agent_step_text(node, default="Agent-authored flow")
+    match = re.match(
+        r"^(?:someone|a user|the user)\s+(?:starts|opens|uses|runs|submits|requests|triggers|visits)\s+(.+)$",
+        label,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return _human_title(match.group(1))
+    return _human_title(label)
+
+
+def _agent_node_looks_like_start(node: Mapping[str, Any]) -> bool:
+    node_type = str(node.get("type") or "").lower()
+    node_id = str(node.get("id") or "").lower()
+    label = str(node.get("label") or "").lower()
+    return (
+        node_type in {"command", "entrypoint", "event", "page", "route", "screen", "trigger", "when"}
+        or node_id.startswith("when:")
+        or label.startswith(("someone ", "a user ", "the user "))
+    )
+
+
+def _agent_step_role(item: Mapping[str, Any], index: int) -> str:
+    raw = str(item.get("role") or item.get("kind") or item.get("type") or "").lower()
+    if raw in {"when", "trigger", "event", "route", "screen", "page", "command", "entrypoint"}:
+        return "when" if index == 0 else "do"
+    return "when" if index == 0 else "do"
+
+
+def _agent_step_text(item: Mapping[str, Any], *, default: str) -> str:
+    for key in ("text", "label", "title", "name"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return _sentence(value.strip())
+    return default
+
+
+def _agent_refs(item: Mapping[str, Any]) -> List[str]:
+    refs: List[str] = []
+    path = item.get("path")
+    if isinstance(path, str):
+        refs.append(_line_ref(path, item.get("line")))
+
+    data = item.get("data") if isinstance(item.get("data"), Mapping) else {}
+    projection = data.get("projection") if isinstance(data.get("projection"), Mapping) else {}
+    for fact_id in projection.get("fact_ids") or item.get("fact_ids") or []:
+        if isinstance(fact_id, str):
+            refs.append(fact_id)
+
+    for key in ("refs", "sources"):
+        values = item.get(key)
+        if isinstance(values, list):
+            refs.extend(str(value) for value in values if value)
+
+    provenance = item.get("provenance")
+    if isinstance(provenance, list):
+        for entry in provenance:
+            if not isinstance(entry, Mapping):
+                continue
+            location = entry.get("location") if isinstance(entry.get("location"), Mapping) else {}
+            entry_path = location.get("path") or entry.get("path")
+            if isinstance(entry_path, str):
+                refs.append(_line_ref(entry_path, location.get("line") or entry.get("line")))
+
+    return _dedupe(refs)
+
+
 def _cli_journeys(workflow_ir: Mapping[str, Any], workspace: Optional[Path]) -> List[_Journey]:
     if workspace is None:
         return []

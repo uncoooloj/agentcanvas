@@ -15,10 +15,11 @@ from .ir import (
     list_pending,
     load_ir,
     resolve_workspace,
-    save_ir,
+    save_canvas_ir,
     state_paths,
     update_pending_status,
 )
+from .core import build_agent_authored_canvas
 from .projection import ProjectionValidationError, materialize_canvas_model
 from .server import run_server
 
@@ -74,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     apply_parser = subparsers.add_parser(
         "apply-query",
-        help="validate an LLM canvas query and write it back to workflow IR",
+        help="validate an agent canvas query and write the display canvas",
     )
     apply_parser.add_argument("path", nargs="?", help="workspace path to update")
     apply_parser.add_argument("--workspace", help="workspace path to update")
@@ -82,7 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     apply_parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="validate and summarize without writing workflow IR",
+        help="validate and summarize without writing canvas IR",
     )
     apply_parser.set_defaults(func=cmd_apply_query)
 
@@ -184,17 +185,23 @@ def cmd_apply_query(args: argparse.Namespace) -> int:
         print(f"Canvas query rejected: {exc}")
         return 1
 
-    canvas_model["source_facts"] = workflow_ir.get("source_facts")
-    canvas_model["projection_contract"] = workflow_ir.get("projection_contract")
+    canvas_ir = build_agent_authored_canvas(
+        canvas_model,
+        workspace=workspace,
+        canvas_query=canvas_query,
+    )
 
     if args.dry_run:
         print("Canvas query is valid.")
-        print(format_index_summary(canvas_model))
+        flow_count = len((canvas_ir.get("canvas") or {}).get("journeys") or [])
+        print(f"Display canvas flows: {flow_count}")
         return 0
 
-    save_ir(workspace, canvas_model)
-    print(f"Applied canvas query to {ir_path}")
-    print(format_index_summary(canvas_model))
+    path = save_canvas_ir(workspace, canvas_ir)
+    print(f"Applied canvas query to {path}")
+    print(f"Workflow evidence remains in {ir_path}")
+    flow_count = len((canvas_ir.get("canvas") or {}).get("journeys") or [])
+    print(f"Display canvas flows: {flow_count}")
     return 0
 
 

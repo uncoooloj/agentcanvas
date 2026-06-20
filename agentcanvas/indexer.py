@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 from collections import Counter, defaultdict
+from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -79,6 +80,7 @@ SKIP_DIRS = {
 MAX_INDEXED_FILES = 3000
 MAX_FILE_BYTES = 1_000_000
 MAX_SOURCE_FACTS = 500
+IGNORE_FILE = ".agentcanvasignore"
 
 IMPORT_RE = re.compile(
     r"""
@@ -209,16 +211,19 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
 def discover_files(root: Path) -> Tuple[List[Path], bool]:
     files: List[Path] = []
     truncated = False
+    ignore_patterns = load_ignore_patterns(root)
 
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
             dirname
             for dirname in dirnames
-            if should_descend_into(dirname)
+            if should_descend_into(root, Path(dirpath) / dirname, ignore_patterns)
         ]
 
         for filename in filenames:
             path = Path(dirpath) / filename
+            if is_ignored_path(to_posix(path.relative_to(root)), ignore_patterns):
+                continue
             files.append(path)
             if len(files) >= MAX_INDEXED_FILES:
                 return sorted(files), True
@@ -226,12 +231,63 @@ def discover_files(root: Path) -> Tuple[List[Path], bool]:
     return sorted(files), truncated
 
 
-def should_descend_into(dirname: str) -> bool:
+def load_ignore_patterns(root: Path) -> List[str]:
+    ignore_path = root / IGNORE_FILE
+    text = safe_read_text(ignore_path)
+    if not text:
+        return []
+
+    patterns: List[str] = []
+    for line in text.splitlines():
+        pattern = line.strip()
+        if not pattern or pattern.startswith("#"):
+            continue
+        patterns.append(pattern.lstrip("/"))
+    return patterns
+
+
+def should_descend_into(root: Path, path: Path, ignore_patterns: Sequence[str]) -> bool:
+    dirname = path.name
     if dirname in SKIP_DIRS:
         return False
     if dirname.startswith(".") and dirname not in {".github"}:
         return False
+    if is_ignored_path(to_posix(path.relative_to(root)), ignore_patterns, directory=True):
+        return False
     return True
+
+
+def is_ignored_path(rel_path: str, patterns: Sequence[str], *, directory: bool = False) -> bool:
+    rel = to_posix(rel_path).strip("/")
+    if not rel:
+        return False
+
+    parts = rel.split("/")
+    basename = parts[-1]
+
+    for raw_pattern in patterns:
+        pattern = raw_pattern.strip().lstrip("/")
+        if not pattern:
+            continue
+
+        directory_only = pattern.endswith("/")
+        pattern = pattern.rstrip("/")
+        if directory_only and not directory:
+            if rel == pattern or rel.startswith(f"{pattern}/"):
+                return True
+            continue
+
+        if "/" not in pattern:
+            if any(fnmatch(part, pattern) for part in parts):
+                return True
+            continue
+
+        if fnmatch(rel, pattern) or rel == pattern or rel.startswith(f"{pattern}/"):
+            return True
+        if fnmatch(basename, pattern):
+            return True
+
+    return False
 
 
 def is_source_file(path: Path) -> bool:

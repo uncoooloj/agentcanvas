@@ -21,14 +21,31 @@ import { Inspector } from "@/components/Inspector"
 import { Provenance } from "@/components/Provenance"
 import { BottomDock } from "@/components/BottomDock"
 import { LandingPage } from "@/components/LandingPage"
-import { DEMO_MODEL, projectToBehavior } from "@/lib/behavioral"
+import { WorkspaceMappingState } from "@/components/WorkspaceMappingState"
+import { DEMO_MODEL, emptyAppModel } from "@/lib/behavioral"
 import { applyChanges, useChanges, type ChangeEntry, type HandoffItem, type Phase } from "@/lib/changeset"
-import { fetchGraph, reindex } from "@/lib/api"
+import { describeApiError, fetchCanvas, reindexCanvas, type CanvasMapping } from "@/lib/api"
 import { useAppContext } from "@/lib/appcontext"
 import type { EditRequest, StagedEdit } from "@/lib/edits"
 import { findNode, type AppModel, type FlowNode, type Journey } from "@/lib/types"
 
 const HOME = "__home__"
+const MAPPING_STAGES = [
+  "Scanning workspace",
+  "Finding app surfaces",
+  "Translating flows",
+  "Preparing canvas",
+]
+
+type CanvasState =
+  | { kind: "idle" | "ready"; notice?: string }
+  | { kind: "loading" | "reindexing" | "empty" | "error"; message?: string; detail?: string; notice?: string }
+
+type WorkspaceModelResult = {
+  model: AppModel
+  mapping?: CanvasMapping
+  notice?: string
+}
 
 export default function App() {
   const navigate = useNavigate()
@@ -42,12 +59,14 @@ export default function App() {
   const go = (to: string) => navigate({ pathname: to, search: location.search })
 
   const { context, loading: contextLoading } = useAppContext()
-  const [model, setModel] = useState<AppModel>(DEMO_MODEL)
+  const [model, setModel] = useState<AppModel>(emptyAppModel())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editRequest, setEditRequest] = useState<EditRequest | null>(null)
   const [leftOpen, setLeftOpen] = useState(true)
-  const [loading, setLoading] = useState(true)
+  const [canvasState, setCanvasState] = useState<CanvasState>({ kind: "loading" })
   const [dark, setDark] = useState(false)
+  const mappingActive = canvasState.kind === "loading" || canvasState.kind === "reindexing"
+  const [mappingStage, setMappingStage] = useState(0)
 
   const phase = useChanges((s) => s.handoff.phase)
   const handoffItems = useChanges((s) => s.handoff.items)
@@ -74,6 +93,15 @@ export default function App() {
     setEditRequest(null)
   }, [view])
 
+  useEffect(() => {
+    if (!mappingActive) return
+
+    const timer = window.setInterval(() => {
+      setMappingStage((current) => Math.min(current + 1, MAPPING_STAGES.length - 1))
+    }, 900)
+    return () => window.clearInterval(timer)
+  }, [mappingActive])
+
   async function load({ refresh = false }: { refresh?: boolean } = {}) {
     // Demo mode shows the curated, hand-authored flows (great first impression);
     // the heuristic projection over real code isn't good enough to lead with yet.
@@ -81,18 +109,34 @@ export default function App() {
     if (context.mode === "demo") {
       setModel((current) => preserveLocalJourneyRecency(DEMO_MODEL, current))
       setSelectedId(null)
-      setLoading(false)
+      setCanvasState({ kind: "ready" })
       return
     }
-    setLoading(true)
+
+    setMappingStage(0)
+    setCanvasState({ kind: refresh ? "reindexing" : "loading" })
     try {
-      const graph = refresh ? await reindex() : await fetchGraph()
-      setModel((current) => preserveLocalJourneyRecency(projectToBehavior(graph), current))
-    } catch {
-      setModel((current) => preserveLocalJourneyRecency(DEMO_MODEL, current))
+      const result = await loadWorkspaceModel(refresh)
+      if (!result.model.journeys.length) {
+        setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
+        setCanvasState({
+          kind: "empty",
+          message: "Workspace map isn't ready yet",
+          detail: emptyWorkspaceDetail(result),
+        })
+      } else {
+        setModel((current) => preserveLocalJourneyRecency(result.model, current))
+        setCanvasState({ kind: "ready", notice: result.notice })
+      }
+    } catch (error) {
+      setModel(emptyAppModel(context.workspace || model.appName || "Your app"))
+      setCanvasState({
+        kind: "error",
+        message: "Couldn't load workspace map",
+        detail: `AgentCanvas could not read the workspace canvas. ${describeApiError(error)}`,
+      })
     } finally {
       setSelectedId(null)
-      setLoading(false)
     }
   }
 
@@ -195,6 +239,23 @@ export default function App() {
   const inJourney = view !== HOME && !!activeJourney
   const appAvailable = !contextLoading && context.mode !== "landing"
   const landing = onWelcome || (!contextLoading && context.mode === "landing")
+  const loading = mappingActive
+  const workspaceState =
+    canvasState.kind === "loading" ||
+    canvasState.kind === "reindexing" ||
+    canvasState.kind === "empty" ||
+    canvasState.kind === "error"
+      ? canvasState
+      : null
+  const headerStatus = model.isDemo
+    ? "Demo"
+    : mappingActive
+      ? MAPPING_STAGES[mappingStage]
+      : canvasState.kind === "empty"
+        ? "Mapping needed"
+        : canvasState.kind === "error"
+          ? "Needs attention"
+          : "Up to date"
 
   if (contextLoading) {
     return (
@@ -237,9 +298,15 @@ export default function App() {
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <span className="mr-1 hidden text-xs text-muted-foreground sm:inline">
-            {loading ? "Reading your app…" : "Up to date"}
+            {headerStatus}
           </span>
-          <Button variant="ghost" size="icon" onClick={() => load({ refresh: true })} aria-label="Refresh">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => load({ refresh: true })}
+            aria-label="Refresh"
+            disabled={loading}
+          >
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </Button>
           <Button variant="ghost" size="icon" onClick={() => setDark((v) => !v)} aria-label="Toggle theme">
@@ -267,7 +334,19 @@ export default function App() {
 
         <main className="min-w-0 flex-1 overflow-auto">
           {(model.isDemo || context.isDemo) && <DemoBanner thin={model.thin} />}
-          {inJourney ? (
+          {!model.isDemo && canvasState.kind === "ready" && canvasState.notice && (
+            <WorkspaceNotice message={canvasState.notice} />
+          )}
+          {workspaceState ? (
+            <WorkspaceMappingState
+              kind={workspaceState.kind}
+              stageIndex={mappingStage}
+              workspaceName={context.workspace || model.appName}
+              message={workspaceState.message}
+              detail={workspaceState.detail}
+              onRetry={() => load({ refresh: true })}
+            />
+          ) : inJourney ? (
             <JourneyView
               journey={activeJourney!}
               selectedId={selectedId}
@@ -326,6 +405,37 @@ export default function App() {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+async function loadWorkspaceModel(refresh: boolean): Promise<WorkspaceModelResult> {
+  const result = refresh ? await reindexCanvas() : await fetchCanvas()
+  return {
+    model: result.model,
+    mapping: result.mapping,
+    notice: mappingNotice(result.mapping),
+  }
+}
+
+function emptyWorkspaceDetail(result: WorkspaceModelResult): string {
+  const source = "The canvas endpoint returned no flows yet."
+  return result.notice ? `${result.notice} ${source}` : source
+}
+
+function mappingNotice(mapping?: CanvasMapping): string | undefined {
+  const warning = mapping?.warnings?.find(Boolean)
+  if (warning) return warning
+  if (mapping?.mode === "heuristic" && mapping.primaryMode === "llm-assisted") {
+    return "This is the grounded starter map. The calling LLM can refine it with the projection contract."
+  }
+  return undefined
+}
+
+function WorkspaceNotice({ message }: { message: string }) {
+  return (
+    <div className="border-b bg-secondary/70 px-6 py-2.5 text-center text-xs text-muted-foreground">
+      {message}
     </div>
   )
 }

@@ -121,6 +121,15 @@ export const DEMO_MODEL: AppModel = {
   ],
 }
 
+export function emptyAppModel(appName = "Your app", thin = true): AppModel {
+  return {
+    appName,
+    journeys: [],
+    isDemo: false,
+    thin,
+  }
+}
+
 // ---- Heuristic projection: code IR -> behavior tree ----
 
 const JOURNEY_RULES: Array<{ id: string; title: string; summary: string; match: RegExp }> = [
@@ -160,7 +169,11 @@ function refsOf(node: CodeNode): string[] {
   const raw = (node.source_refs || node.sources || []) as Array<
     string | { path?: string; file?: string }
   >
-  return raw.map((r) => (typeof r === "string" ? r : r?.path || r?.file || "")).filter(Boolean)
+  const refs = raw.map((r) => (typeof r === "string" ? r : r?.path || r?.file || "")).filter(Boolean)
+  const data = (node as unknown as { path?: string; data?: { file?: string; path?: string } }).data
+  const path = (node as unknown as { path?: string }).path || data?.file || data?.path
+  if (path) refs.push(path)
+  return Array.from(new Set(refs))
 }
 
 function humanize(input: string): string {
@@ -184,12 +197,16 @@ type Role = "when" | "do" | "if"
 function classify(node: CodeNode): Role | null {
   const type = `${node.type || node.kind || ""}`.toLowerCase()
   const text = `${type} ${node.label || node.name || ""} ${refsOf(node).join(" ")}`.toLowerCase()
-  if (/test|spec|coverage/.test(text)) return null
+  const refs = refsOf(node)
+  if (refs.some(isFixtureRef) || /test|spec|coverage/.test(text)) return null
+  if (type === "file") return refs.some(isEntrypointRef) ? "when" : null
+  if (type === "export") return null
+  if (type === "component" || type === "app_surface") return null
   if (/route|endpoint|page|screen|handler|controller|webhook/.test(text)) return "when"
   if (/valid|check|guard|branch|decision|condition|permission/.test(text)) return "if"
   if (/action|service|job|queue|function|mutation|command|send|create|update|delete|charge/.test(text))
     return "do"
-  return "do"
+  return null
 }
 
 function pickJourney(node: CodeNode): { id: string; title: string; summary: string } {
@@ -197,12 +214,30 @@ function pickJourney(node: CodeNode): { id: string; title: string; summary: stri
     node
   ).join(" ")}`
   for (const rule of JOURNEY_RULES) if (rule.match.test(hay)) return rule
-  return { id: "other", title: "Other behaviors", summary: "Everything else your app does." }
+  if (/cli\.py|__main__\.py|command|script/i.test(hay)) {
+    return {
+      id: "commands",
+      title: "Running project commands",
+      summary: "Command-line entrypoints detected in the workspace.",
+    }
+  }
+  if (/api|endpoint|server/i.test(hay)) {
+    return {
+      id: "api",
+      title: "Using the local API",
+      summary: "HTTP/API entrypoints detected in the workspace.",
+    }
+  }
+  return {
+    id: "workspace-entrypoints",
+    title: "Workspace entrypoints",
+    summary: "High-confidence entrypoints detected in the workspace.",
+  }
 }
 
 export function projectToBehavior(graph: CodeGraph | null | undefined): AppModel {
   const nodes = graph?.nodes || []
-  if (!nodes.length) return DEMO_MODEL
+  if (!nodes.length) return emptyAppModel(appNameFromGraph(graph))
 
   const buckets = new Map<string, Journey>()
   let kept = 0
@@ -238,7 +273,7 @@ export function projectToBehavior(graph: CodeGraph | null | undefined): AppModel
   }
 
   const journeys = Array.from(buckets.values()).filter((j) => j.nodes.length)
-  if (!kept || !journeys.length) return { ...DEMO_MODEL, thin: true }
+  if (!kept || !journeys.length) return emptyAppModel(appNameFromGraph(graph))
 
   for (const j of journeys) {
     j.nodes.sort((a, b) => order(a) - order(b))
@@ -246,16 +281,36 @@ export function projectToBehavior(graph: CodeGraph | null | undefined): AppModel
     j.entry = firstWhen?.text || j.title
   }
 
-  const appName =
-    (typeof graph?.workspace === "string" && graph.workspace.split(/[/\\]/).filter(Boolean).pop()) ||
-    "Your app"
-
   return {
-    appName: sentenceCase(humanize(appName)),
+    appName: sentenceCase(humanize(appNameFromGraph(graph))),
     journeys,
     isDemo: false,
     thin: kept < 4,
   }
+}
+
+function isFixtureRef(ref: string): boolean {
+  const normalized = ref.toLowerCase()
+  return /(^|\/)(__tests__|demo_project|demo_projects|examples|fixtures?|tests?)(\/|$)/.test(normalized)
+}
+
+function isEntrypointRef(ref: string): boolean {
+  const normalized = ref.toLowerCase()
+  return /(^|\/)(cli|__main__|main|server|app|index)\.(py|tsx?|jsx?|mjs|cjs)$/.test(normalized)
+}
+
+function appNameFromGraph(graph: CodeGraph | null | undefined): string {
+  if (typeof graph?.workspace === "string") {
+    return graph.workspace.split(/[/\\]/).filter(Boolean).pop() || graph.workspace
+  }
+  if (graph?.workspace && typeof graph.workspace === "object") {
+    const workspace = graph.workspace as Record<string, unknown>
+    if (typeof workspace.name === "string" && workspace.name.trim()) return workspace.name
+    if (typeof workspace.root === "string" && workspace.root.trim()) {
+      return workspace.root.split(/[/\\]/).filter(Boolean).pop() || workspace.root
+    }
+  }
+  return "Your app"
 }
 
 function order(n: FlowNode): number {

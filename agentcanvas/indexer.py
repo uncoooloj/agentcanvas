@@ -81,6 +81,16 @@ MAX_INDEXED_FILES = 3000
 MAX_FILE_BYTES = 1_000_000
 MAX_SOURCE_FACTS = 500
 IGNORE_FILE = ".agentcanvasignore"
+NON_BEHAVIOR_PATH_PARTS = {
+    "__tests__",
+    "demo_project",
+    "demo_projects",
+    "examples",
+    "fixture",
+    "fixtures",
+    "test",
+    "tests",
+}
 
 IMPORT_RE = re.compile(
     r"""
@@ -385,7 +395,7 @@ def build_source_facts(
         repo,
         max_facts=150,
     )
-    facts.extend(base_bundle.get("facts") or [])
+    facts.extend(mark_projection_roles(fact) for fact in base_bundle.get("facts") or [])
 
     if len(facts) > MAX_SOURCE_FACTS:
         warnings.append(
@@ -408,7 +418,7 @@ def canonical_language_facts(
 ) -> List[Dict[str, Any]]:
     language = str(bundle.get("language") or bundle.get("language_family") or default_language)
     return [
-        canonical_language_fact(raw, language, index)
+        mark_projection_roles(canonical_language_fact(raw, language, index))
         for index, raw in enumerate(bundle.get("facts") or [])
         if isinstance(raw, dict)
     ]
@@ -437,6 +447,46 @@ def canonical_language_fact(
         "evidence": language_fact_evidence(raw),
         "confidence": language_fact_confidence(raw_type),
     }
+
+
+def mark_projection_roles(fact: Dict[str, Any]) -> Dict[str, Any]:
+    """Mark facts that are useful evidence but not product behavior sources."""
+
+    paths = [path for path in fact_path_strings(fact) if path]
+    if not any(is_non_behavior_path(path) for path in paths):
+        return fact
+
+    role = "test_fixture" if any(is_test_path(path) for path in paths) else "fixture"
+    attributes = fact.setdefault("attributes", {})
+    if isinstance(attributes, dict):
+        attributes.setdefault("behavior_source", False)
+        attributes.setdefault("is_fixture", True)
+        attributes.setdefault("projection_role", role)
+    fact.setdefault("behavior_source", False)
+    fact.setdefault("is_fixture", True)
+    fact.setdefault("projection_role", role)
+    return fact
+
+
+def fact_path_strings(value: Any) -> List[str]:
+    paths: List[str] = []
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            lowered = str(key).lower()
+            if lowered in {"file", "path", "source", "resolved_path"} and isinstance(item, str):
+                paths.append(to_posix(item))
+            paths.extend(fact_path_strings(item))
+    elif isinstance(value, list):
+        for item in value:
+            paths.extend(fact_path_strings(item))
+    return paths
+
+
+def is_non_behavior_path(path: str) -> bool:
+    if not path or path.startswith("/"):
+        return False
+    parts = {part.lower() for part in PurePosixPath(path).parts}
+    return bool(parts.intersection(NON_BEHAVIOR_PATH_PARTS))
 
 
 def language_fact_subject(raw: Dict[str, Any]) -> str:

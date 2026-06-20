@@ -14,13 +14,17 @@ from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from .indexer import index_workspace
 from .ir import (
+    canvas_ir_path,
     list_pending,
+    load_canvas_ir,
     load_ir,
     resolve_workspace,
+    save_canvas_ir,
     state_paths,
     update_pending_status,
     write_pending_change,
 )
+from .core.behavior_canvas import build_behavior_canvas
 
 
 # Known coding-agent platforms that may launch AgentCanvas, with human labels.
@@ -108,6 +112,32 @@ def ensure_ir(workspace: Path) -> None:
         index_workspace(workspace)
 
 
+def load_or_build_canvas(workspace: Path, *, refresh: bool = False) -> Dict[str, Any]:
+    if not refresh:
+        try:
+            if canvas_cache_is_fresh(workspace):
+                return load_canvas_ir(workspace)
+        except FileNotFoundError:
+            pass
+    try:
+        graph = load_ir(workspace)
+    except FileNotFoundError:
+        graph = index_workspace(workspace)
+    canvas = build_behavior_canvas(graph, workspace=workspace)
+    save_canvas_ir(workspace, canvas)
+    return canvas
+
+
+def canvas_cache_is_fresh(workspace: Path) -> bool:
+    _, ir_path, _ = state_paths(workspace)
+    path = canvas_ir_path(workspace)
+    if not path.exists():
+        return False
+    if not ir_path.exists():
+        return True
+    return path.stat().st_mtime >= ir_path.stat().st_mtime
+
+
 def make_handler(
     workspace: Path,
     token: str,
@@ -168,6 +198,11 @@ def make_handler(
                 self.write_json({"ok": True, "graph": graph})
                 return
 
+            if parsed.path == "/api/canvas":
+                canvas = load_or_build_canvas(workspace)
+                self.write_json({"ok": True, **canvas})
+                return
+
             if parsed.path == "/api/pending":
                 self.write_json({"ok": True, "pending": list_pending(workspace)})
                 return
@@ -215,7 +250,17 @@ def make_handler(
 
             if parsed.path == "/api/reindex":
                 graph = index_workspace(workspace)
-                self.write_json({"ok": True, "graph": graph, "summary": graph["summary"]})
+                canvas = build_behavior_canvas(graph, workspace=workspace)
+                save_canvas_ir(workspace, canvas)
+                self.write_json(
+                    {
+                        "ok": True,
+                        "graph": graph,
+                        "canvas": canvas.get("canvas"),
+                        "mapping": canvas.get("mapping"),
+                        "summary": graph["summary"],
+                    }
+                )
                 return
 
             if parsed.path == "/api/changes":

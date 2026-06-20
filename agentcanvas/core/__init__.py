@@ -7,6 +7,12 @@ from .app_surface import (
     detect_app_surfaces,
     enrich_app_surfaces,
 )
+from .behavior_canvas import (
+    BEHAVIOR_CANVAS_SCHEMA,
+    build_behavior_canvas,
+    parse_pyproject_scripts,
+    workflow_ir_to_behavior_canvas,
+)
 from .mapper import repo_facts_to_canvas_model
 from .model import (
     CANVAS_SCHEMA,
@@ -39,6 +45,7 @@ from .model import (
 )
 
 __all__ = [
+    "BEHAVIOR_CANVAS_SCHEMA",
     "CANVAS_SCHEMA",
     "CORE_SCHEMA",
     "CallFact",
@@ -62,6 +69,7 @@ __all__ = [
     "app_surface_for_path",
     "app_surface_id_for_path",
     "all_fact_ids",
+    "build_behavior_canvas",
     "detect_app_surfaces",
     "enrich_app_surfaces",
     "make_fact_id",
@@ -69,7 +77,9 @@ __all__ = [
     "normalize_http_method",
     "normalize_path",
     "normalize_repo_facts",
+    "parse_pyproject_scripts",
     "repo_facts_to_canvas_model",
     "validate_canvas_model",
     "validate_repo_facts",
+    "workflow_ir_to_behavior_canvas",
 ]

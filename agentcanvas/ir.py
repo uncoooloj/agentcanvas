@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 SCHEMA = "agentcanvas.workflow.v1"
 IR_FILENAME = "workflow.ir.json"
+CANVAS_IR_FILENAME = "canvas.ir.json"
 STATE_DIR_NAME = ".agentcanvas"
 PENDING_DIR_NAME = "pending"
 PENDING_STATUSES = {
@@ -39,6 +40,11 @@ def state_paths(workspace: str | Path) -> Tuple[Path, Path, Path]:
     root = resolve_workspace(workspace)
     state_dir = root / STATE_DIR_NAME
     return state_dir, state_dir / IR_FILENAME, state_dir / PENDING_DIR_NAME
+
+
+def canvas_ir_path(workspace: str | Path) -> Path:
+    root = resolve_workspace(workspace)
+    return root / STATE_DIR_NAME / CANVAS_IR_FILENAME
 
 
 def ensure_state_dirs(workspace: str | Path) -> Tuple[Path, Path, Path]:
@@ -70,9 +76,22 @@ def save_ir(workspace: str | Path, workflow_ir: Dict[str, Any]) -> Path:
     return ir_path
 
 
+def save_canvas_ir(workspace: str | Path, canvas_ir: Dict[str, Any]) -> Path:
+    ensure_state_dirs(workspace)
+    path = canvas_ir_path(workspace)
+    atomic_write_json(path, canvas_ir)
+    return path
+
+
 def load_ir(workspace: str | Path) -> Dict[str, Any]:
     _, ir_path, _ = state_paths(workspace)
     with ir_path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def load_canvas_ir(workspace: str | Path) -> Dict[str, Any]:
+    path = canvas_ir_path(workspace)
+    with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 

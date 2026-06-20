@@ -83,7 +83,7 @@ GEM_FRAMEWORKS = {
     "sinatra": "sinatra",
 }
 
-TYPE_PRIORITY = {"mobile": 4, "web": 3, "backend": 2, "package": 1}
+TYPE_PRIORITY = {"mobile": 5, "web": 4, "backend": 3, "cli": 2, "package": 1}
 
 
 class _SurfaceAccumulator:
@@ -186,6 +186,7 @@ def enrich_app_surfaces(
         surface["source_files"] += 1
         if info.get("is_test"):
             surface["test_files"] += 1
+            continue
 
         for route in info.get("routes") or []:
             if not isinstance(route, Mapping):
@@ -322,6 +323,10 @@ def _classify_manifest(path: Path, rel: str) -> Optional[Dict[str, Any]]:
             scores["backend"] += 1
         elif _contains_any(text, ["fastapi", "django", "flask", "starlette"]):
             scores["backend"] += 3
+        elif _contains_any(text, ["[project.scripts]", "[project.gui-scripts]", "[tool.poetry.scripts]"]):
+            scores["cli"] += 4
+        elif _contains_any(text, ["[tool.setuptools.packages.find]", "[tool.poetry]", "[project]"]):
+            scores["package"] += 1
         if not scores:
             return None
         return _manifest_signal(
@@ -536,6 +541,13 @@ def _entry_hint_for_path(
             return {"kind": "backend-entry", "path": rel, "detail": "service entry"}
         if part_set.intersection({"controllers", "handlers", "routes", "router", "views"}) or "signup" in lowered:
             return {"kind": "backend-handler", "path": rel, "detail": _human_flow_detail(rel)}
+        return None
+
+    if app_type == "cli":
+        if name in {"cli.py", "__main__.py", "main.py"}:
+            return {"kind": "cli-entry", "path": rel, "detail": "command line entry"}
+        if part_set.intersection({"commands", "cli", "cmd"}):
+            return {"kind": "cli-command", "path": rel, "detail": _human_flow_detail(rel)}
         return None
 
     if "signup" in lowered:

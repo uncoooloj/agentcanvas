@@ -4,6 +4,11 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url)
 
+    if (url.pathname === "/") {
+      url.pathname = `${BASE_PATH}/`
+      return Response.redirect(url.toString(), 308)
+    }
+
     if (url.pathname === BASE_PATH) {
       url.pathname = `${BASE_PATH}/`
       return Response.redirect(url.toString(), 308)

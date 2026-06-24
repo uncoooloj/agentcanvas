@@ -84,6 +84,62 @@ export interface AppModel {
   thin?: boolean
 }
 
+export interface MappingStage {
+  id: string
+  label: string
+  status: "pending" | "active" | "done" | "ready" | "error"
+  detail?: string
+}
+
+export interface CanvasMapping {
+  schema?: string
+  status?: string
+  mode?: string
+  primaryMode?: string
+  fallbackMode?: string
+  flowCount?: number
+  displayFlowCount?: number
+  stale?: boolean
+  empty?: boolean
+  demoFallback?: boolean
+  cacheStatus?: string
+  source?: CanvasSourceMetadata
+  warnings?: string[]
+  stages?: MappingStage[]
+}
+
+export interface CanvasSourceMetadata {
+  kind?: string
+  status?: string
+  label?: string
+  reason?: string
+  flowCount?: number
+  isDemoContent?: boolean
+  isFallback?: boolean
+  isStale?: boolean
+  isEmpty?: boolean
+}
+
+export type CanvasSourceKind =
+  | "agent-authored"
+  | "heuristic-projection"
+  | "demo"
+  | "demo-fallback"
+  | "stale-cache"
+  | "no-flow"
+  | "loading"
+  | "error"
+  | "unknown"
+
+export interface CanvasSourceSummary {
+  kind: CanvasSourceKind
+  label: string
+  shortLabel: string
+  detail: string
+  tone: "default" | "info" | "warning" | "error"
+  flowCount?: number
+}
+
 export type PendingStatus = "pending" | "sent" | "in_progress" | "done" | "needs_input" | "blocked"
 
 export interface PendingStatusHistoryEntry {

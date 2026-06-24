@@ -25,7 +25,10 @@ from .ir import (
     update_pending_status,
     write_pending_change,
 )
-from .core.behavior_canvas import BEHAVIOR_CANVAS_SCHEMA, build_behavior_canvas
+from .core.behavior_canvas import (
+    build_behavior_canvas,
+    canvas_source_metadata,
+)
 from .core.workspace_profile import infer_workspace_profile
 
 
@@ -37,6 +40,7 @@ _ASSISTANTS = {
     "antigravity": "Antigravity",
     "generic": "Your assistant",
 }
+DEMO_MARKER_FILENAME = ".agentcanvas-demo"
 
 
 def resolve_assistant(agent: Optional[str]) -> Tuple[str, str]:
@@ -114,24 +118,47 @@ def ensure_ir(workspace: Path) -> None:
         index_workspace(workspace)
 
 
-def load_or_build_canvas(workspace: Path, *, refresh: bool = False) -> Dict[str, Any]:
+def load_or_build_canvas(
+    workspace: Path,
+    *,
+    refresh: bool = False,
+    demo_mode: bool = False,
+    demo_fallback: bool = False,
+) -> Dict[str, Any]:
+    demo_content = demo_mode or demo_fallback or is_demo_workspace(workspace)
     if not refresh:
         try:
             canvas = load_canvas_ir(workspace)
             if is_agent_authored_canvas(canvas):
                 return with_workspace_profile(
                     workspace,
-                    preserve_agent_authored_canvas(workspace, canvas),
+                    with_runtime_source_status(
+                        preserve_agent_authored_canvas(workspace, canvas),
+                        demo_content=demo_content,
+                        demo_fallback=demo_fallback,
+                    ),
                 )
             if canvas_cache_is_fresh(workspace):
-                return with_workspace_profile(workspace, canvas)
+                return with_workspace_profile(
+                    workspace,
+                    with_runtime_source_status(
+                        canvas,
+                        demo_content=demo_content,
+                        demo_fallback=demo_fallback,
+                    ),
+                )
         except FileNotFoundError:
             pass
     try:
         graph = load_ir(workspace)
     except FileNotFoundError:
         graph = index_workspace(workspace)
-    canvas = build_behavior_canvas(graph, workspace=workspace)
+    canvas = build_behavior_canvas(graph, workspace=workspace, is_demo=demo_content)
+    canvas = with_runtime_source_status(
+        canvas,
+        demo_content=demo_content,
+        demo_fallback=demo_fallback,
+    )
     save_canvas_ir(workspace, canvas)
     return with_workspace_profile(workspace, canvas)
 
@@ -140,12 +167,18 @@ def is_agent_authored_canvas(canvas: Dict[str, Any]) -> bool:
     mapping = canvas.get("mapping") if isinstance(canvas.get("mapping"), dict) else {}
     if mapping.get("mode") == "agent-authored":
         return True
+    source = mapping.get("source") if isinstance(mapping.get("source"), dict) else {}
+    if source.get("kind") == "agent-authored":
+        return True
     body = canvas.get("canvas") if isinstance(canvas.get("canvas"), dict) else canvas
     metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    source = metadata.get("source") if isinstance(metadata.get("source"), dict) else {}
+    if source.get("kind") == "agent-authored":
+        return True
     projection = metadata.get("projection") if isinstance(metadata.get("projection"), dict) else {}
     if projection.get("mode") == "agent-authored":
         return True
-    return body.get("schema") == BEHAVIOR_CANVAS_SCHEMA and projection.get("mode") != "deterministic"
+    return False
 
 
 def preserve_agent_authored_canvas(workspace: Path, canvas: Dict[str, Any]) -> Dict[str, Any]:
@@ -155,7 +188,11 @@ def preserve_agent_authored_canvas(workspace: Path, canvas: Dict[str, Any]) -> D
         "Workspace evidence was refreshed after this agent-authored canvas. "
         "AgentCanvas kept the canvas file; ask the connected agent to refresh the map if behavior changed."
     )
-    return with_canvas_warning(canvas, warning)
+    return with_runtime_source_status(
+        with_canvas_warning(canvas, warning),
+        stale=True,
+        stale_reason=warning,
+    )
 
 
 def with_canvas_warning(canvas: Dict[str, Any], warning: str) -> Dict[str, Any]:
@@ -184,6 +221,114 @@ def canvas_cache_is_fresh(workspace: Path) -> bool:
     if not ir_path.exists():
         return True
     return path.stat().st_mtime >= ir_path.stat().st_mtime
+
+
+def is_demo_workspace(workspace: Path) -> bool:
+    return (workspace / DEMO_MARKER_FILENAME).exists()
+
+
+def canvas_runtime_source(
+    workspace: Path,
+    *,
+    demo_mode: bool = False,
+    landing_mode: bool = False,
+    request_demo_mode: bool = False,
+) -> Dict[str, Any]:
+    demo_fallback = landing_mode and not request_demo_mode and is_demo_workspace(workspace)
+    demo_content = demo_mode or request_demo_mode or demo_fallback or is_demo_workspace(workspace)
+    if demo_fallback:
+        kind = "demo-fallback"
+        status = "demo_fallback"
+        reason = "launch_page_without_workspace"
+    elif demo_content:
+        kind = "demo"
+        status = "demo"
+        reason = "requested_demo_workspace" if (demo_mode or request_demo_mode) else "demo_workspace"
+    else:
+        kind = "workspace"
+        status = "workspace"
+        reason = None
+    return {
+        "kind": kind,
+        "status": status,
+        "demoContent": demo_content,
+        "demoFallback": demo_fallback,
+        "demoFixture": workspace.name if demo_content else None,
+        "reason": reason,
+    }
+
+
+def with_runtime_source_status(
+    canvas: Dict[str, Any],
+    *,
+    demo_content: bool = False,
+    demo_fallback: bool = False,
+    stale: bool = False,
+    stale_reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    next_canvas = deepcopy(canvas)
+    body = next_canvas.get("canvas") if isinstance(next_canvas.get("canvas"), dict) else next_canvas
+    mapping = next_canvas.setdefault("mapping", {})
+    if not isinstance(mapping, dict):
+        mapping = {}
+        next_canvas["mapping"] = mapping
+    metadata = body.setdefault("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+        body["metadata"] = metadata
+
+    existing_source = metadata.get("source") if isinstance(metadata.get("source"), dict) else {}
+    existing_kind = str(existing_source.get("kind") or mapping.get("mode") or "heuristic-projection")
+    if existing_kind == "deterministic":
+        existing_kind = "heuristic-projection"
+    existing_status = str(mapping.get("status") or existing_source.get("status") or "ready")
+    existing_empty = bool(existing_source.get("isEmpty") or mapping.get("empty"))
+    existing_stale = bool(existing_source.get("isStale") or mapping.get("stale"))
+    effective_stale = stale or existing_stale
+
+    kind = existing_kind
+    status = existing_status
+    reason = str(existing_source.get("reason")) if existing_source.get("reason") else None
+    is_fallback = bool(existing_source.get("isFallback"))
+    if demo_fallback:
+        kind = "demo-fallback"
+        status = "demo_fallback"
+        reason = "launch_page_without_workspace"
+        is_fallback = True
+    elif demo_content and kind not in {"agent-authored", "empty"}:
+        kind = "demo"
+        status = "demo"
+        reason = reason or "demo_workspace"
+    if effective_stale:
+        status = "stale_cache"
+        reason = stale_reason or reason
+
+    source = canvas_source_metadata(
+        kind,
+        status,
+        is_demo_content=demo_content,
+        is_fallback=is_fallback,
+        is_stale=effective_stale,
+        is_empty=existing_empty,
+        flow_count=0 if existing_empty else len(body.get("journeys") or []),
+        reason=reason,
+    )
+    metadata["source"] = source
+    body["isDemo"] = bool(body.get("isDemo") or demo_content)
+    mapping["status"] = status
+    mapping["mode"] = kind
+    mapping["source"] = source
+    mapping["stale"] = effective_stale
+    mapping["empty"] = existing_empty
+    mapping["demoFallback"] = demo_fallback
+    mapping.setdefault("displayFlowCount", len(body.get("journeys") or []))
+    if existing_empty:
+        mapping["flowCount"] = 0
+    projection = metadata.get("projection") if isinstance(metadata.get("projection"), dict) else {}
+    if projection:
+        projection["source_status"] = status
+        projection["source_kind"] = kind
+    return next_canvas
 
 
 def load_workspace_profile(workspace: Path) -> Dict[str, Any]:
@@ -271,7 +416,18 @@ def make_handler(
                 return
 
             if parsed.path == "/api/canvas":
-                canvas = load_or_build_canvas(workspace)
+                request_demo_mode = self.request_demo_mode(parsed)
+                source = canvas_runtime_source(
+                    workspace,
+                    demo_mode=demo_mode,
+                    landing_mode=landing_mode,
+                    request_demo_mode=request_demo_mode,
+                )
+                canvas = load_or_build_canvas(
+                    workspace,
+                    demo_mode=source["demoContent"],
+                    demo_fallback=source["demoFallback"],
+                )
                 self.write_json({"ok": True, **canvas})
                 return
 
@@ -283,6 +439,12 @@ def make_handler(
                 request_session_id = self.request_session_id(parsed)
                 request_demo_mode = self.request_demo_mode(parsed)
                 effective_demo_mode = demo_mode or request_demo_mode
+                source = canvas_runtime_source(
+                    workspace,
+                    demo_mode=demo_mode,
+                    landing_mode=landing_mode,
+                    request_demo_mode=request_demo_mode,
+                )
                 workspace_profile = load_workspace_profile(workspace)
                 mode = (
                     "landing"
@@ -304,7 +466,10 @@ def make_handler(
                             "assistant": assistant_name,
                             "mode": mode,
                             "isDemo": effective_demo_mode,
-                            "demoFixture": workspace.name if effective_demo_mode else None,
+                            "isDemoContent": source["demoContent"],
+                            "demoFallback": source["demoFallback"],
+                            "demoFixture": source["demoFixture"],
+                            "source": source,
                             "sessionId": request_session_id,
                         },
                     }
@@ -325,15 +490,35 @@ def make_handler(
                 return
 
             if parsed.path == "/api/reindex":
+                request_demo_mode = self.request_demo_mode(parsed)
+                source = canvas_runtime_source(
+                    workspace,
+                    demo_mode=demo_mode,
+                    landing_mode=landing_mode,
+                    request_demo_mode=request_demo_mode,
+                )
                 graph = index_workspace(workspace)
                 try:
                     existing_canvas = load_canvas_ir(workspace)
                 except FileNotFoundError:
                     existing_canvas = None
                 if existing_canvas and is_agent_authored_canvas(existing_canvas):
-                    canvas = preserve_agent_authored_canvas(workspace, existing_canvas)
+                    canvas = with_runtime_source_status(
+                        preserve_agent_authored_canvas(workspace, existing_canvas),
+                        demo_content=source["demoContent"],
+                        demo_fallback=source["demoFallback"],
+                    )
                 else:
-                    canvas = build_behavior_canvas(graph, workspace=workspace)
+                    canvas = build_behavior_canvas(
+                        graph,
+                        workspace=workspace,
+                        is_demo=source["demoContent"],
+                    )
+                    canvas = with_runtime_source_status(
+                        canvas,
+                        demo_content=source["demoContent"],
+                        demo_fallback=source["demoFallback"],
+                    )
                     save_canvas_ir(workspace, canvas)
                 self.write_json(
                     {

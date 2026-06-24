@@ -1,15 +1,16 @@
 import { AlertCircle, Check, Circle, Loader2, RefreshCw, Search, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import type { CanvasSourceSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 export type WorkspaceMappingKind = "loading" | "reindexing" | "empty" | "error"
 
 const MAPPING_STAGES = [
-  "Scanning workspace",
-  "Finding app surfaces",
-  "Translating flows",
-  "Preparing canvas",
+  "Reading project",
+  "Finding where work starts",
+  "Naming the flows",
+  "Preparing the map",
 ]
 
 interface Props {
@@ -18,6 +19,7 @@ interface Props {
   workspaceName: string
   message?: string
   detail?: string
+  source?: CanvasSourceSummary
   onRetry: () => void
 }
 
@@ -27,6 +29,7 @@ export function WorkspaceMappingState({
   workspaceName,
   message,
   detail,
+  source,
   onRetry,
 }: Props) {
   const active = kind === "loading" || kind === "reindexing"
@@ -36,19 +39,20 @@ export function WorkspaceMappingState({
   const title =
     message ||
     (kind === "reindexing"
-      ? "Refreshing workspace map"
+      ? "Refreshing this project"
       : kind === "loading"
-        ? `Mapping ${workspaceName || "your workspace"}`
+        ? `Reading ${workspaceName || "your project"}`
         : kind === "empty"
-          ? "Workspace map isn't ready yet"
-          : "Couldn't load workspace map")
+          ? "No readable map yet"
+          : "Couldn't open the project map")
   const body =
     detail ||
     (active
       ? MAPPING_STAGES[clampedStage]
-      : kind === "empty"
-        ? "AgentCanvas did not receive any workspace flows to show."
-        : "The workspace canvas API did not return a usable map.")
+      : source?.detail ||
+        (kind === "empty"
+          ? "AgentCanvas has looked at the project, but no readable flows are ready yet."
+          : "AgentCanvas could not open a usable map for this project."))
 
   return (
     <div className="flex min-h-full items-center justify-center px-6 py-16" aria-live="polite">
@@ -65,6 +69,21 @@ export function WorkspaceMappingState({
           <div className="min-w-0 flex-1">
             <p className="text-base font-medium tracking-tight">{title}</p>
             <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{body}</p>
+            {source && (
+              <p
+                className={cn(
+                  "mt-3 inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+                  source.tone === "warning"
+                    ? "border-gold/30 bg-gold/10 text-foreground"
+                    : source.tone === "error"
+                      ? "border-destructive/25 bg-destructive/10 text-destructive"
+                      : "border-border bg-secondary/70 text-muted-foreground"
+                )}
+                title={source.detail}
+              >
+                {source.label}
+              </p>
+            )}
           </div>
         </div>
 
@@ -100,7 +119,7 @@ export function WorkspaceMappingState({
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <Button type="button" onClick={onRetry} className="gap-2">
               <RefreshCw className="size-4" />
-              Retry mapping
+              Try again
             </Button>
           </div>
         )}

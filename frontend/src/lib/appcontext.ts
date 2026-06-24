@@ -10,7 +10,10 @@ export type AppContext = {
   assistantId: string
   mode?: "landing" | "workspace" | "demo"
   isDemo?: boolean
+  isDemoContent?: boolean
+  demoFallback?: boolean
   demoFixture?: string | null
+  source?: RuntimeSource
   sessionId?: string | null
 }
 
@@ -27,6 +30,15 @@ export type WorkspaceProfile = {
   product_language?: ProductLanguage
 }
 
+export type RuntimeSource = {
+  kind?: string
+  status?: string
+  demoContent?: boolean
+  demoFallback?: boolean
+  demoFixture?: string | null
+  reason?: string | null
+}
+
 const DEMO_CONTEXT: AppContext = {
   workspace: "Your project",
   workspacePath: "",
@@ -35,6 +47,8 @@ const DEMO_CONTEXT: AppContext = {
   assistantId: "generic",
   mode: "landing",
   isDemo: false,
+  isDemoContent: false,
+  demoFallback: false,
   sessionId: null,
 }
 
@@ -46,6 +60,8 @@ const DEMO_FALLBACK: AppContext = {
   assistantId: "claude-code",
   mode: "demo",
   isDemo: true,
+  isDemoContent: true,
+  demoFallback: false,
   sessionId: null,
 }
 
@@ -64,7 +80,7 @@ export async function fetchAppContext(): Promise<AppContext> {
     const data = (await res.json()) as { ok: boolean; context: AppContext }
     // ?demo=1 always enters demo mode, even if the server didn't say so.
     if (demo && data.context.mode !== "demo") {
-      return { ...data.context, mode: "demo", isDemo: true }
+      return { ...data.context, mode: "demo", isDemo: true, isDemoContent: true, demoFallback: false }
     }
     return data.context
   } catch {

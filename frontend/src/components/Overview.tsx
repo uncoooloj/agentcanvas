@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react"
 import {
+  AlertCircle,
   ArrowRight,
   CalendarClock,
   CreditCard,
+  Info,
   Loader2,
   Mail,
   MessageSquare,
@@ -17,7 +19,8 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { countSteps, type Journey } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import { countSteps, type CanvasSourceSummary, type Journey } from "@/lib/types"
 import type { ProductLanguage } from "@/lib/appcontext"
 import type { ChangeEntry } from "@/lib/changeset"
 
@@ -26,13 +29,14 @@ type JourneyActivity = "idle" | "edited" | "working"
 interface Props {
   appName: string
   productLanguage?: ProductLanguage
+  source?: CanvasSourceSummary
   journeys: Journey[]
   changes: ChangeEntry[]
   activity: Map<string, JourneyActivity>
   onOpen: (id: string) => void
 }
 
-export function Overview({ appName, productLanguage, journeys, changes, activity, onOpen }: Props) {
+export function Overview({ appName, productLanguage, source, journeys, changes, activity, onOpen }: Props) {
   const [query, setQuery] = useState("")
 
   const pendingByJourney = useMemo(() => {
@@ -64,6 +68,9 @@ export function Overview({ appName, productLanguage, journeys, changes, activity
         <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-muted-foreground">
           Each card is a plain-English {entryNoun}. Open one to see what happens and why.
         </p>
+        {source && (
+          <SourceTruth source={source} />
+        )}
       </header>
 
       {/* Sticky search — always available so this scales to a big app */}
@@ -110,6 +117,27 @@ export function Overview({ appName, productLanguage, journeys, changes, activity
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+function SourceTruth({ source }: { source: CanvasSourceSummary }) {
+  const Icon = source.tone === "warning" || source.tone === "error" ? AlertCircle : Info
+  return (
+    <div
+      className={cn(
+        "mx-auto mt-4 inline-flex max-w-2xl items-center gap-2 rounded-full border px-3 py-1.5 text-xs",
+        source.tone === "warning"
+          ? "border-gold/30 bg-gold/10 text-foreground"
+          : source.tone === "error"
+            ? "border-destructive/25 bg-destructive/10 text-destructive"
+            : "border-border bg-secondary/70 text-muted-foreground"
+      )}
+      title={source.detail}
+    >
+      <Icon className="size-3.5 shrink-0" />
+      <span className="font-medium text-foreground">{source.label}</span>
+      <span className="hidden text-muted-foreground sm:inline">· {source.detail}</span>
     </div>
   )
 }

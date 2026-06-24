@@ -1,9 +1,12 @@
 import type {
   AppModel,
   BranchNode,
+  CanvasMapping,
+  CanvasSourceMetadata,
   CodeGraph,
   FlowNode,
   Journey,
+  MappingStage,
   PendingItem,
   PendingStatus,
   PendingStatusHistoryEntry,
@@ -53,23 +56,6 @@ async function getJson<T>(path: string): Promise<T> {
 export async function fetchCanvasModel(): Promise<AppModel> {
   const data = await getJson<unknown>("/api/canvas")
   return normalizeCanvasPayload(data)
-}
-
-export interface MappingStage {
-  id: string
-  label: string
-  status: "pending" | "active" | "done" | "ready" | "error"
-  detail?: string
-}
-
-export interface CanvasMapping {
-  schema?: string
-  status?: string
-  mode?: string
-  primaryMode?: string
-  flowCount?: number
-  warnings?: string[]
-  stages?: MappingStage[]
 }
 
 export interface CanvasResponse {
@@ -238,12 +224,47 @@ function normalizeCanvasMapping(value: Record<string, unknown> | undefined): Can
     status: stringValue(value.status),
     mode: stringValue(value.mode),
     primaryMode: stringValue(value.primaryMode) || stringValue(value.primary_mode),
+    fallbackMode: stringValue(value.fallbackMode) || stringValue(value.fallback_mode),
     flowCount: typeof value.flowCount === "number" ? value.flowCount : undefined,
+    displayFlowCount: typeof value.displayFlowCount === "number" ? value.displayFlowCount : undefined,
+    stale:
+      booleanValue(value.stale) ||
+      booleanValue(value.staleCache) ||
+      booleanValue(value.stale_cache) ||
+      stringLooksStale(value.status) ||
+      stringLooksStale(value.cacheStatus) ||
+      stringLooksStale(value.cache_status),
+    empty: booleanValue(value.empty),
+    demoFallback: booleanValue(value.demoFallback) || booleanValue(value.demo_fallback),
+    cacheStatus: stringValue(value.cacheStatus) || stringValue(value.cache_status),
+    source: normalizeCanvasSource(value.source) || sourceFromLegacyFields(value),
     warnings: Array.isArray(value.warnings) ? value.warnings.map((item) => String(item)).filter(Boolean) : undefined,
     stages: Array.isArray(value.stages)
       ? value.stages.map(normalizeMappingStage).filter((stage): stage is MappingStage => Boolean(stage))
       : undefined,
   }
+}
+
+function normalizeCanvasSource(value: unknown): CanvasSourceMetadata | undefined {
+  const source = recordValue(value)
+  if (!source) return undefined
+  return {
+    kind: stringValue(source.kind),
+    status: stringValue(source.status),
+    label: stringValue(source.label),
+    reason: stringValue(source.reason),
+    flowCount: typeof source.flowCount === "number" ? source.flowCount : undefined,
+    isDemoContent: booleanValue(source.isDemoContent) || booleanValue(source.is_demo_content),
+    isFallback: booleanValue(source.isFallback) || booleanValue(source.is_fallback),
+    isStale: booleanValue(source.isStale) || booleanValue(source.is_stale),
+    isEmpty: booleanValue(source.isEmpty) || booleanValue(source.is_empty),
+  }
+}
+
+function sourceFromLegacyFields(value: Record<string, unknown>): CanvasSourceMetadata | undefined {
+  const label = stringValue(value.sourceLabel) || stringValue(value.source_label) || stringValue(value.source)
+  if (!label) return undefined
+  return { label }
 }
 
 function normalizeMappingStage(value: unknown): MappingStage | null {
@@ -557,4 +578,12 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined
+}
+
+function booleanValue(value: unknown): boolean {
+  return value === true || value === "true" || value === "1"
+}
+
+function stringLooksStale(value: unknown): boolean {
+  return typeof value === "string" && /stale|out[-_\s]?of[-_\s]?date|expired/i.test(value)
 }

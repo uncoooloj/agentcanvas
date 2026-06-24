@@ -52,7 +52,10 @@ class ServerContextTests(unittest.TestCase):
             context = fake.response["payload"]["context"]
             self.assertEqual(context["mode"], "demo")
             self.assertTrue(context["isDemo"])
+            self.assertTrue(context["isDemoContent"])
+            self.assertFalse(context["demoFallback"])
             self.assertEqual(context["demoFixture"], "agentcanvas-demo")
+            self.assertEqual("demo", context["source"]["kind"])
             self.assertEqual(context["assistant"], "No agent connected")
             self.assertEqual(context["sessionId"], "agent-session-1")
 
@@ -60,6 +63,7 @@ class ServerContextTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "agentcanvas-demo"
             workspace.mkdir()
+            _write(workspace, ".agentcanvas-demo", "fixture=agentcanvas-demo\n")
             handler_cls = make_handler(
                 workspace,
                 token="token",
@@ -74,7 +78,10 @@ class ServerContextTests(unittest.TestCase):
             context = fake.response["payload"]["context"]
             self.assertEqual(context["mode"], "landing")
             self.assertFalse(context["isDemo"])
-            self.assertIsNone(context["demoFixture"])
+            self.assertTrue(context["isDemoContent"])
+            self.assertTrue(context["demoFallback"])
+            self.assertEqual(context["demoFixture"], "agentcanvas-demo")
+            self.assertEqual("demo-fallback", context["source"]["kind"])
             self.assertEqual(context["workspacePath"], "")
 
             handler_cls.handle_api_get(fake, urlparse("/api/context?token=token&demo=1"))
@@ -82,7 +89,10 @@ class ServerContextTests(unittest.TestCase):
             context = fake.response["payload"]["context"]
             self.assertEqual(context["mode"], "demo")
             self.assertTrue(context["isDemo"])
+            self.assertTrue(context["isDemoContent"])
+            self.assertFalse(context["demoFallback"])
             self.assertEqual(context["demoFixture"], "agentcanvas-demo")
+            self.assertEqual("demo", context["source"]["kind"])
             self.assertEqual(context["workspacePath"], str(workspace))
 
     def test_query_session_id_overrides_server_session_id(self):
@@ -106,7 +116,10 @@ class ServerContextTests(unittest.TestCase):
             context = fake.response["payload"]["context"]
             self.assertEqual(context["mode"], "workspace")
             self.assertFalse(context["isDemo"])
+            self.assertFalse(context["isDemoContent"])
+            self.assertFalse(context["demoFallback"])
             self.assertIsNone(context["demoFixture"])
+            self.assertEqual("workspace", context["source"]["kind"])
             self.assertEqual(context["workspacePath"], str(workspace))
             self.assertEqual(context["sessionId"], "query-session")
 

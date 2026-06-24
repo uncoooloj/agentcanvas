@@ -120,9 +120,15 @@ class BehaviorCanvasApiTests(unittest.TestCase):
 
             wrapper = build_behavior_canvas(workflow_ir, workspace=root)
             canvas = wrapper["canvas"]
+            mapping = wrapper["mapping"]
             profile = canvas["metadata"]["workspace_profile"]
             titles = [journey["title"] for journey in canvas["journeys"]]
 
+            self.assertEqual("ready", mapping["status"])
+            self.assertEqual("heuristic-projection", mapping["mode"])
+            self.assertEqual("heuristic-projection", mapping["source"]["kind"])
+            self.assertFalse(mapping["source"]["isDemoContent"])
+            self.assertFalse(mapping["empty"])
             self.assertEqual("tool_product", profile["kind"])
             self.assertEqual("tool", profile["product_language"]["singular"])
             self.assertIn("`agentcanvas start`", titles)
@@ -137,6 +143,29 @@ class BehaviorCanvasApiTests(unittest.TestCase):
                 self.assertEqual("step", first["kind"])
                 self.assertEqual("when", first["role"])
                 self.assertLessEqual(len(journey["nodes"]), 5)
+
+    def test_core_canvas_marks_empty_workspace_as_no_flows(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            _write(root, "README.md", "# Notes only\n")
+            workflow_ir = build_workflow_ir(root)
+
+            wrapper = build_behavior_canvas(workflow_ir, workspace=root)
+            mapping = wrapper["mapping"]
+            canvas = wrapper["canvas"]
+            source = mapping["source"]
+
+            self.assertEqual("empty", mapping["status"])
+            self.assertEqual("empty", mapping["mode"])
+            self.assertTrue(mapping["empty"])
+            self.assertEqual(0, mapping["flowCount"])
+            self.assertEqual(1, mapping["displayFlowCount"])
+            self.assertEqual("empty", source["kind"])
+            self.assertTrue(source["isEmpty"])
+            self.assertTrue(source["isFallback"])
+            self.assertEqual("empty", canvas["metadata"]["source"]["status"])
+            self.assertTrue(canvas["metadata"]["projection"]["fallback"])
+            self.assertTrue(canvas["journeys"][0]["metadata"]["fallback"])
 
     def test_api_canvas_returns_persisted_behavior_canvas(self):
         with tempfile.TemporaryDirectory() as temp_root:
@@ -158,7 +187,36 @@ class BehaviorCanvasApiTests(unittest.TestCase):
             self.assertIn("canvas", payload)
             self.assertIn("mapping", payload)
             self.assertTrue(payload["canvas"]["journeys"])
+            self.assertEqual("heuristic-projection", payload["mapping"]["source"]["kind"])
+            self.assertFalse(payload["mapping"]["demoFallback"])
             self.assertTrue((root / ".agentcanvas" / "canvas.ir.json").is_file())
+
+    def test_api_canvas_marks_landing_demo_workspace_as_demo_fallback(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            _agentcanvas_like_workspace(root)
+            _write(root, ".agentcanvas-demo", "fixture=agentcanvas-demo\n")
+            handler_cls = make_handler(
+                root,
+                token="token",
+                assistant_id="generic",
+                assistant_name="No agent connected",
+                landing_mode=True,
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/canvas?token=token"))
+
+            payload = fake.response["payload"]
+            source = payload["mapping"]["source"]
+            self.assertTrue(payload["canvas"]["isDemo"])
+            self.assertEqual("demo_fallback", payload["mapping"]["status"])
+            self.assertEqual("demo-fallback", payload["mapping"]["mode"])
+            self.assertEqual("demo-fallback", source["kind"])
+            self.assertTrue(source["isDemoContent"])
+            self.assertTrue(source["isFallback"])
+            self.assertTrue(payload["mapping"]["demoFallback"])
+            self.assertEqual("demo-fallback", payload["canvas"]["metadata"]["source"]["kind"])
 
     def test_api_canvas_enriches_stale_cached_canvas_with_workspace_profile(self):
         with tempfile.TemporaryDirectory() as temp_root:
@@ -288,6 +346,10 @@ def main():
             self.assertEqual(fake.response["status"], 200)
             payload = fake.response["payload"]
             self.assertEqual("agent-authored", payload["mapping"]["mode"])
+            self.assertEqual("stale_cache", payload["mapping"]["status"])
+            self.assertTrue(payload["mapping"]["stale"])
+            self.assertEqual("agent-authored", payload["mapping"]["source"]["kind"])
+            self.assertTrue(payload["mapping"]["source"]["isStale"])
             self.assertEqual("Signup", payload["canvas"]["journeys"][0]["title"])
             with (root / ".agentcanvas" / "canvas.ir.json").open(encoding="utf-8") as handle:
                 persisted = json.load(handle)

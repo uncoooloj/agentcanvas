@@ -49,6 +49,13 @@ SCRIPT_NAMES_OF_INTEREST = {
     "test",
     "typecheck",
 }
+SOURCE_LABELS = {
+    "agent-authored": "Agent-authored canvas",
+    "heuristic-projection": "Heuristic projection",
+    "demo": "Demo content",
+    "demo-fallback": "Demo fallback content",
+    "empty": "No runtime flows",
+}
 
 
 @dataclass
@@ -120,6 +127,61 @@ class _CliCommand:
     line: int
 
 
+def canvas_source_metadata(
+    kind: str,
+    status: str,
+    *,
+    is_demo_content: bool = False,
+    is_fallback: bool = False,
+    is_stale: bool = False,
+    is_empty: bool = False,
+    flow_count: Optional[int] = None,
+    reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return the machine-readable source status shared by canvas and mapping."""
+
+    normalized_kind = kind or "heuristic-projection"
+    normalized_status = status or "ready"
+    source: Dict[str, Any] = {
+        "kind": normalized_kind,
+        "status": normalized_status,
+        "label": SOURCE_LABELS.get(normalized_kind, _human_title(normalized_kind)),
+        "isDemoContent": bool(is_demo_content),
+        "isFallback": bool(is_fallback),
+        "isStale": bool(is_stale),
+        "isEmpty": bool(is_empty),
+    }
+    if flow_count is not None:
+        source["flowCount"] = max(0, int(flow_count))
+    if reason:
+        source["reason"] = reason
+    return source
+
+
+def _canvas_source(canvas: Mapping[str, Any]) -> Dict[str, Any]:
+    metadata = canvas.get("metadata") if isinstance(canvas.get("metadata"), Mapping) else {}
+    source = metadata.get("source") if isinstance(metadata.get("source"), Mapping) else {}
+    projection = metadata.get("projection") if isinstance(metadata.get("projection"), Mapping) else {}
+    journeys = canvas.get("journeys") if isinstance(canvas.get("journeys"), list) else []
+    fallback = bool(projection.get("fallback"))
+    is_empty = bool(source.get("isEmpty")) or fallback or not journeys
+    kind = str(source.get("kind") or ("empty" if is_empty else "heuristic-projection"))
+    status = str(source.get("status") or ("empty" if is_empty else "ready"))
+    flow_count = source.get("flowCount")
+    if not isinstance(flow_count, int):
+        flow_count = 0 if is_empty else len(journeys)
+    return canvas_source_metadata(
+        kind,
+        status,
+        is_demo_content=bool(source.get("isDemoContent") or canvas.get("isDemo")),
+        is_fallback=bool(source.get("isFallback") or fallback),
+        is_stale=bool(source.get("isStale")),
+        is_empty=is_empty,
+        flow_count=flow_count,
+        reason=str(source.get("reason")) if source.get("reason") else None,
+    )
+
+
 def workflow_ir_to_behavior_canvas(
     workflow_ir: Mapping[str, Any],
     *,
@@ -156,8 +218,20 @@ def workflow_ir_to_behavior_canvas(
         add(journey)
 
     ordered = sorted(journeys.values(), key=lambda item: item.sort_key)[:MAX_JOURNEYS]
+    fallback_used = False
     if not ordered:
+        fallback_used = True
         ordered = [_fallback_journey(workflow_ir, components)]
+    source_kind = "demo" if is_demo else "empty" if fallback_used else "heuristic-projection"
+    source_status = "demo" if is_demo else "empty" if fallback_used else "ready"
+    source = canvas_source_metadata(
+        source_kind,
+        source_status,
+        is_demo_content=is_demo,
+        is_fallback=fallback_used,
+        is_empty=fallback_used,
+        flow_count=0 if fallback_used else len(ordered),
+    )
 
     return {
         "schema": BEHAVIOR_CANVAS_SCHEMA,
@@ -173,8 +247,13 @@ def workflow_ir_to_behavior_canvas(
             "workspace_profile": workspace_profile,
             "app_surfaces": _public_app_surfaces(workflow_ir),
             "components": _public_components(components),
+            "source": source,
             "projection": {
-                "mode": "deterministic",
+                "mode": "heuristic-projection",
+                "engine": "deterministic",
+                "fallback": fallback_used,
+                "detectedFlowCount": len(journeys),
+                "displayFlowCount": len(ordered),
                 "warnings": _projection_warnings(workflow_ir, len(journeys), len(ordered)),
             },
         },
@@ -199,16 +278,26 @@ def build_behavior_canvas(
         .get("projection", {})
         .get("warnings", [])
     )
+    source = _canvas_source(canvas)
+    flow_count = int(source.get("flowCount", 0))
+    display_flow_count = len(canvas.get("journeys") or [])
+    entrypoint_status = "empty" if source.get("isEmpty") else "done"
+    mapping_status = str(source.get("status") or "ready")
     return {
         "schema": BEHAVIOR_CANVAS_WRAPPER_SCHEMA,
         "version": "0.1.0",
         "canvas": canvas,
         "mapping": {
             "schema": CANVAS_MAPPING_SCHEMA,
-            "status": "ready",
-            "mode": "deterministic",
+            "status": mapping_status,
+            "mode": str(source.get("kind") or "heuristic-projection"),
             "primaryMode": "llm-assisted",
-            "flowCount": len(canvas.get("journeys") or []),
+            "flowCount": flow_count,
+            "displayFlowCount": display_flow_count,
+            "source": source,
+            "stale": bool(source.get("isStale")),
+            "empty": bool(source.get("isEmpty")),
+            "demoFallback": source.get("kind") == "demo-fallback",
             "warnings": warnings,
             "stages": [
                 {
@@ -219,12 +308,12 @@ def build_behavior_canvas(
                 {
                     "id": "entrypoints",
                     "label": "Found runtime entrypoints",
-                    "status": "done" if canvas.get("journeys") else "error",
+                    "status": entrypoint_status,
                 },
                 {
                     "id": "canvas",
                     "label": "Built behavior canvas",
-                    "status": "ready",
+                    "status": mapping_status,
                 },
             ],
         },
@@ -256,16 +345,23 @@ def build_agent_authored_canvas(
         .get("projection", {})
         .get("warnings", [])
     )
+    source = _canvas_source(canvas)
+    mapping_status = str(source.get("status") or "ready")
     return {
         "schema": BEHAVIOR_CANVAS_WRAPPER_SCHEMA,
         "version": "0.1.0",
         "canvas": canvas,
         "mapping": {
             "schema": CANVAS_MAPPING_SCHEMA,
-            "status": "ready",
+            "status": mapping_status,
             "mode": "agent-authored",
             "primaryMode": "agent-authored",
             "flowCount": len(canvas.get("journeys") or []),
+            "displayFlowCount": len(canvas.get("journeys") or []),
+            "source": source,
+            "stale": bool(source.get("isStale")),
+            "empty": bool(source.get("isEmpty")),
+            "demoFallback": source.get("kind") == "demo-fallback",
             "warnings": warnings,
             "stages": [
                 {
@@ -281,7 +377,7 @@ def build_agent_authored_canvas(
                 {
                     "id": "canvas",
                     "label": "Browser canvas ready",
-                    "status": "ready",
+                    "status": mapping_status,
                 },
             ],
         },
@@ -319,6 +415,13 @@ def _agent_authored_behavior_canvas(
     if not ordered:
         warnings.append("Agent-authored canvas had no displayable flows.")
     workspace_profile = infer_workspace_profile(canvas_model, workspace=workspace)
+    source = canvas_source_metadata(
+        "agent-authored",
+        "empty" if not ordered else "ready",
+        is_demo_content=is_demo,
+        is_empty=not ordered,
+        flow_count=len(ordered),
+    )
 
     return {
         "schema": BEHAVIOR_CANVAS_SCHEMA,
@@ -333,6 +436,7 @@ def _agent_authored_behavior_canvas(
             "generated_at": canvas_model.get("generated_at"),
             "summary": canvas_model.get("summary") or {},
             "workspace_profile": workspace_profile,
+            "source": source,
             "projection": {
                 "mode": "agent-authored",
                 "query_mode": query_mode,

@@ -24,23 +24,23 @@ import { LandingPage } from "@/components/LandingPage"
 import { WorkspaceMappingState } from "@/components/WorkspaceMappingState"
 import { DEMO_MODEL, emptyAppModel } from "@/lib/behavioral"
 import { applyChanges, useChanges, type ChangeEntry, type HandoffItem, type Phase } from "@/lib/changeset"
-import { describeApiError, fetchCanvas, reindexCanvas, type CanvasMapping } from "@/lib/api"
-import { useAppContext } from "@/lib/appcontext"
+import { ApiError, fetchCanvas, reindexCanvas } from "@/lib/api"
+import { useAppContext, type AppContext } from "@/lib/appcontext"
 import type { EditRequest, StagedEdit } from "@/lib/edits"
-import { findNode, type AppModel, type FlowNode, type Journey } from "@/lib/types"
+import { findNode, type AppModel, type CanvasMapping, type CanvasSourceSummary, type FlowNode, type Journey } from "@/lib/types"
 
 const HOME = "__home__"
 const CANVAS_POLL_INTERVAL_MS = 2500
 const MAPPING_STAGES = [
-  "Scanning workspace",
-  "Finding app surfaces",
-  "Translating flows",
-  "Preparing canvas",
+  "Reading project",
+  "Finding where work starts",
+  "Naming the flows",
+  "Preparing the map",
 ]
 
 type CanvasState =
-  | { kind: "idle" | "ready"; notice?: string }
-  | { kind: "loading" | "reindexing" | "empty" | "error"; message?: string; detail?: string; notice?: string }
+  | { kind: "idle" | "ready"; notice?: string; mapping?: CanvasMapping }
+  | { kind: "loading" | "reindexing" | "empty" | "error"; message?: string; detail?: string; notice?: string; mapping?: CanvasMapping }
 
 type WorkspaceModelResult = {
   model: AppModel
@@ -87,6 +87,10 @@ export default function App() {
     () => getJourneyActivity(model.journeys, localChanges, orderingChanges, phase, handoffItems),
     [handoffItems, localChanges, model.journeys, orderingChanges, phase]
   )
+  const canvasSource = useMemo(
+    () => describeCanvasSource(context, model, canvasState),
+    [context, model, canvasState]
+  )
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark)
@@ -127,30 +131,32 @@ export default function App() {
     try {
       const result = await loadWorkspaceModel(refresh)
       canvasSignatureRef.current = canvasSignature(result)
-      if (isStarterMap(result.mapping)) {
+      if (isUnreadyMap(result.mapping)) {
         setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
         setCanvasState({
           kind: "empty",
-          message: `Waiting for ${context.assistant || "your assistant"} to map this workspace`,
+          message: "No readable map yet",
           detail: starterMapDetail(result, context.assistant),
+          mapping: result.mapping,
         })
       } else if (!result.model.journeys.length) {
         setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
         setCanvasState({
           kind: "empty",
-          message: "Workspace map isn't ready yet",
+          message: "No readable map yet",
           detail: emptyWorkspaceDetail(result),
+          mapping: result.mapping,
         })
       } else {
         setModel((current) => preserveLocalJourneyRecency(result.model, current))
-        setCanvasState({ kind: "ready", notice: result.notice })
+        setCanvasState({ kind: "ready", notice: result.notice, mapping: result.mapping })
       }
     } catch (error) {
       setModel(emptyAppModel(context.workspace || model.appName || "Your app"))
       setCanvasState({
         kind: "error",
-        message: "Couldn't load workspace map",
-        detail: `AgentCanvas could not read the workspace canvas. ${describeApiError(error)}`,
+        message: "Couldn't open the project map",
+        detail: plainLoadError(error),
       })
     } finally {
       setSelectedId(null)
@@ -180,23 +186,25 @@ export default function App() {
         if (signature === canvasSignatureRef.current) return
 
         canvasSignatureRef.current = signature
-        if (isStarterMap(result.mapping)) {
+        if (isUnreadyMap(result.mapping)) {
           setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
           setCanvasState({
             kind: "empty",
-            message: `Waiting for ${context.assistant || "your assistant"} to map this workspace`,
+            message: "No readable map yet",
             detail: starterMapDetail(result, context.assistant),
+            mapping: result.mapping,
           })
         } else if (!result.model.journeys.length) {
           setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
           setCanvasState({
             kind: "empty",
-            message: "Workspace map isn't ready yet",
+            message: "No readable map yet",
             detail: emptyWorkspaceDetail(result),
+            mapping: result.mapping,
           })
         } else {
           setModel((current) => preserveLocalJourneyRecency(result.model, current))
-          setCanvasState({ kind: "ready", notice: result.notice })
+          setCanvasState({ kind: "ready", notice: result.notice, mapping: result.mapping })
         }
       } catch {
         // Polling is quiet; keep the current canvas visible through transient read errors.
@@ -313,15 +321,7 @@ export default function App() {
     canvasState.kind === "error"
       ? canvasState
       : null
-  const headerStatus = model.isDemo
-    ? "Demo"
-    : mappingActive
-      ? MAPPING_STAGES[mappingStage]
-      : canvasState.kind === "empty"
-        ? "Mapping needed"
-        : canvasState.kind === "error"
-          ? "Needs attention"
-          : "Up to date"
+  const headerStatus = mappingActive ? MAPPING_STAGES[mappingStage] : canvasSource.shortLabel
 
   if (contextLoading) {
     return (
@@ -360,7 +360,7 @@ export default function App() {
           <BrandMark />
         </button>
         <div className="min-w-0 flex-1">
-          <Provenance context={context} demoMode={model.isDemo || context.isDemo} />
+          <Provenance context={context} demoMode={model.isDemo || context.isDemo} source={canvasSource} />
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <span className="mr-1 hidden text-xs text-muted-foreground sm:inline">
@@ -410,6 +410,7 @@ export default function App() {
               workspaceName={context.workspace || model.appName}
               message={workspaceState.message}
               detail={workspaceState.detail}
+              source={canvasSource}
               onRetry={() => load({ refresh: true })}
             />
           ) : inJourney ? (
@@ -428,6 +429,7 @@ export default function App() {
             <Overview
               appName={model.appName}
               productLanguage={context.productLanguage}
+              source={canvasSource}
               journeys={orderedJourneys}
               changes={localChanges}
               activity={journeyActivity}
@@ -486,37 +488,206 @@ async function loadWorkspaceModel(refresh: boolean): Promise<WorkspaceModelResul
 }
 
 function emptyWorkspaceDetail(result: WorkspaceModelResult): string {
-  const source = "The canvas endpoint returned no flows yet."
+  const source = "No readable flows are ready yet."
   return result.notice ? `${result.notice} ${source}` : source
 }
 
 function mappingNotice(mapping?: CanvasMapping): string | undefined {
   const warning = mapping?.warnings?.find(Boolean)
-  if (warning) return warning
-  if (mapping?.mode === "heuristic" && mapping.primaryMode === "llm-assisted") {
-    return "This is the grounded starter map. The calling LLM can refine it with the projection contract."
+  if (warning) return plainMappingWarning(warning)
+  if (isHeuristicMap(mapping)) {
+    return "This is a starter view built from project clues. Ask your assistant to review it before you rely on it."
   }
   return undefined
 }
 
 function isStarterMap(mapping?: CanvasMapping): boolean {
-  return mapping?.mode === "deterministic" && mapping.primaryMode === "llm-assisted"
+  return isHeuristicMap(mapping) && mapping?.primaryMode === "llm-assisted"
+}
+
+function isUnreadyMap(mapping?: CanvasMapping): boolean {
+  return Boolean(mapping?.empty || mapping?.source?.isEmpty || mapping?.mode === "empty" || isStarterMap(mapping))
 }
 
 function starterMapDetail(result: WorkspaceModelResult, assistant?: string): string {
-  const agent = assistant || "your assistant"
+  const helper = assistant || "your assistant"
+  if (result.mapping?.empty || result.mapping?.source?.isEmpty) {
+    return `AgentCanvas looked through the project, but no readable flows are ready yet. Ask ${helper} to turn what it found into a plain-English map; this page will update when the map is saved.`
+  }
   const count = result.model.journeys.length
   const starter = count
-    ? `AgentCanvas found ${count} starter entr${count === 1 ? "y" : "ies"}, but they are only indexed surfaces, not the finished human map.`
-    : "AgentCanvas refreshed the repo evidence, but no authored flows are ready yet."
-  return `${starter} ${agent} needs to translate the evidence into .agentcanvas/canvas.ir.json; this page will update when that file is written.`
+    ? `AgentCanvas found ${count} starter place${count === 1 ? "" : "s"}, but no finished plain-English map yet.`
+    : "AgentCanvas looked through the project, but no readable flows are ready yet."
+  return `${starter} Ask ${helper} to turn what AgentCanvas found into readable flows; this page will update when the map is saved.`
 }
 
 function canvasSignature(result: WorkspaceModelResult): string {
   return JSON.stringify({
     model: result.model,
+    mapping: result.mapping,
     notice: result.notice,
   })
+}
+
+function describeCanvasSource(
+  context: AppContext,
+  model: AppModel,
+  state: CanvasState
+): CanvasSourceSummary {
+  const mapping = state.mapping
+  const source = mapping?.source
+  const sourceKind = source?.kind || mapping?.mode
+  const flowCount = source?.flowCount ?? mapping?.flowCount ?? model.journeys.length
+
+  if (sourceKind === "demo-fallback" || mapping?.demoFallback || context.demoFallback) {
+    return {
+      kind: "demo-fallback",
+      label: "Example map",
+      shortLabel: "Example",
+      detail: "This is sample content because no project was connected yet.",
+      tone: "info",
+      flowCount,
+    }
+  }
+
+  if (model.isDemo || context.isDemo || context.isDemoContent || context.mode === "demo" || sourceKind === "demo") {
+    return {
+      kind: "demo",
+      label: "Example project",
+      shortLabel: "Example",
+      detail: "You are looking at sample flows, not your own project.",
+      tone: "info",
+      flowCount,
+    }
+  }
+
+  if (state.kind === "loading" || state.kind === "reindexing") {
+    return {
+      kind: "loading",
+      label: state.kind === "reindexing" ? "Refreshing this project" : "Reading this project",
+      shortLabel: state.kind === "reindexing" ? "Refreshing" : "Reading",
+      detail: "AgentCanvas is looking through the project and preparing the map.",
+      tone: "info",
+      flowCount,
+    }
+  }
+
+  if (state.kind === "error") {
+    return {
+      kind: "error",
+      label: "Map not available",
+      shortLabel: "Needs attention",
+      detail: "AgentCanvas could not open this project's map.",
+      tone: "error",
+      flowCount,
+    }
+  }
+
+  if (state.kind === "empty" || !model.journeys.length) {
+    return {
+      kind: "no-flow",
+      label: "No map yet",
+      shortLabel: "No map yet",
+      detail: "AgentCanvas has looked at the project, but no readable flows are ready yet.",
+      tone: "warning",
+      flowCount,
+    }
+  }
+
+  if (isStaleMap(mapping)) {
+    return {
+      kind: "stale-cache",
+      label: "Saved map may be out of date",
+      shortLabel: "Saved copy",
+      detail: "The project changed after this map was saved. Ask your assistant to refresh it if the behavior changed.",
+      tone: "warning",
+      flowCount,
+    }
+  }
+
+  if (isAgentAuthoredMap(mapping)) {
+    return {
+      kind: "agent-authored",
+      label: "Made by your assistant",
+      shortLabel: "Assistant map",
+      detail: "These flows come from a saved map your assistant wrote from the project.",
+      tone: "info",
+      flowCount,
+    }
+  }
+
+  if (isHeuristicMap(mapping)) {
+    return {
+      kind: "heuristic-projection",
+      label: "Starter view from project clues",
+      shortLabel: "Starter view",
+      detail: "AgentCanvas built this first pass from project structure. Treat it as a starting point until your assistant reviews it.",
+      tone: "warning",
+      flowCount,
+    }
+  }
+
+  return {
+    kind: "unknown",
+    label: source?.label || "Saved project map",
+    shortLabel: "Saved map",
+    detail: "These flows come from the current map saved for this project.",
+    tone: "default",
+    flowCount,
+  }
+}
+
+function isAgentAuthoredMap(mapping?: CanvasMapping): boolean {
+  return mapping?.mode === "agent-authored" || mapping?.primaryMode === "agent-authored" || mapping?.source?.kind === "agent-authored"
+}
+
+function isHeuristicMap(mapping?: CanvasMapping): boolean {
+  return (
+    mapping?.mode === "heuristic" ||
+    mapping?.mode === "heuristic-projection" ||
+    mapping?.mode === "deterministic" ||
+    mapping?.source?.kind === "heuristic-projection"
+  )
+}
+
+function isStaleMap(mapping?: CanvasMapping): boolean {
+  return Boolean(
+    mapping?.stale ||
+      mapping?.source?.isStale ||
+      looksStale(mapping?.status) ||
+      looksStale(mapping?.cacheStatus) ||
+      looksStale(mapping?.source?.status) ||
+      mapping?.warnings?.some((warning) => looksStale(warning) || /refreshed after|kept the canvas|behavior changed/i.test(warning))
+  )
+}
+
+function looksStale(value?: string): boolean {
+  return Boolean(value && /stale|out[-_\s]?of[-_\s]?date|expired/i.test(value))
+}
+
+function plainMappingWarning(warning: string): string {
+  if (/refreshed after|kept the canvas|behavior changed|stale|out[-_\s]?of[-_\s]?date/i.test(warning)) {
+    return "This saved map may be out of date because the project changed after it was written."
+  }
+  if (/no displayable flows|no authored flows|no flows/i.test(warning)) {
+    return "AgentCanvas could not find readable flows for this project yet."
+  }
+  if (/projection|llm|deterministic|heuristic|schema|contract|\.agentcanvas/i.test(warning)) {
+    return "AgentCanvas found project details that still need a clearer plain-English map."
+  }
+  return warning
+}
+
+function plainLoadError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401 || error.status === 403) {
+      return "This AgentCanvas link does not have access to the project anymore. Open AgentCanvas again from the project."
+    }
+    if (error.status === 404) {
+      return "The local AgentCanvas server did not have a map ready. Try again, or restart AgentCanvas for this project."
+    }
+  }
+  return "Try again, or restart AgentCanvas if the local app stopped."
 }
 
 function WorkspaceNotice({ message }: { message: string }) {

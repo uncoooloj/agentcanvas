@@ -136,21 +136,34 @@ If an agent is launching AgentCanvas, it can pass its name and session id:
 agentcanvas start --workspace /path/to/your/project --agent codex --session-id <session-id>
 ```
 
-## Landing And Demo Mode
+## What Happens When It Starts
 
-Landing mode is what you see when no workspace is selected. It should make the
-next step obvious: open a real workspace or try the demo.
+AgentCanvas has three startup states. The difference is where the project facts
+come from and where AgentCanvas writes its local files.
 
-Demo mode uses a bundled sample app, but it still runs through the real indexer,
-server, pending-request files, and status loop. The UI should always make demo
-mode obvious so nobody thinks the sample app is their own repo or that a live
-agent is connected when it is not.
+- **No workspace yet**: `agentcanvas start` opens a landing page. It has not
+  read your repo and it should not pretend it has. Pick a real workspace or try
+  the demo.
+- **Demo mode**: `agentcanvas start --demo` opens a bundled sample project. It
+  uses the real indexer, server, pending-request files, and status loop, but the
+  files belong to the sample project. The UI should keep saying `Demo mode` so
+  nobody mistakes it for their own repo.
+- **Workspace mode**: `agentcanvas start --workspace /path/to/project` works
+  inside that project. AgentCanvas writes its state under
+  `<workspace>/.agentcanvas/`, reads repo evidence from there, and shows the
+  canvas for that workspace.
+
+Starting or indexing a workspace does not change source code. It creates or
+refreshes AgentCanvas files. Source-code changes only happen later, when the
+user explicitly asks for implementation and an agent works from a pending
+request.
 
 See [docs/demo-mode.md](docs/demo-mode.md) for the product rules.
 
 ## Workspace Mode
 
-Workspace mode is the real use case.
+Workspace mode is the real use case. It means "map this project, keep the map
+beside the project, and let agents use that map before they edit code."
 
 AgentCanvas writes all local state under the selected repo:
 
@@ -166,9 +179,19 @@ AgentCanvas writes all local state under the selected repo:
 Markdown and JSON files are for implementation requests, not normal canvas-only
 edits.
 
-The invoking agent should keep translating repo behavior into human-readable
-flows and update `canvas.ir.json` as the user edits the canvas. Preserve evidence
-links where possible, and use plain language over file-inventory language.
+The invoking agent authors the display canvas. In plain English:
+
+1. AgentCanvas indexes the repo into `workflow.ir.json`.
+2. The agent reads that evidence and asks questions if the intended journey,
+   actor, outcome, or source evidence is unclear.
+3. The agent writes or updates `canvas.ir.json` with human-readable flows.
+4. The browser reads `canvas.ir.json`.
+5. Canvas-only edits keep updating `canvas.ir.json`.
+6. Explicit implementation requests create pending Markdown and JSON files.
+
+Preserve evidence links where possible, and use plain language over file
+inventory language. A person should see what the project does, not just which
+files exist.
 
 ## Send Changes To A Coding Agent
 
@@ -236,7 +259,10 @@ into any coding agent. The prompt includes the workspace, pending file paths,
 acceptance details, status commands, and the reminder to test and re-index after
 code changes.
 
-This keeps AgentCanvas useful before deeper integrations exist.
+This keeps AgentCanvas useful before deeper integrations exist. The copy prompt
+should also remind the receiving agent to inspect the current workspace and ask
+one clear question before editing if the requested change, affected flow,
+acceptance criteria, or verification path is unclear.
 
 ## Agent-Agnostic By Design
 
@@ -261,7 +287,13 @@ See [docs/adapters.md](docs/adapters.md) for adapter notes and prompt snippets.
 
 ## Language And Monorepo Support
 
-AgentCanvas now has a broader core indexing layer.
+AgentCanvas treats LLM- or agent-authored maps as the primary experience.
+Parsers and indexers are helpers: they collect grounded facts, file paths, and
+evidence so an agent can write a better plain-English canvas.
+
+That posture is intentional. A parser can find routes, branches, functions, and
+files. It should not be expected to perfectly understand the whole product by
+itself. The agent-authored canvas is where the project becomes readable.
 
 Built-in MVP language modules:
 
@@ -275,8 +307,10 @@ Built-in MVP language modules:
 - Kotlin
 
 The goal is not to perfectly compile every language on day one. The goal is to
-collect grounded facts with file paths and evidence, then let the projection
-layer turn those facts into a canvas a person can read.
+collect honest facts with paths and evidence, then let the projection layer or
+invoking agent turn those facts into a canvas a person can read. Stronger
+parsers are welcome when they improve grounding, speed, or evidence quality, but
+they are optimizations around the same agent-authored workflow.
 
 For monorepos, AgentCanvas keeps app surfaces separate instead of flattening
 everything into one generic graph. A repo with `apps/customer-web`,

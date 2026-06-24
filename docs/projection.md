@@ -34,6 +34,33 @@ re-indexing, because no repo evidence changed.
 validation and materialization path. Applying a query writes the display canvas.
 It does not overwrite `workflow.ir.json` or rewrite repo facts.
 
+## Agent-Authored Canvas Workflow
+
+The readable canvas is authored by an agent or LLM using grounded evidence. The
+indexer helps by collecting facts; it is not the final map.
+
+The expected workflow is:
+
+1. Index the workspace into `.agentcanvas/workflow.ir.json`.
+2. Read the raw evidence, especially `source_facts`, `projection_contract`, and
+   any `app_surfaces`.
+3. If the journey, actor, outcome, affected surface, or evidence is unclear, ask
+   a short plain-English question before writing the canvas.
+4. Generate or edit `agentcanvas.canvas_query.v1` operations using `When`, `Do`,
+   `If`, `ElseIf`, and `Else`.
+5. Cite `fact_ids` for repo claims.
+6. Validate with `agentcanvas apply-query --dry-run`.
+7. Apply only after validation passes, writing `.agentcanvas/canvas.ir.json`.
+
+Canvas-only edits continue from the same file. The agent reads
+`.agentcanvas/canvas.ir.json`, applies the map change, preserves evidence where
+possible, and does not touch source code unless the user explicitly asks for
+implementation.
+
+If no live model adapter exists, this same workflow can happen in copy/manual
+mode: copy the prompt and source facts into another agent, validate the returned
+query, then apply it through the CLI.
+
 ## Plain Version
 
 The safe flow is:

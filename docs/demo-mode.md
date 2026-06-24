@@ -6,6 +6,19 @@ repo.
 It should feel like the real product, not a fake frontend mock. It should also
 be clearly labeled so nobody mistakes it for their workspace.
 
+## Plain-English Difference
+
+- **Landing mode** is the front door. AgentCanvas has not opened a project yet,
+  so it should only help the user choose a workspace or try the demo.
+- **Demo mode** opens a bundled sample project. It runs the real AgentCanvas
+  loop, but the files are sample files, not the user's repo.
+- **Workspace mode** opens the user's project. AgentCanvas writes local state
+  under that project in `.agentcanvas/` and shows the map for that workspace.
+
+Opening demo mode or workspace mode can create AgentCanvas files. It should not
+change source code. Source-code changes only happen through an explicit
+implementation request that an agent picks up, verifies, and marks with status.
+
 ## How To Start It
 
 Explicit demo:
@@ -27,6 +40,8 @@ landing page.
 
 - Demo mode uses a bundled sample project.
 - Demo mode runs through the same indexer and server as a real workspace.
+- Demo mode writes AgentCanvas state for the sample project, not the user's
+  real project.
 - Canvas edits create normal pending requests under the demo workspace.
 - Status updates use the same `agentcanvas status` and `/api/status` paths.
 - Re-index uses the same `agentcanvas index` and `/api/reindex` paths.

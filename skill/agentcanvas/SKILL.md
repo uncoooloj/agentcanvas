@@ -122,6 +122,19 @@ from the grounded evidence. Keep the display canvas human-readable: use journeys
 steps, branches, lanes, and provenance instead of a raw file inventory. Follow
 the plain-English map authoring rules for all visible titles and labels.
 
+Plain-English startup behavior:
+
+- No workspace: `agentcanvas start` opens the landing page only. It has not read
+  the user's project yet.
+- Demo: `agentcanvas start --demo` opens a bundled sample project and uses the
+  real AgentCanvas loop, but all AgentCanvas state belongs to the sample.
+- Workspace: `agentcanvas start --workspace <workspace>` writes local
+  AgentCanvas state under `<workspace>/.agentcanvas/` and maps that project.
+
+Starting, indexing, or projecting should not change source code. Source-code
+changes only happen when there is an explicit implementation request and the
+agent has clarified anything unclear before execution.
+
 ## No Workspace And Demo
 
 Use the no-workspace landing when no project is selected:
@@ -257,11 +270,15 @@ implementation requests.
 
 ## LLM Projection
 
-LLM-assisted projection is the intended path for turning source facts into the
-human-readable display canvas. AgentCanvas prepares facts and a provider-neutral
-contract; the invoking agent or model reads them, asks for clarification if
-needed, generates an `agentcanvas.canvas_query.v1`, validates it, then applies
-it to `.agentcanvas/canvas.ir.json`.
+LLM- or agent-assisted projection is the intended path for turning source facts
+into the human-readable display canvas. AgentCanvas prepares facts and a
+provider-neutral contract; the invoking agent or model reads them, asks for
+clarification if needed, generates an `agentcanvas.canvas_query.v1`, validates
+it, then applies it to `.agentcanvas/canvas.ir.json`.
+
+Treat parsers and indexers as helpers. They collect routes, files, branches, and
+other evidence. The visible map is authored or reviewed by the agent/LLM so it
+can use plain language and ask questions when the evidence is not enough.
 
 Before generating or applying a projection, read:
 

@@ -113,6 +113,9 @@ still keep canvas-only edits in `.agentcanvas/canvas.ir.json`. For source-code
 implementation, it should create the pending request and show a prompt the user
 can paste into any coding agent.
 
+This is not a failure state. It is the portable path for nontechnical users who
+want a clear handoff without caring which agent receives it.
+
 The implementation prompt should include:
 
 - workspace path
@@ -174,6 +177,8 @@ agentcanvas status --workspace <workspace> <pending-id> --status done --note "Im
 
 - Keep adapters optional.
 - Keep files and CLI commands usable without adapters.
+- Treat the readable canvas as agent-authored. Indexers and parsers provide
+  evidence; they do not replace the plain-English map.
 - Prefer the Markdown request as the readable source for implementation work.
 - Use JSON for ids, files, node references, and acceptance criteria.
 - Update `.agentcanvas/canvas.ir.json` for canvas-only edits.

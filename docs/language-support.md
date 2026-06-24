@@ -5,7 +5,16 @@ useful. The primary MVP path is LLM-assisted projection: language modules gather
 grounded facts, chunks, and provenance, then the calling agent or LLM translates
 those facts into human-readable canvas flows.
 
-Language support is therefore a grounding layer, not the whole product.
+Language support is therefore a grounding layer, not the whole product. The
+primary product experience is still an LLM- or agent-authored map that a person
+can read.
+
+In simple terms:
+
+- parsers and indexers find evidence
+- agents and LLMs turn that evidence into the visible canvas
+- stronger parsers make the evidence better, but they do not replace the
+  agent-authored canvas
 
 ## Architecture
 
@@ -232,7 +241,10 @@ stronger parser when it materially improves one of these:
 - source ranges and provenance
 
 Keep the module API stable so the parser strategy can improve without changing
-the rest of AgentCanvas.
+the rest of AgentCanvas. Treat parser upgrades as better evidence collection,
+not a change in product philosophy. The final map should still be written or
+reviewed by an agent/LLM that can ask clarifying questions when the evidence is
+not enough.
 
 ## Non-Goals
 

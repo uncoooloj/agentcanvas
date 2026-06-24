@@ -20,6 +20,8 @@ after the request is clear, verify, re-index to refresh evidence, update status.
 For projection prompts, keep the same safety loop: inspect `source_facts` and
 `app_surfaces`, clarify before applying unclear output, generate grounded
 human-readable journeys, validate, then apply to `.agentcanvas/canvas.ir.json`.
+Treat parsers and indexers as evidence helpers. The visible map should still be
+agent-authored or agent-reviewed in plain English.
 
 ## Canvas Edit Prompt
 
@@ -94,6 +96,25 @@ Once clear, mark the request in_progress, make the smallest change that satisfie
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
 agentcanvas index --workspace <workspace>
 agentcanvas status --workspace <workspace> <pending-id> --status done --note "Implemented and verified: <test or smoke check>."
+```
+
+## Copy Projection Template
+
+```text
+Use AgentCanvas to author the visible canvas for this workspace:
+<workspace>
+
+Read .agentcanvas/workflow.ir.json, especially source_facts, projection_contract, and app_surfaces. If .agentcanvas/canvas.ir.json already exists, read it too.
+
+Use the indexed facts as evidence, not as the final map. Write a plain-English canvas for a non-technical project owner using When, Do, If, ElseIf, and Else. Cite fact_ids for repo claims and keep source paths, routes, package names, and schema terms in provenance/details instead of visible titles.
+
+If the intended journey, actor, outcome, affected surface, or evidence is unclear, ask the fewest useful plain-language questions before writing. Once clear, generate agentcanvas.canvas_query.v1, validate with:
+
+agentcanvas apply-query --workspace <workspace> --query <canvas-query.json> --dry-run
+
+Apply only after validation passes:
+
+agentcanvas apply-query --workspace <workspace> --query <canvas-query.json>
 ```
 
 ## Portable Projection Prompt

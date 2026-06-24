@@ -21,4 +21,15 @@ agentcanvas start --demo
 agentcanvas start
 ```
 
+Startup modes should stay obvious in the UI:
+
+- `start` means no project is open yet.
+- `start --demo` means the bundled sample project is open.
+- `start --workspace` means AgentCanvas is reading and writing
+  `.agentcanvas/` files beside the user's project.
+
+The frontend should read the display canvas from `.agentcanvas/canvas.ir.json`
+through the local API. The map is agent-authored from indexed evidence; parser
+output is supporting detail, not the visible user-facing story.
+
 Use `npm run dev` only when actively working on the UI.

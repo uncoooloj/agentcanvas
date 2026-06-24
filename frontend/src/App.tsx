@@ -40,7 +40,14 @@ const MAPPING_STAGES = [
 
 type CanvasState =
   | { kind: "idle" | "ready"; notice?: string; mapping?: CanvasMapping }
-  | { kind: "loading" | "reindexing" | "empty" | "error"; message?: string; detail?: string; notice?: string; mapping?: CanvasMapping }
+  | {
+      kind: "loading" | "reindexing" | "empty" | "error"
+      message?: string
+      detail?: string
+      fallbackPrompt?: string
+      notice?: string
+      mapping?: CanvasMapping
+    }
 
 type WorkspaceModelResult = {
   model: AppModel
@@ -137,6 +144,7 @@ export default function App() {
           kind: "empty",
           message: "No readable map yet",
           detail: starterMapDetail(result, context.assistant),
+          fallbackPrompt: mapFallbackPrompt(result, context),
           mapping: result.mapping,
         })
       } else if (!result.model.journeys.length) {
@@ -145,6 +153,7 @@ export default function App() {
           kind: "empty",
           message: "No readable map yet",
           detail: emptyWorkspaceDetail(result),
+          fallbackPrompt: mapFallbackPrompt(result, context),
           mapping: result.mapping,
         })
       } else {
@@ -192,6 +201,7 @@ export default function App() {
             kind: "empty",
             message: "No readable map yet",
             detail: starterMapDetail(result, context.assistant),
+            fallbackPrompt: mapFallbackPrompt(result, context),
             mapping: result.mapping,
           })
         } else if (!result.model.journeys.length) {
@@ -200,6 +210,7 @@ export default function App() {
             kind: "empty",
             message: "No readable map yet",
             detail: emptyWorkspaceDetail(result),
+            fallbackPrompt: mapFallbackPrompt(result, context),
             mapping: result.mapping,
           })
         } else {
@@ -410,6 +421,7 @@ export default function App() {
               workspaceName={context.workspace || model.appName}
               message={workspaceState.message}
               detail={workspaceState.detail}
+              fallbackPrompt={workspaceState.fallbackPrompt}
               source={canvasSource}
               onRetry={() => load({ refresh: true })}
             />
@@ -519,6 +531,19 @@ function starterMapDetail(result: WorkspaceModelResult, assistant?: string): str
     ? `AgentCanvas found ${count} starter place${count === 1 ? "" : "s"}, but no finished plain-English map yet.`
     : "AgentCanvas looked through the project, but no readable flows are ready yet."
   return `${starter} Ask ${helper} to turn what AgentCanvas found into readable flows; this page will update when the map is saved.`
+}
+
+function mapFallbackPrompt(result: WorkspaceModelResult, context: AppContext): string {
+  const workspace = context.workspace || result.model.appName || "this project"
+  const action =
+    isStarterMap(result.mapping) && !result.mapping?.empty && !result.mapping?.source?.isEmpty
+      ? "refresh the AgentCanvas starter view"
+      : "author an AgentCanvas map"
+  return [
+    `Please ${action} for ${workspace}.`,
+    "Use the current project as the source of truth.",
+    "Name the main user flows in plain English, save the AgentCanvas map, and tell me to refresh this page.",
+  ].join(" ")
 }
 
 function canvasSignature(result: WorkspaceModelResult): string {

@@ -1,5 +1,7 @@
-import { AlertCircle, Check, Circle, Loader2, RefreshCw, Search, Sparkles } from "lucide-react"
+import { useState } from "react"
+import { AlertCircle, Check, Circle, Clipboard, Loader2, RefreshCw, Search, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import type { CanvasSourceSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -19,6 +21,7 @@ interface Props {
   workspaceName: string
   message?: string
   detail?: string
+  fallbackPrompt?: string
   source?: CanvasSourceSummary
   onRetry: () => void
 }
@@ -29,6 +32,7 @@ export function WorkspaceMappingState({
   workspaceName,
   message,
   detail,
+  fallbackPrompt,
   source,
   onRetry,
 }: Props) {
@@ -116,7 +120,8 @@ export function WorkspaceMappingState({
             </div>
           </div>
         ) : (
-          <div className="mt-5 flex flex-wrap items-center gap-3">
+          <div className="mt-5 space-y-4">
+            {kind === "empty" && fallbackPrompt && <CopyMapPrompt prompt={fallbackPrompt} />}
             <Button type="button" onClick={onRetry} className="gap-2">
               <RefreshCw className="size-4" />
               Try again
@@ -124,6 +129,51 @@ export function WorkspaceMappingState({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function CopyMapPrompt({ prompt }: { prompt: string }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "manual">("idle")
+
+  async function copyPrompt() {
+    try {
+      await navigator.clipboard.writeText(prompt)
+      setCopyState("copied")
+      window.setTimeout(() => setCopyState("idle"), 1600)
+    } catch {
+      setCopyState("manual")
+    }
+  }
+
+  return (
+    <div className="rounded-md border bg-secondary/30 p-3">
+      <p className="text-xs font-medium text-muted-foreground">Paste this into your agent</p>
+      <div className="mt-2 flex items-center gap-2">
+        <Input
+          readOnly
+          value={prompt}
+          aria-label="Instruction to paste into your agent"
+          className="h-9 min-w-0 flex-1 text-xs text-muted-foreground"
+          onFocus={(event) => event.currentTarget.select()}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={copyPrompt}
+          aria-label="Copy agent instruction"
+        >
+          {copyState === "copied" ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
+          {copyState === "copied" ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      {copyState === "manual" && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Clipboard blocked. Select the text above.
+        </p>
+      )}
     </div>
   )
 }

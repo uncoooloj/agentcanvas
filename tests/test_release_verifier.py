@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -61,6 +62,68 @@ class ReleaseVerifierTests(unittest.TestCase):
 
         self.assertIn("could not start", str(raised.exception))
         self.assertIn("missing-tool", str(raised.exception))
+
+    def test_run_step_can_map_exit_code_to_clear_message(self):
+        verifier = load_verifier()
+
+        completed = subprocess.CompletedProcess(["blocked-tool"], 2)
+        with patch("subprocess.run", return_value=completed), redirect_stdout(StringIO()):
+            with self.assertRaises(verifier.VerificationError) as raised:
+                verifier.run_step(
+                    "Blocked command",
+                    ["blocked-tool"],
+                    PROJECT_ROOT,
+                    returncode_messages={2: "localhost permission blocked"},
+                )
+
+        self.assertEqual(str(raised.exception), "localhost permission blocked")
+
+    def test_runtime_smoke_argument_defaults_to_enabled(self):
+        verifier = load_verifier()
+
+        args = verifier.build_parser().parse_args([])
+
+        self.assertFalse(args.skip_runtime_smoke)
+
+    def test_runtime_smoke_argument_can_be_skipped(self):
+        verifier = load_verifier()
+
+        args = verifier.build_parser().parse_args(["--skip-runtime-smoke"])
+
+        self.assertTrue(args.skip_runtime_smoke)
+
+    def test_python_checks_run_runtime_smoke_after_cli_by_default(self):
+        verifier = load_verifier()
+        labels = []
+
+        def fake_run_step(label, *args, **kwargs):
+            labels.append(label)
+
+        with patch.object(verifier, "run_step", side_effect=fake_run_step):
+            verifier.run_python_checks()
+
+        self.assertEqual(
+            labels,
+            [
+                "Python unit tests",
+                "AgentCanvas CLI smoke test",
+                "AgentCanvas runtime API smoke test",
+            ],
+        )
+
+    def test_python_checks_can_skip_runtime_smoke(self):
+        verifier = load_verifier()
+        labels = []
+
+        def fake_run_step(label, *args, **kwargs):
+            labels.append(label)
+
+        with patch.object(verifier, "run_step", side_effect=fake_run_step), redirect_stdout(
+            StringIO()
+        ):
+            verifier.run_python_checks(skip_runtime_smoke=True)
+
+        self.assertEqual(labels, ["Python unit tests", "AgentCanvas CLI smoke test"])
 
 
 if __name__ == "__main__":

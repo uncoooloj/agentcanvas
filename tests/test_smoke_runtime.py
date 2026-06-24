@@ -1,6 +1,8 @@
 import importlib.util
 import unittest
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -146,6 +148,23 @@ class RuntimeSmokeTests(unittest.TestCase):
             summary,
             "PermissionError: [Errno 1] Operation not permitted",
         )
+
+    def test_main_reports_sandbox_permission_without_traceback(self):
+        smoke = load_smoke_runtime()
+        stderr = StringIO()
+
+        with patch.object(
+            smoke,
+            "run_smoke",
+            side_effect=smoke.SandboxPermissionError("localhost blocked"),
+        ), patch("sys.stderr", stderr):
+            code = smoke.main([])
+
+        message = stderr.getvalue()
+        self.assertEqual(code, 2)
+        self.assertIn("SANDBOX PERMISSION BLOCKED", message)
+        self.assertIn("localhost blocked", message)
+        self.assertNotIn("Traceback", message)
 
 
 if __name__ == "__main__":

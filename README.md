@@ -429,10 +429,20 @@ Run the release verifier before publishing to GitHub, PyPI, or Cloudflare:
 python3 scripts/verify_release.py
 ```
 
-The verifier runs Python unit tests, the CLI smoke test, and two frontend builds:
-one for the packaged local web assets and one for the Cloudflare
-`/agentcanvas/` path. Use the full verifier when a release, frontend asset, or
-Cloudflare deploy could be affected.
+The verifier runs Python unit tests, the CLI smoke test, the runtime API smoke
+against `examples/sample-js-app`, and two frontend builds: one for the packaged
+local web assets and one for the Cloudflare `/agentcanvas/` path. Use the full
+verifier when a release, frontend asset, local API behavior, or Cloudflare
+deploy could be affected.
+
+The runtime API smoke starts AgentCanvas on a random localhost port and checks
+`/api/context` and `/api/canvas`. If your environment cannot bind or request
+localhost, use the explicit escape hatch and record that runtime coverage was
+not verified there:
+
+```bash
+python3 scripts/verify_release.py --skip-runtime-smoke
+```
 
 Use the Python-only path only when the change cannot affect the browser app or
 packaged frontend assets, for example a docs-only change or a Python-only check

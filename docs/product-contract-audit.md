@@ -206,6 +206,14 @@ Contract:
 - `POST /api/status`: update request status.
 - `POST /api/reindex`: re-index the workspace.
 
+Release verification contract:
+
+- `python3 scripts/verify_release.py` runs the runtime API smoke by default
+  after CLI smoke. It starts the sample workspace on localhost and verifies
+  `/api/context` and `/api/canvas`.
+- `--skip-runtime-smoke` is only for environments that cannot bind or request
+  localhost; using it means the release check did not prove the live API path.
+
 Next:
 
 - Document request/response shapes once they stabilize.

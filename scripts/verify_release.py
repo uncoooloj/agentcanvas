@@ -34,7 +34,7 @@ def with_project_pythonpath():
     return env
 
 
-def run_step(label, command, cwd, env=None, timeout=300):
+def run_step(label, command, cwd, env=None, timeout=300, returncode_messages=None):
     print(f"\n== {label} ==", flush=True)
     print(f"Command: {command_text(command)}", flush=True)
     print(f"Working directory: {cwd}", flush=True)
@@ -58,6 +58,8 @@ def run_step(label, command, cwd, env=None, timeout=300):
         )
 
     if completed.returncode != 0:
+        if returncode_messages and completed.returncode in returncode_messages:
+            raise VerificationError(returncode_messages[completed.returncode])
         raise VerificationError(
             f"{label} failed with exit code {completed.returncode}. "
             "Read the command output above for the failing details."
@@ -135,7 +137,26 @@ def run_frontend_builds():
         )
 
 
-def run_python_checks():
+def run_runtime_smoke(env):
+    run_step(
+        "AgentCanvas runtime API smoke test",
+        [sys.executable, "scripts/smoke_runtime.py"],
+        PROJECT_ROOT,
+        env=env,
+        timeout=120,
+        returncode_messages={
+            2: (
+                "AgentCanvas runtime API smoke test was blocked by local sandbox "
+                "permissions for localhost binding or requests. Rerun with "
+                "permission to bind/connect to 127.0.0.1, or use "
+                "`--skip-runtime-smoke` only when this environment cannot bind "
+                "localhost."
+            )
+        },
+    )
+
+
+def run_python_checks(skip_runtime_smoke=False):
     env = with_project_pythonpath()
     run_step(
         "Python unit tests",
@@ -151,9 +172,14 @@ def run_python_checks():
         env=env,
         timeout=120,
     )
+    if skip_runtime_smoke:
+        print("\n== AgentCanvas runtime API smoke test ==", flush=True)
+        print("Skipped by --skip-runtime-smoke.", flush=True)
+    else:
+        run_runtime_smoke(env)
 
 
-def main(argv=None):
+def build_parser():
     parser = argparse.ArgumentParser(
         description=(
             "Run lightweight AgentCanvas release checks before publishing to "
@@ -165,13 +191,25 @@ def main(argv=None):
         action="store_true",
         help="Run only Python checks. Use this only when frontend verification is not needed.",
     )
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--skip-runtime-smoke",
+        action="store_true",
+        help=(
+            "Skip the localhost runtime API smoke. Use only in environments "
+            "that cannot bind or request localhost."
+        ),
+    )
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
 
     print("AgentCanvas release verification", flush=True)
     print(f"Project root: {PROJECT_ROOT}", flush=True)
 
     try:
-        run_python_checks()
+        run_python_checks(skip_runtime_smoke=args.skip_runtime_smoke)
         if args.skip_frontend:
             print("\n== Frontend build ==", flush=True)
             print("Skipped by --skip-frontend.", flush=True)

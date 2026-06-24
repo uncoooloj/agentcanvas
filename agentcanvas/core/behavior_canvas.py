@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from .workspace_profile import infer_workspace_profile
+
 BEHAVIOR_CANVAS_SCHEMA = "agentcanvas.behavior_canvas.v1"
 BEHAVIOR_CANVAS_WRAPPER_SCHEMA = "agentcanvas.behavior_canvas_response.v1"
 CANVAS_MAPPING_SCHEMA = "agentcanvas.canvas_mapping.v1"
@@ -129,6 +131,7 @@ def workflow_ir_to_behavior_canvas(
     workspace_info = workflow_ir.get("workspace") if isinstance(workflow_ir.get("workspace"), Mapping) else {}
     workspace_name = str(workspace_info.get("name") or "Your app")
     workspace_root = Path(workspace) if workspace is not None else _workspace_root(workflow_ir)
+    workspace_profile = infer_workspace_profile(workflow_ir, workspace=workspace_root)
     components = [item for item in workflow_ir.get("components") or [] if isinstance(item, Mapping)]
     component_index = _component_index(components)
 
@@ -167,6 +170,7 @@ def workflow_ir_to_behavior_canvas(
             "source_schema": workflow_ir.get("schema"),
             "generated_at": workflow_ir.get("generated_at"),
             "summary": workflow_ir.get("summary") or {},
+            "workspace_profile": workspace_profile,
             "app_surfaces": _public_app_surfaces(workflow_ir),
             "components": _public_components(components),
             "projection": {
@@ -314,6 +318,7 @@ def _agent_authored_behavior_canvas(
     warnings = [str(item) for item in raw_warnings if item]
     if not ordered:
         warnings.append("Agent-authored canvas had no displayable flows.")
+    workspace_profile = infer_workspace_profile(canvas_model, workspace=workspace)
 
     return {
         "schema": BEHAVIOR_CANVAS_SCHEMA,
@@ -327,6 +332,7 @@ def _agent_authored_behavior_canvas(
             "workspace": str(workspace) if workspace is not None else workspace_info.get("root"),
             "generated_at": canvas_model.get("generated_at"),
             "summary": canvas_model.get("summary") or {},
+            "workspace_profile": workspace_profile,
             "projection": {
                 "mode": "agent-authored",
                 "query_mode": query_mode,

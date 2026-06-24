@@ -26,6 +26,7 @@ from .ir import (
     write_pending_change,
 )
 from .core.behavior_canvas import BEHAVIOR_CANVAS_SCHEMA, build_behavior_canvas
+from .core.workspace_profile import infer_workspace_profile
 
 
 # Known coding-agent platforms that may launch AgentCanvas, with human labels.
@@ -182,6 +183,14 @@ def canvas_cache_is_fresh(workspace: Path) -> bool:
     return path.stat().st_mtime >= ir_path.stat().st_mtime
 
 
+def load_workspace_profile(workspace: Path) -> Dict[str, Any]:
+    try:
+        graph = load_ir(workspace)
+    except FileNotFoundError:
+        graph = None
+    return infer_workspace_profile(graph, workspace=workspace)
+
+
 def make_handler(
     workspace: Path,
     token: str,
@@ -255,6 +264,7 @@ def make_handler(
                 request_session_id = self.request_session_id(parsed)
                 request_demo_mode = self.request_demo_mode(parsed)
                 effective_demo_mode = demo_mode or request_demo_mode
+                workspace_profile = load_workspace_profile(workspace)
                 mode = (
                     "landing"
                     if landing_mode and not request_demo_mode
@@ -268,6 +278,9 @@ def make_handler(
                         "context": {
                             "workspace": workspace.name,
                             "workspacePath": "" if mode == "landing" else str(workspace),
+                            "workspaceKind": workspace_profile["kind"],
+                            "workspaceProfile": workspace_profile,
+                            "productLanguage": workspace_profile["product_language"],
                             "assistantId": assistant_id,
                             "assistant": assistant_name,
                             "mode": mode,

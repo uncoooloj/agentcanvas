@@ -7,6 +7,7 @@ from agentcanvas.core import (
     annotate_bundle_with_surfaces,
     app_surface_for_path,
     detect_app_surfaces,
+    infer_workspace_profile,
 )
 
 
@@ -160,6 +161,83 @@ class AppSurfaceDetectionTests(unittest.TestCase):
             self.assertEqual("web", by_id["web"]["app_surface_type"])
             self.assertEqual("app:backend", by_id["backend"]["app_surface_id"])
             self.assertEqual("backend", by_id["backend"]["app_surface_type"])
+
+    def test_infers_app_workspace_profile_from_web_surface(self):
+        profile = infer_workspace_profile(
+            {
+                "workspace": {"name": "shop"},
+                "summary": {"routes": 0},
+                "app_surfaces": [
+                    {
+                        "id": "app:web",
+                        "name": "web",
+                        "type": "web",
+                        "root": ".",
+                        "manifest_paths": ["package.json"],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual("app", profile["kind"])
+        self.assertEqual("app", profile["product_language"]["singular"])
+
+    def test_infers_backend_workspace_profile_from_routes_and_surface(self):
+        profile = infer_workspace_profile(
+            {
+                "workspace": {"name": "orders-api"},
+                "summary": {"routes": 3},
+                "app_surfaces": [
+                    {
+                        "id": "app:backend",
+                        "name": "backend",
+                        "type": "backend",
+                        "root": ".",
+                        "manifest_paths": ["go.mod"],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual("api_backend", profile["kind"])
+        self.assertEqual("service", profile["product_language"]["singular"])
+
+    def test_infers_library_package_profile_from_package_surface(self):
+        profile = infer_workspace_profile(
+            {
+                "workspace": {"name": "example-sdk"},
+                "summary": {},
+                "package": {"manifests": [{"path": "sdk/python/pyproject.toml"}]},
+                "app_surfaces": [
+                    {
+                        "id": "app:python",
+                        "name": "python",
+                        "type": "package",
+                        "root": "sdk/python",
+                        "manifest_paths": ["sdk/python/pyproject.toml"],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual("library_package", profile["kind"])
+        self.assertEqual("package", profile["product_language"]["singular"])
+
+    def test_infers_monorepo_profile_from_mixed_app_surfaces(self):
+        profile = infer_workspace_profile(
+            {
+                "workspace": {"name": "acme-platform"},
+                "summary": {"routes": 4},
+                "app_surfaces": [
+                    {"id": "app:web", "name": "web", "type": "web", "root": "apps/web"},
+                    {"id": "app:mobile", "name": "mobile", "type": "mobile", "root": "apps/mobile"},
+                    {"id": "app:api", "name": "api", "type": "backend", "root": "apps/api"},
+                ],
+            }
+        )
+
+        self.assertEqual("monorepo_mixed", profile["kind"])
+        self.assertEqual("workspace", profile["product_language"]["singular"])
 
 
 if __name__ == "__main__":

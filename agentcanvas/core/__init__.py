@@ -44,11 +44,16 @@ from .model import (
     validate_canvas_model,
     validate_repo_facts,
 )
+from .workspace_profile import (
+    WORKSPACE_PROFILE_SCHEMA,
+    infer_workspace_profile,
+)
 
 __all__ = [
     "BEHAVIOR_CANVAS_SCHEMA",
     "CANVAS_SCHEMA",
     "CORE_SCHEMA",
+    "WORKSPACE_PROFILE_SCHEMA",
     "CallFact",
     "CanvasModel",
     "CanvasStep",
@@ -74,6 +79,7 @@ __all__ = [
     "build_behavior_canvas",
     "detect_app_surfaces",
     "enrich_app_surfaces",
+    "infer_workspace_profile",
     "make_fact_id",
     "normalize_canvas_model",
     "normalize_http_method",

@@ -117,8 +117,11 @@ class BehaviorCanvasApiTests(unittest.TestCase):
 
             wrapper = build_behavior_canvas(workflow_ir, workspace=root)
             canvas = wrapper["canvas"]
+            profile = canvas["metadata"]["workspace_profile"]
             titles = [journey["title"] for journey in canvas["journeys"]]
 
+            self.assertEqual("tool_product", profile["kind"])
+            self.assertEqual("tool", profile["product_language"]["singular"])
             self.assertIn("`agentcanvas start`", titles)
             self.assertIn("GET /api/canvas", titles)
             self.assertIn("POST /api/reindex", titles)

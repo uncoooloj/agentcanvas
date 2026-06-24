@@ -4,14 +4,31 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "use-agentcanvas"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local editable workflow canvas for AI coding agents."
 readme = "README.md"
 requires-python = ">=3.7"
 license = { text = "MIT" }
 authors = [{ name = "AgentCanvas contributors" }]
 keywords = ["ai-agents", "workflow", "canvas", "developer-tools"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Environment :: Web Environment",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Software Development",
+  "Topic :: Software Development :: Documentation",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/uncoooloj/agentcanvas"
+Repository = "https://github.com/uncoooloj/agentcanvas"
+Issues = "https://github.com/uncoooloj/agentcanvas/issues"
+Changelog = "https://github.com/uncoooloj/agentcanvas/releases"
 
 [project.scripts]
 agentcanvas = "agentcanvas.cli:main"

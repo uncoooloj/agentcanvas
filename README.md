@@ -38,11 +38,11 @@ agent starts editing.
 
 Landing mode:
 
-![AgentCanvas landing page](docs/assets/agentcanvas-landing.png)
+![AgentCanvas landing page](https://raw.githubusercontent.com/uncoooloj/agentcanvas/main/docs/assets/agentcanvas-landing.png)
 
 Demo mode:
 
-![AgentCanvas demo flows](docs/assets/agentcanvas-demo-flows.png)
+![AgentCanvas demo flows](https://raw.githubusercontent.com/uncoooloj/agentcanvas/main/docs/assets/agentcanvas-demo-flows.png)
 
 ## How It Works
 
@@ -68,7 +68,7 @@ Re-indexing refreshes evidence; it is not required after canvas-only edits.
 Install AgentCanvas from PyPI:
 
 ```bash
-python3 -m pip install use-agentcanvas
+python3 -m pip install --upgrade use-agentcanvas
 ```
 
 Then check the CLI:
@@ -82,7 +82,7 @@ The package name is `use-agentcanvas`, but the command is `agentcanvas`.
 The public package page is
 [pypi.org/project/use-agentcanvas](https://pypi.org/project/use-agentcanvas/).
 
-For development, install from the public source repo:
+For development, install from the source repo:
 
 ```bash
 gh repo clone uncoooloj/agentcanvas
@@ -96,7 +96,8 @@ You can also install directly from GitHub:
 python3 -m pip install "use-agentcanvas @ git+https://github.com/uncoooloj/agentcanvas.git"
 ```
 
-You can also run it directly from the source checkout:
+When working from a source checkout, prefer the module form for local checks so
+you do not accidentally run an older globally installed `agentcanvas` command:
 
 ```bash
 python3 -m agentcanvas --help
@@ -357,3 +358,25 @@ fixture:
 ```text
 .agentcanvas/
 ```
+
+## Package And Release Checks
+
+The PyPI package is `use-agentcanvas`. PyPI already has a `0.1.0` release, so a
+new publish needs a later version.
+
+Build and validate locally before publishing:
+
+```bash
+python3 -m build
+python3 -m twine check dist/*.tar.gz dist/*.whl
+```
+
+Publish only after the build artifacts pass `twine check` and the GitHub release
+state is final:
+
+```bash
+python3 -m twine upload dist/*.tar.gz dist/*.whl
+```
+
+Publishing requires PyPI credentials for `use-agentcanvas`. This repository does
+not store those credentials.

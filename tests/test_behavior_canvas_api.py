@@ -102,6 +102,9 @@ class _FakeHandler:
     def authorized(self, _parsed):
         return True
 
+    def request_demo_mode(self, parsed):
+        return self.handler_cls.request_demo_mode(self, parsed)
+
     def write_json(self, payload, status=200):
         self.response = {"status": status, "payload": payload}
 

@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from .indexer import index_workspace
 from .ir import (
+    canvas_map_handoff,
     canvas_ir_path,
     list_pending,
     load_canvas_ir,
@@ -453,6 +454,17 @@ def make_handler(
                     if effective_demo_mode
                     else "workspace"
                 )
+                canvas_handoff = canvas_map_handoff(workspace)
+                if mode == "landing":
+                    canvas_handoff = {
+                        **canvas_handoff,
+                        "readable": False,
+                        "needsAuthoring": False,
+                        "reason": "workspace_not_selected",
+                        "workspacePath": "",
+                        "outputPath": "",
+                        "instruction": None,
+                    }
                 self.write_json(
                     {
                         "ok": True,
@@ -471,6 +483,10 @@ def make_handler(
                             "demoFixture": source["demoFixture"],
                             "source": source,
                             "sessionId": request_session_id,
+                            "handoff": {
+                                "schema": "agentcanvas.handoff.v1",
+                                "canvasMap": canvas_handoff,
+                            },
                         },
                     }
                 )

@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import urlparse
 
+from agentcanvas.ir import canvas_map_handoff
 from agentcanvas.server import make_handler
 
 
@@ -32,6 +33,70 @@ class _FakeHandler:
 
 
 class ServerContextTests(unittest.TestCase):
+    def test_canvas_map_handoff_instruction_for_missing_map_is_agent_agnostic(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            resolved = workspace.resolve()
+
+            handoff = canvas_map_handoff(workspace)
+
+            self.assertFalse(handoff["readable"])
+            self.assertTrue(handoff["needsAuthoring"])
+            self.assertEqual("missing", handoff["reason"])
+            self.assertEqual(".agentcanvas/canvas.ir.json", handoff["relativeOutputPath"])
+            self.assertEqual(
+                str(resolved / ".agentcanvas" / "canvas.ir.json"),
+                handoff["outputPath"],
+            )
+            instruction = handoff["instruction"]
+            self.assertIn(str(resolved), instruction)
+            self.assertIn(".agentcanvas/canvas.ir.json", instruction)
+            self.assertIn("ask clarifying questions", instruction)
+            for agent_name in ["Codex", "Claude", "Cursor", "Antigravity"]:
+                self.assertNotIn(agent_name, instruction)
+
+    def test_canvas_map_handoff_suppresses_instruction_when_map_is_readable(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps({"schema": "agentcanvas.behavior_canvas_response.v1"}),
+            )
+
+            handoff = canvas_map_handoff(workspace)
+
+            self.assertTrue(handoff["readable"])
+            self.assertFalse(handoff["needsAuthoring"])
+            self.assertIsNone(handoff["reason"])
+            self.assertIsNone(handoff["instruction"])
+
+    def test_context_includes_canvas_map_handoff_for_missing_map(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            resolved = workspace.resolve()
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/context?token=token"))
+
+            context = fake.response["payload"]["context"]
+            handoff = context["handoff"]["canvasMap"]
+            self.assertFalse(handoff["readable"])
+            self.assertTrue(handoff["needsAuthoring"])
+            self.assertEqual("missing", handoff["reason"])
+            self.assertEqual(str(resolved), handoff["workspacePath"])
+            self.assertIn(str(resolved), handoff["instruction"])
+            self.assertIn(".agentcanvas/canvas.ir.json", handoff["instruction"])
+
     def test_demo_context_uses_workspace_name(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "agentcanvas-demo"

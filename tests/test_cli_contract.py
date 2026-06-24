@@ -228,6 +228,31 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             self.assertEqual(updated["status"], "in_progress")
             self.assertEqual(updated["note"], "Working on it.")
 
+    def test_pending_handoff_markdown_includes_canvas_map_instruction(self):
+        from agentcanvas.ir import write_pending_change
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._copy_sample_workspace(temp_root)
+
+            pending = write_pending_change(
+                workspace,
+                {
+                    "title": "Refresh the checkout map",
+                    "summary": "Map the checkout journey for the canvas.",
+                },
+            )
+
+            markdown = Path(pending["markdown_path"]).read_text(encoding="utf-8")
+            self.assertIn(str(workspace.resolve()), markdown)
+            self.assertIn(
+                str(workspace.resolve() / ".agentcanvas" / "canvas.ir.json"),
+                markdown,
+            )
+            self.assertIn("`.agentcanvas/canvas.ir.json`", markdown)
+            self.assertIn("ask clarifying questions", markdown)
+            for agent_name in ["Codex", "Claude", "Cursor", "Antigravity"]:
+                self.assertNotIn(agent_name, markdown)
+
     def test_apply_query_materializes_llm_canvas_query(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = self._copy_sample_workspace(temp_root)

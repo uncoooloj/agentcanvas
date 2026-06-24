@@ -14,6 +14,7 @@ IR_FILENAME = "workflow.ir.json"
 CANVAS_IR_FILENAME = "canvas.ir.json"
 STATE_DIR_NAME = ".agentcanvas"
 PENDING_DIR_NAME = "pending"
+CANVAS_MAP_HANDOFF_SCHEMA = "agentcanvas.canvas_map_handoff.v1"
 PENDING_STATUSES = {
     "pending",
     "sent",
@@ -93,6 +94,55 @@ def load_canvas_ir(workspace: str | Path) -> Dict[str, Any]:
     path = canvas_ir_path(workspace)
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def build_canvas_map_instruction(workspace: str | Path) -> str:
+    """Return copyable instructions for authoring a missing canvas map."""
+
+    root = resolve_workspace(workspace)
+    relative_output = f"{STATE_DIR_NAME}/{CANVAS_IR_FILENAME}"
+    output_path = canvas_ir_path(root)
+    return (
+        f"Read the workspace at {root}. If there is no readable canvas map, "
+        "refresh or author the AgentCanvas behavior map from the current "
+        f"workspace evidence and write the output to {output_path} "
+        f"(`{relative_output}`). Describe user-visible behavior in plain "
+        "English, keep the map grounded in the files you inspected, and ask "
+        "clarifying questions before executing any user-requested edits when "
+        "scope, expected behavior, or missing details are unclear."
+    )
+
+
+def canvas_map_handoff(workspace: str | Path) -> Dict[str, Any]:
+    """Return canvas-map readability plus the instruction needed to repair it."""
+
+    root = resolve_workspace(workspace)
+    output_path = canvas_ir_path(root)
+    readable = False
+    reason = None
+    try:
+        payload = load_canvas_ir(root)
+    except FileNotFoundError:
+        reason = "missing"
+    except json.JSONDecodeError:
+        reason = "invalid_json"
+    except OSError:
+        reason = "unreadable"
+    else:
+        readable = isinstance(payload, dict)
+        if not readable:
+            reason = "invalid_shape"
+
+    return {
+        "schema": CANVAS_MAP_HANDOFF_SCHEMA,
+        "readable": readable,
+        "needsAuthoring": not readable,
+        "reason": reason,
+        "workspacePath": str(root),
+        "outputPath": str(output_path),
+        "relativeOutputPath": f"{STATE_DIR_NAME}/{CANVAS_IR_FILENAME}",
+        "instruction": None if readable else build_canvas_map_instruction(root),
+    }
 
 
 def summarize_ir(workflow_ir: Dict[str, Any]) -> Dict[str, Any]:
@@ -182,8 +232,12 @@ def _markdown_for_pending(record: Dict[str, Any]) -> str:
         "moving into execution.",
         "",
         "If this is a canvas-authoring request, update "
-        "`.agentcanvas/canvas.ir.json` so the browser reflects the new map. Do "
-        "not re-index after a canvas-only edit.",
+        "`.agentcanvas/canvas.ir.json` so the browser reflects the new map. "
+        "The map instruction is:",
+        "",
+        build_canvas_map_instruction(record.get("workspace") or "."),
+        "",
+        "Do not re-index after a canvas-only edit.",
         "",
         "If the user explicitly asked for a source-code implementation, patch the "
         "app code, run the relevant checks, then re-index so the evidence file "

@@ -47,6 +47,7 @@ type CanvasState =
       kind: "loading" | "reindexing" | "empty" | "error"
       message?: string
       detail?: string
+      nextSteps?: string[]
       fallbackPrompt?: string
       notice?: string
       mapping?: CanvasMapping
@@ -155,8 +156,9 @@ export default function App() {
         setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
         setCanvasState({
           kind: "empty",
-          message: "No readable map yet",
+          message: unreadyMapTitle(result),
           detail: starterMapDetail(result, context.assistant),
+          nextSteps: mapNextSteps(result, context),
           fallbackPrompt: mapFallbackPrompt(result, context),
           mapping: result.mapping,
         })
@@ -164,8 +166,9 @@ export default function App() {
         setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
         setCanvasState({
           kind: "empty",
-          message: "No readable map yet",
+          message: "No plain-English map yet",
           detail: emptyWorkspaceDetail(result),
+          nextSteps: mapNextSteps(result, context),
           fallbackPrompt: mapFallbackPrompt(result, context),
           mapping: result.mapping,
         })
@@ -212,8 +215,9 @@ export default function App() {
           setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
           setCanvasState({
             kind: "empty",
-            message: "No readable map yet",
+            message: unreadyMapTitle(result),
             detail: starterMapDetail(result, context.assistant),
+            nextSteps: mapNextSteps(result, context),
             fallbackPrompt: mapFallbackPrompt(result, context),
             mapping: result.mapping,
           })
@@ -221,8 +225,9 @@ export default function App() {
           setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
           setCanvasState({
             kind: "empty",
-            message: "No readable map yet",
+            message: "No plain-English map yet",
             detail: emptyWorkspaceDetail(result),
+            nextSteps: mapNextSteps(result, context),
             fallbackPrompt: mapFallbackPrompt(result, context),
             mapping: result.mapping,
           })
@@ -441,6 +446,7 @@ export default function App() {
               workspaceName={context.workspace || model.appName}
               message={workspaceState.message}
               detail={workspaceState.detail}
+              nextSteps={workspaceState.nextSteps}
               fallbackPrompt={workspaceState.fallbackPrompt}
               source={canvasSource}
               onRetry={() => load({ refresh: true })}
@@ -520,7 +526,8 @@ async function loadWorkspaceModel(refresh: boolean): Promise<WorkspaceModelResul
 }
 
 function emptyWorkspaceDetail(result: WorkspaceModelResult): string {
-  const source = "No readable flows are ready yet."
+  const source =
+    "AgentCanvas checked this project, but it does not have a clear list of the main things people can do yet."
   return result.notice ? `${result.notice} ${source}` : source
 }
 
@@ -528,7 +535,7 @@ function mappingNotice(mapping?: CanvasMapping): string | undefined {
   const warning = mapping?.warnings?.find(Boolean)
   if (warning) return plainMappingWarning(warning)
   if (isHeuristicMap(mapping)) {
-    return "This is a starter view built from project clues. Ask your assistant to review it before you rely on it."
+    return "This is a rough first pass. Ask your assistant to review it before you rely on it."
   }
   return undefined
 }
@@ -541,23 +548,49 @@ function isUnreadyMap(mapping?: CanvasMapping): boolean {
   return Boolean(mapping?.empty || mapping?.source?.isEmpty || mapping?.mode === "empty" || isStarterMap(mapping))
 }
 
+function unreadyMapTitle(result: WorkspaceModelResult): string {
+  if (isStarterMap(result.mapping) && !result.mapping?.empty && !result.mapping?.source?.isEmpty) {
+    return "Starter map needs review"
+  }
+  return "No plain-English map yet"
+}
+
 function starterMapDetail(result: WorkspaceModelResult, assistant?: string): string {
   const helper = assistant || "your assistant"
   if (result.mapping?.empty || result.mapping?.source?.isEmpty) {
-    return `AgentCanvas looked through the project, but no readable flows are ready yet. Ask ${helper} to turn what it found into a plain-English map; this page will update when the map is saved.`
+    return `AgentCanvas checked the project, but it does not have a clear map yet. Ask ${helper} to write the main flows in everyday language; this page will update after the map is saved.`
   }
   const count = result.model.journeys.length
   const starter = count
-    ? `AgentCanvas found ${count} starter place${count === 1 ? "" : "s"}, but no finished plain-English map yet.`
-    : "AgentCanvas looked through the project, but no readable flows are ready yet."
-  return `${starter} Ask ${helper} to turn what AgentCanvas found into readable flows; this page will update when the map is saved.`
+    ? `AgentCanvas found ${count} possible flow${count === 1 ? "" : "s"}, but this is still a rough first pass.`
+    : "AgentCanvas checked the project, but it does not have a clear map yet."
+  return `${starter} Ask ${helper} to review it and write the map in everyday language; this page will update after the map is saved.`
+}
+
+function mapNextSteps(result: WorkspaceModelResult, context: AppContext): string[] {
+  const helper = context.assistant || "your assistant"
+  const starter = isStarterMap(result.mapping) && !result.mapping?.empty && !result.mapping?.source?.isEmpty
+
+  if (starter) {
+    return [
+      `Copy the note below and send it to ${helper}.`,
+      "Ask for the rough map to be checked and rewritten in plain English.",
+      "When they are done, refresh this page.",
+    ]
+  }
+
+  return [
+    "Refresh to check whether a map was just added.",
+    `If this still appears, copy the note below and send it to ${helper}.`,
+    "When they are done, refresh this page.",
+  ]
 }
 
 function mapFallbackPrompt(result: WorkspaceModelResult, context: AppContext): string {
   const workspace = context.workspace || result.model.appName || "this project"
   const action =
     isStarterMap(result.mapping) && !result.mapping?.empty && !result.mapping?.source?.isEmpty
-      ? "refresh the AgentCanvas starter view"
+      ? "review the AgentCanvas starter map"
       : "author an AgentCanvas map"
   return [
     `Please ${action} for ${workspace}.`,
@@ -584,16 +617,16 @@ function describeMapRefreshAction(
 
   if (source.kind === "heuristic-projection") {
     return {
-      title: "This is still a starter view",
-      detail: "Refresh to check for a newer map, or ask your assistant to finish this one.",
+      title: "Starter map needs review",
+      detail: "Refresh to check for a newer map, or ask your assistant to rewrite this in plain English.",
       prompt: mapInstructionPrompt("starter", workspace),
     }
   }
 
   if (source.kind === "no-flow") {
     return {
-      title: "No map yet",
-      detail: "Refresh to check again, or ask your assistant to make one.",
+      title: "No plain-English map yet",
+      detail: "Refresh to check again, or ask your assistant to make the first map.",
       prompt: mapInstructionPrompt("author", workspace),
     }
   }
@@ -684,7 +717,7 @@ function describeCanvasSource(
       kind: "no-flow",
       label: "No map yet",
       shortLabel: "No map yet",
-      detail: "AgentCanvas has looked at the project, but no readable flows are ready yet.",
+      detail: "AgentCanvas checked this project, but it does not have a clear plain-English map yet.",
       tone: "warning",
       flowCount,
     }
@@ -715,9 +748,9 @@ function describeCanvasSource(
   if (isHeuristicMap(mapping)) {
     return {
       kind: "heuristic-projection",
-      label: "Starter view from project clues",
-      shortLabel: "Starter view",
-      detail: "AgentCanvas built this first pass from project structure. Treat it as a starting point until your assistant reviews it.",
+      label: "Rough first pass",
+      shortLabel: "Starter map",
+      detail: "AgentCanvas made a rough first pass from what it found. Treat it as a starting point until your assistant reviews it.",
       tone: "warning",
       flowCount,
     }
@@ -766,10 +799,10 @@ function plainMappingWarning(warning: string): string {
     return "This saved map may be out of date because the project changed after it was written."
   }
   if (/no displayable flows|no authored flows|no flows/i.test(warning)) {
-    return "AgentCanvas could not find readable flows for this project yet."
+    return "AgentCanvas could not find a clear plain-English map for this project yet."
   }
   if (/projection|llm|deterministic|heuristic|schema|contract|\.agentcanvas/i.test(warning)) {
-    return "AgentCanvas found project details that still need a clearer plain-English map."
+    return "AgentCanvas found details that still need to be rewritten in plain English."
   }
   return warning
 }

@@ -21,6 +21,7 @@ interface Props {
   workspaceName: string
   message?: string
   detail?: string
+  nextSteps?: string[]
   fallbackPrompt?: string
   source?: CanvasSourceSummary
   onRetry: () => void
@@ -32,6 +33,7 @@ export function WorkspaceMappingState({
   workspaceName,
   message,
   detail,
+  nextSteps,
   fallbackPrompt,
   source,
   onRetry,
@@ -47,7 +49,7 @@ export function WorkspaceMappingState({
       : kind === "loading"
         ? `Reading ${workspaceName || "your project"}`
         : kind === "empty"
-          ? "No readable map yet"
+          ? "No plain-English map yet"
           : "Couldn't open the project map")
   const body =
     detail ||
@@ -55,7 +57,7 @@ export function WorkspaceMappingState({
       ? MAPPING_STAGES[clampedStage]
       : source?.detail ||
         (kind === "empty"
-          ? "AgentCanvas has looked at the project, but no readable flows are ready yet."
+          ? "AgentCanvas checked this project, but it does not have a clear list of the main things people can do yet."
           : "AgentCanvas could not open a usable map for this project."))
   const retryLabel = kind === "empty" ? "Refresh map" : "Try again"
 
@@ -121,12 +123,27 @@ export function WorkspaceMappingState({
             </div>
           </div>
         ) : (
-          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Button type="button" onClick={onRetry} className="w-full gap-2 sm:w-auto">
-              <RefreshCw className="size-4" />
-              {retryLabel}
-            </Button>
-            {kind === "empty" && fallbackPrompt && <CopyMapPrompt prompt={fallbackPrompt} />}
+          <div className="mt-5 space-y-4">
+            {kind === "empty" && nextSteps?.length ? (
+              <div className="rounded-lg border bg-secondary/35 p-3.5">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Next</p>
+                <ol className="mt-2 space-y-1.5 text-sm leading-relaxed text-foreground">
+                  {nextSteps.map((step) => (
+                    <li key={step} className="flex gap-2">
+                      <Check className="mt-0.5 size-3.5 shrink-0 text-act-accent" />
+                      <span>{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ) : null}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Button type="button" onClick={onRetry} className="w-full gap-2 sm:w-auto">
+                <RefreshCw className="size-4" />
+                {retryLabel}
+              </Button>
+              {kind === "empty" && fallbackPrompt && <CopyMapPrompt prompt={fallbackPrompt} />}
+            </div>
           </div>
         )}
       </div>

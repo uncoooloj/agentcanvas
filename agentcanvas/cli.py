@@ -12,6 +12,7 @@ from .demo import demo_workspace
 from .indexer import format_index_summary, index_workspace
 from .ir import (
     PENDING_STATUSES,
+    build_canvas_map_instruction,
     format_map_health,
     list_pending,
     load_ir,
@@ -71,6 +72,14 @@ def build_parser() -> argparse.ArgumentParser:
     health_parser.add_argument("path", nargs="?", help="workspace path to inspect")
     health_parser.add_argument("--workspace", help="workspace path to inspect")
     health_parser.set_defaults(func=cmd_health)
+
+    prompt_parser = subparsers.add_parser(
+        "prompt",
+        help="print the copyable instruction for your coding agent",
+    )
+    prompt_parser.add_argument("path", nargs="?", help="workspace path to map")
+    prompt_parser.add_argument("--workspace", help="workspace path to map")
+    prompt_parser.set_defaults(func=cmd_prompt)
 
     status_parser = subparsers.add_parser(
         "status",
@@ -150,6 +159,14 @@ def cmd_pending(args: argparse.Namespace) -> int:
 def cmd_health(args: argparse.Namespace) -> int:
     workspace = resolve_workspace(selected_workspace(args))
     print(format_map_health(map_health(workspace)))
+    return 0
+
+
+def cmd_prompt(args: argparse.Namespace) -> int:
+    workspace = resolve_workspace(selected_workspace(args))
+    print("Copy this to the AI coding agent working in this project:")
+    print()
+    print(build_canvas_map_instruction(workspace))
     return 0
 
 

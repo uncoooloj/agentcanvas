@@ -288,6 +288,32 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 completed.stdout,
             )
 
+    def test_prompt_command_prints_copyable_agent_instruction_without_writing_state(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace-to-map"
+            workspace.mkdir()
+
+            completed = self._run_agentcanvas("prompt", str(workspace), cwd=temp_root)
+            self._skip_if_cli_scaffold(completed)
+
+            self.assertEqual(
+                completed.returncode,
+                0,
+                completed.stdout + completed.stderr,
+            )
+            self.assertIn("Copy this to the AI coding agent", completed.stdout)
+            self.assertIn(str(workspace.resolve()), completed.stdout)
+            self.assertIn(
+                str(workspace.resolve() / ".agentcanvas" / "canvas.ir.json"),
+                completed.stdout,
+            )
+            self.assertIn("`.agentcanvas/canvas.ir.json`", completed.stdout)
+            self.assertIn("plain English", completed.stdout)
+            self.assertIn("ask clarifying questions", completed.stdout)
+            for agent_name in ["Codex", "Claude", "Cursor", "Antigravity"]:
+                self.assertNotIn(agent_name, completed.stdout)
+            self.assertFalse((workspace / ".agentcanvas").exists())
+
     def test_pending_handoff_markdown_includes_canvas_map_instruction(self):
         from agentcanvas.ir import write_pending_change
 

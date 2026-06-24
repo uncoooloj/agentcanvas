@@ -136,29 +136,53 @@ If an agent is launching AgentCanvas, it can pass its name and session id:
 agentcanvas start --workspace /path/to/your/project --agent codex --session-id <session-id>
 ```
 
-## What Happens When It Starts
+## What Happens When You Run It
 
-AgentCanvas has three startup states. The difference is where the project facts
-come from and where AgentCanvas writes its local files.
+AgentCanvas has three plain modes. The important difference is whether it is
+looking at a real project and where it writes local AgentCanvas files.
 
-- **No workspace yet**: `agentcanvas start` opens a landing page. It has not
-  read your repo and it should not pretend it has. Pick a real workspace or try
-  the demo.
-- **Demo mode**: `agentcanvas start --demo` opens a bundled sample project. It
-  uses the real indexer, server, pending-request files, and status loop, but the
-  files belong to the sample project. The UI should keep saying `Demo mode` so
-  nobody mistakes it for their own repo.
-- **Workspace mode**: `agentcanvas start --workspace /path/to/project` works
-  inside that project. AgentCanvas writes its state under
-  `<workspace>/.agentcanvas/`, reads repo evidence from there, and shows the
-  canvas for that workspace.
+- `agentcanvas start` opens the landing page. No project has been read yet.
+- `agentcanvas start --demo` opens the bundled sample project. This is safe for
+  trying the product because it writes demo AgentCanvas files, not files in your
+  own repo.
+- `agentcanvas index --workspace /path/to/project` reads a real project and
+  writes the raw evidence file:
+  `<workspace>/.agentcanvas/workflow.ir.json`.
+- `agentcanvas start --workspace /path/to/project` opens the browser for that
+  real project and reads AgentCanvas state from `<workspace>/.agentcanvas/`.
 
-Starting or indexing a workspace does not change source code. It creates or
-refreshes AgentCanvas files. Source-code changes only happen later, when the
-user explicitly asks for implementation and an agent works from a pending
-request.
+Starting or indexing AgentCanvas does not change source code. It creates or
+refreshes AgentCanvas files beside the project. Source-code changes only happen
+later, when the user explicitly asks for implementation and an agent works from
+a pending request.
 
 See [docs/demo-mode.md](docs/demo-mode.md) for the product rules.
+
+## What The Agent Should Do Next
+
+After AgentCanvas has opened a real workspace, the next step is usually agent
+work, not user file editing.
+
+For a new or stale map, the agent should:
+
+1. Read `.agentcanvas/workflow.ir.json`.
+2. Turn the useful repo behavior into a plain-English canvas.
+3. Write or update `.agentcanvas/canvas.ir.json`.
+4. Validate before writing when using a generated canvas query:
+   `agentcanvas apply-query --workspace /path/to/project --query canvas-query.json --dry-run`.
+
+For a user-requested source-code change, the agent should:
+
+1. Read the pending Markdown and matching JSON in `.agentcanvas/pending/`.
+2. Mark the request `in_progress`.
+3. Ask one clear question with `needs_input` if the request is unclear.
+4. Make the smallest code change that satisfies the request.
+5. Run the closest useful test or smoke check.
+6. Re-index with `agentcanvas index --workspace /path/to/project`.
+7. Mark the request `done` only after verification.
+
+For preparing a release or publish, see
+[docs/publishing.md](docs/publishing.md).
 
 ## What The App Is Showing
 
@@ -422,6 +446,9 @@ fixture:
 
 The PyPI package is `use-agentcanvas`. PyPI already has a `0.1.0` release, so a
 new publish needs a later version.
+
+For a shorter plain-English publishing checklist, see
+[docs/publishing.md](docs/publishing.md).
 
 Run the release verifier before publishing to GitHub, PyPI, or Cloudflare:
 

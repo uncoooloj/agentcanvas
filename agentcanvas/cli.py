@@ -12,8 +12,10 @@ from .demo import demo_workspace
 from .indexer import format_index_summary, index_workspace
 from .ir import (
     PENDING_STATUSES,
+    format_map_health,
     list_pending,
     load_ir,
+    map_health,
     resolve_workspace,
     save_canvas_ir,
     state_paths,
@@ -61,6 +63,14 @@ def build_parser() -> argparse.ArgumentParser:
     pending_parser.add_argument("path", nargs="?", help="workspace path to inspect")
     pending_parser.add_argument("--workspace", help="workspace path to inspect")
     pending_parser.set_defaults(func=cmd_pending)
+
+    health_parser = subparsers.add_parser(
+        "health",
+        help="check whether the workspace map files are ready",
+    )
+    health_parser.add_argument("path", nargs="?", help="workspace path to inspect")
+    health_parser.add_argument("--workspace", help="workspace path to inspect")
+    health_parser.set_defaults(func=cmd_health)
 
     status_parser = subparsers.add_parser(
         "status",
@@ -134,6 +144,12 @@ def cmd_pending(args: argparse.Namespace) -> int:
         )
         suffix = f" - {paths}" if paths else ""
         print(f"- {item.get('id')} [{item.get('status', 'pending')}] {title} ({created}){suffix}")
+    return 0
+
+
+def cmd_health(args: argparse.Namespace) -> int:
+    workspace = resolve_workspace(selected_workspace(args))
+    print(format_map_health(map_health(workspace)))
     return 0
 
 

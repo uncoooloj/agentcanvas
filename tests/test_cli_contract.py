@@ -228,6 +228,66 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             self.assertEqual(updated["status"], "in_progress")
             self.assertEqual(updated["note"], "Working on it.")
 
+    def test_health_command_reports_missing_map_files_without_writing_state(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "empty-workspace"
+            workspace.mkdir()
+
+            completed = self._run_agentcanvas("health", str(workspace), cwd=temp_root)
+            self._skip_if_cli_scaffold(completed)
+
+            self.assertEqual(
+                completed.returncode,
+                0,
+                completed.stdout + completed.stderr,
+            )
+            self.assertIn("Map is not ready yet", completed.stdout)
+            self.assertIn(
+                "Workflow evidence (workflow IR): missing from .agentcanvas/workflow.ir.json.",
+                completed.stdout,
+            )
+            self.assertIn(
+                "Canvas map (canvas IR): missing from .agentcanvas/canvas.ir.json.",
+                completed.stdout,
+            )
+            self.assertIn(".agentcanvas/pending", completed.stdout)
+            self.assertFalse((workspace / ".agentcanvas").exists())
+
+    def test_health_command_reports_readable_stale_canvas(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "mapped-workspace"
+            state_dir = workspace / ".agentcanvas"
+            state_dir.mkdir(parents=True)
+            workflow_path = state_dir / "workflow.ir.json"
+            canvas_path = state_dir / "canvas.ir.json"
+            workflow_path.write_text(
+                json.dumps({"schema": "agentcanvas.workflow.v1"}),
+                encoding="utf-8",
+            )
+            canvas_path.write_text(
+                json.dumps({"schema": "agentcanvas.behavior_canvas_response.v1"}),
+                encoding="utf-8",
+            )
+            os.utime(canvas_path, (1000, 1000))
+            os.utime(workflow_path, (2000, 2000))
+
+            completed = self._run_agentcanvas("health", str(workspace), cwd=temp_root)
+            self._skip_if_cli_scaffold(completed)
+
+            self.assertEqual(
+                completed.returncode,
+                0,
+                completed.stdout + completed.stderr,
+            )
+            self.assertIn(
+                "Canvas map (canvas IR): found and readable at .agentcanvas/canvas.ir.json.",
+                completed.stdout,
+            )
+            self.assertIn(
+                "Freshness: canvas map is older than the workflow evidence.",
+                completed.stdout,
+            )
+
     def test_pending_handoff_markdown_includes_canvas_map_instruction(self):
         from agentcanvas.ir import write_pending_change
 

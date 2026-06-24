@@ -15,6 +15,7 @@ CANVAS_IR_FILENAME = "canvas.ir.json"
 STATE_DIR_NAME = ".agentcanvas"
 PENDING_DIR_NAME = "pending"
 CANVAS_MAP_HANDOFF_SCHEMA = "agentcanvas.canvas_map_handoff.v1"
+MAP_HEALTH_SCHEMA = "agentcanvas.map_health.v1"
 PENDING_STATUSES = {
     "pending",
     "sent",
@@ -143,6 +144,199 @@ def canvas_map_handoff(workspace: str | Path) -> Dict[str, Any]:
         "relativeOutputPath": f"{STATE_DIR_NAME}/{CANVAS_IR_FILENAME}",
         "instruction": None if readable else build_canvas_map_instruction(root),
     }
+
+
+def map_health(workspace: str | Path) -> Dict[str, Any]:
+    """Return a read-only health summary for the workflow and canvas map files."""
+
+    root = resolve_workspace(workspace)
+    state_dir, workflow_path, pending_dir = state_paths(root)
+    canvas_path = canvas_ir_path(root)
+
+    workflow_exists = workflow_path.is_file()
+    canvas_exists = canvas_path.is_file()
+    canvas_readable = False
+    canvas_reason = "missing" if not canvas_exists else None
+    canvas_error = None
+    if canvas_exists:
+        try:
+            with canvas_path.open("r", encoding="utf-8") as handle:
+                canvas_payload = json.load(handle)
+        except json.JSONDecodeError as exc:
+            canvas_reason = "invalid_json"
+            canvas_error = str(exc)
+        except OSError as exc:
+            canvas_reason = "unreadable"
+            canvas_error = str(exc)
+        else:
+            canvas_readable = isinstance(canvas_payload, dict)
+            if not canvas_readable:
+                canvas_reason = "invalid_shape"
+
+    stale = None
+    freshness_status = "unknown"
+    freshness_reason = None
+    if workflow_exists and canvas_exists:
+        try:
+            workflow_mtime = workflow_path.stat().st_mtime
+            canvas_mtime = canvas_path.stat().st_mtime
+        except OSError as exc:
+            freshness_reason = f"Could not compare file times: {exc}"
+        else:
+            stale = canvas_mtime < workflow_mtime
+            freshness_status = "stale" if stale else "fresh"
+    elif not workflow_exists:
+        freshness_reason = "Workflow evidence is missing."
+    else:
+        freshness_reason = "Canvas map is missing."
+
+    pending_exists = pending_dir.is_dir()
+    pending_readable = pending_exists
+    pending_error = None
+    pending_file_count = 0
+    pending_change_count = 0
+    if pending_exists:
+        try:
+            pending_file_count = sum(1 for path in pending_dir.iterdir() if path.is_file())
+            pending_change_count = len(list_pending(root))
+        except OSError as exc:
+            pending_readable = False
+            pending_error = str(exc)
+
+    status = "ready"
+    if not workflow_exists:
+        status = "missing_workflow_ir"
+    elif not canvas_exists:
+        status = "missing_canvas_ir"
+    elif not canvas_readable:
+        status = "unreadable_canvas_ir"
+    elif stale:
+        status = "stale_canvas_ir"
+
+    health: Dict[str, Any] = {
+        "schema": MAP_HEALTH_SCHEMA,
+        "workspacePath": str(root),
+        "stateDir": {
+            "path": str(state_dir),
+            "relativePath": STATE_DIR_NAME,
+            "exists": state_dir.is_dir(),
+        },
+        "workflowIr": {
+            "path": str(workflow_path),
+            "relativePath": f"{STATE_DIR_NAME}/{IR_FILENAME}",
+            "exists": workflow_exists,
+        },
+        "canvasIr": {
+            "path": str(canvas_path),
+            "relativePath": f"{STATE_DIR_NAME}/{CANVAS_IR_FILENAME}",
+            "exists": canvas_exists,
+            "readable": canvas_readable,
+            "reason": canvas_reason,
+            "error": canvas_error,
+        },
+        "freshness": {
+            "status": freshness_status,
+            "stale": stale,
+            "reason": freshness_reason,
+        },
+        "pendingFiles": {
+            "path": str(pending_dir),
+            "relativePath": f"{STATE_DIR_NAME}/{PENDING_DIR_NAME}",
+            "exists": pending_exists,
+            "readable": pending_readable,
+            "fileCount": pending_file_count,
+            "changeCount": pending_change_count,
+            "error": pending_error,
+        },
+        "status": status,
+        "ready": status == "ready",
+    }
+    health["summary"] = map_health_summary_lines(health)
+    return health
+
+
+def map_health_summary_lines(health: Dict[str, Any]) -> List[str]:
+    """Return the user-facing health summary in plain English."""
+
+    workflow = health["workflowIr"]
+    canvas = health["canvasIr"]
+    freshness = health["freshness"]
+    pending = health["pendingFiles"]
+
+    if health["ready"]:
+        lead = (
+            "Map is ready: the workflow evidence and canvas map are present, "
+            "the canvas is readable, and it matches the latest workflow evidence."
+        )
+    elif health["status"] == "missing_workflow_ir":
+        lead = "Map is not ready yet: workflow evidence has not been created."
+    elif health["status"] == "missing_canvas_ir":
+        lead = "Map is not ready yet: the canvas map has not been created."
+    elif health["status"] == "unreadable_canvas_ir":
+        lead = "Map needs attention: the canvas map file exists, but AgentCanvas cannot read it."
+    elif health["status"] == "stale_canvas_ir":
+        lead = "Map needs attention: the canvas map is older than the workflow evidence."
+    else:
+        lead = "Map health could not be fully checked."
+
+    lines = [lead]
+    if workflow["exists"]:
+        lines.append(
+            f"Workflow evidence (workflow IR): found at {workflow['relativePath']}."
+        )
+    else:
+        lines.append(
+            f"Workflow evidence (workflow IR): missing from {workflow['relativePath']}."
+        )
+
+    if canvas["exists"] and canvas["readable"]:
+        lines.append(f"Canvas map (canvas IR): found and readable at {canvas['relativePath']}.")
+    elif canvas["exists"]:
+        reason = _plain_health_reason(canvas.get("reason"))
+        lines.append(
+            f"Canvas map (canvas IR): found at {canvas['relativePath']}, but it is {reason}."
+        )
+    else:
+        lines.append(f"Canvas map (canvas IR): missing from {canvas['relativePath']}.")
+
+    if freshness["stale"] is True:
+        lines.append("Freshness: canvas map is older than the workflow evidence.")
+    elif freshness["stale"] is False:
+        lines.append("Freshness: canvas map is current with the workflow evidence.")
+    else:
+        lines.append(f"Freshness: not checked yet because {freshness['reason']}")
+
+    pending_location = f"{pending['relativePath']} ({pending['path']})"
+    if pending["exists"] and pending["readable"]:
+        lines.append(
+            "Pending request files: "
+            f"use {pending_location}; {pending['changeCount']} change request(s), "
+            f"{pending['fileCount']} file(s)."
+        )
+    elif pending["exists"]:
+        lines.append(
+            f"Pending request files: {pending_location} exists, but AgentCanvas cannot read it."
+        )
+    else:
+        lines.append(
+            f"Pending request files: they will live in {pending_location} when requests exist."
+        )
+    return lines
+
+
+def format_map_health(health: Dict[str, Any]) -> str:
+    lines = [f"AgentCanvas map health for {health['workspacePath']}"]
+    lines.extend(f"- {line}" for line in health["summary"])
+    return "\n".join(lines)
+
+
+def _plain_health_reason(reason: Any) -> str:
+    return {
+        "invalid_json": "not valid JSON",
+        "invalid_shape": "not a JSON object",
+        "unreadable": "not readable",
+        "missing": "missing",
+    }.get(reason, "not readable")
 
 
 def summarize_ir(workflow_ir: Dict[str, Any]) -> Dict[str, Any]:

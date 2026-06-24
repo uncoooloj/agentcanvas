@@ -20,6 +20,7 @@ from .ir import (
     list_pending,
     load_canvas_ir,
     load_ir,
+    map_health,
     resolve_workspace,
     save_canvas_ir,
     state_paths,
@@ -434,6 +435,10 @@ def make_handler(
 
             if parsed.path == "/api/pending":
                 self.write_json({"ok": True, "pending": list_pending(workspace)})
+                return
+
+            if parsed.path == "/api/health":
+                self.write_json({"ok": True, "health": map_health(workspace)})
                 return
 
             if parsed.path == "/api/context":

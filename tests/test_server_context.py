@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -96,6 +97,52 @@ class ServerContextTests(unittest.TestCase):
             self.assertEqual(str(resolved), handoff["workspacePath"])
             self.assertIn(str(resolved), handoff["instruction"])
             self.assertIn(".agentcanvas/canvas.ir.json", handoff["instruction"])
+
+    def test_health_api_returns_map_health_summary(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            _write(
+                workspace,
+                ".agentcanvas/workflow.ir.json",
+                json.dumps({"schema": "agentcanvas.workflow.v1"}),
+            )
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps({"schema": "agentcanvas.behavior_canvas_response.v1"}),
+            )
+            workflow_path = workspace / ".agentcanvas" / "workflow.ir.json"
+            canvas_path = workspace / ".agentcanvas" / "canvas.ir.json"
+            os.utime(workflow_path, (1000, 1000))
+            os.utime(canvas_path, (2000, 2000))
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/health?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            payload = fake.response["payload"]
+            self.assertTrue(payload["ok"])
+            health = payload["health"]
+            self.assertEqual("agentcanvas.map_health.v1", health["schema"])
+            self.assertEqual(str(workspace.resolve()), health["workspacePath"])
+            self.assertTrue(health["workflowIr"]["exists"])
+            self.assertTrue(health["canvasIr"]["exists"])
+            self.assertTrue(health["canvasIr"]["readable"])
+            self.assertFalse(health["freshness"]["stale"])
+            self.assertEqual("ready", health["status"])
+            self.assertTrue(health["ready"])
+            self.assertIn("Map is ready", health["summary"][0])
+            self.assertEqual(
+                str(workspace.resolve() / ".agentcanvas" / "pending"),
+                health["pendingFiles"]["path"],
+            )
 
     def test_demo_context_uses_workspace_name(self):
         with tempfile.TemporaryDirectory() as temp_root:

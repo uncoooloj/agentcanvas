@@ -160,6 +160,31 @@ request.
 
 See [docs/demo-mode.md](docs/demo-mode.md) for the product rules.
 
+## What The App Is Showing
+
+The canvas should always make it clear what kind of map you are looking at.
+
+- **Assistant map**: the best state. An agent or model has turned repo evidence
+  into a plain-English map in `.agentcanvas/canvas.ir.json`. This is the
+  readable canvas the app should prefer.
+- **Starter view**: a first pass made from indexed evidence when no assistant
+  map exists yet. It is useful for orientation, but it may read more like a
+  starting point than a finished product map.
+- **Demo/example**: a bundled sample project. It uses the real AgentCanvas loop,
+  but it is not your repo.
+- **No map yet**: AgentCanvas has no readable canvas for this workspace yet.
+  Index the workspace, then ask your agent or model to create the assistant map.
+- **Stale saved map**: a saved assistant map exists, but the repo evidence was
+  refreshed after it was written. AgentCanvas keeps the readable map instead of
+  throwing it away, and the next step is to ask the agent to refresh it against
+  the new evidence.
+
+If the app says there is **no readable map yet**, nothing is broken. It means
+AgentCanvas has gathered facts, but nobody has written the human version yet.
+Ask your coding agent to read `.agentcanvas/workflow.ir.json` and create or
+refresh `.agentcanvas/canvas.ir.json`, or use the projection prompt in
+[docs/projection.md](docs/projection.md).
+
 ## Workspace Mode
 
 Workspace mode is the real use case. It means "map this project, keep the map
@@ -397,6 +422,25 @@ fixture:
 
 The PyPI package is `use-agentcanvas`. PyPI already has a `0.1.0` release, so a
 new publish needs a later version.
+
+Run the release verifier before publishing to GitHub, PyPI, or Cloudflare:
+
+```bash
+python3 scripts/verify_release.py
+```
+
+The verifier runs Python unit tests, the CLI smoke test, and two frontend builds:
+one for the packaged local web assets and one for the Cloudflare
+`/agentcanvas/` path. Use the full verifier when a release, frontend asset, or
+Cloudflare deploy could be affected.
+
+Use the Python-only path only when the change cannot affect the browser app or
+packaged frontend assets, for example a docs-only change or a Python-only check
+while frontend dependencies are not installed:
+
+```bash
+python3 scripts/verify_release.py --skip-frontend
+```
 
 Build and validate locally before publishing:
 

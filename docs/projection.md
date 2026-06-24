@@ -34,6 +34,30 @@ re-indexing, because no repo evidence changed.
 validation and materialization path. Applying a query writes the display canvas.
 It does not overwrite `workflow.ir.json` or rewrite repo facts.
 
+## Source-Truth States
+
+When the browser opens a canvas, it should describe the source plainly:
+
+- **Assistant map**: `.agentcanvas/canvas.ir.json` was authored or reviewed by
+  an agent or model from grounded repo evidence. This is the main product
+  experience and the browser display source of truth.
+- **Starter view**: no assistant map exists yet, so AgentCanvas builds a simple
+  first view from indexed evidence. Use it to get oriented, then ask an agent or
+  model to turn it into a cleaner assistant map.
+- **Demo/example**: the canvas belongs to the bundled sample project. It can
+  teach the loop, but it is not evidence from the user's repo.
+- **No map yet**: AgentCanvas has indexed the workspace but there is no readable
+  display canvas yet. The next step is to create `.agentcanvas/canvas.ir.json`
+  from `.agentcanvas/workflow.ir.json`.
+- **Stale saved map**: an assistant-authored map exists, but
+  `.agentcanvas/workflow.ir.json` is newer. Keep the saved map visible, label it
+  stale, and ask the agent or model to refresh it from the latest evidence.
+
+Plain version: if the app says there is no readable map yet, the repo facts are
+not enough by themselves. Ask the agent or model to read the evidence file and
+write the human map. This is like asking someone to turn notes into a clean
+diagram before you use it to plan changes.
+
 ## Agent-Authored Canvas Workflow
 
 The readable canvas is authored by an agent or LLM using grounded evidence. The

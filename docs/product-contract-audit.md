@@ -23,6 +23,28 @@ must come from one of these contracts:
 
 Timers can make the UI feel responsive. They cannot be the source of truth.
 
+## Canvas Source Truth
+
+The browser should say where its readable map came from. Use these product
+states consistently:
+
+- **Assistant map**: the map is `.agentcanvas/canvas.ir.json`, written or
+  reviewed by an agent or model from repo evidence. Prefer this state.
+- **Starter view**: AgentCanvas made a first readable view from indexed evidence
+  because no assistant map exists yet.
+- **Demo/example**: the map belongs to the bundled sample project, not the
+  user's repo.
+- **No map yet**: no readable map exists for this workspace yet. Tell the user
+  to ask their agent to create the map from `.agentcanvas/workflow.ir.json`.
+- **Stale saved map**: the saved assistant map is older than the latest indexed
+  evidence. Keep showing it, mark it stale, and ask the agent to refresh it.
+
+Layman copy for the empty state:
+
+> AgentCanvas has read the project, but it has not made the plain-English map
+> yet. Ask your coding agent to turn the project notes into the map, then come
+> back here.
+
 ## P0: No-Workspace Landing
 
 Goal: opening AgentCanvas without a workspace should not drop the user into a

@@ -77,6 +77,26 @@ workspace does, or could be interpreted in more than one user-visible way, ask a
 short plain-language question before writing or executing anything. Do not
 silently convert an unclear map change into source-code work.
 
+## Source-Truth States
+
+When describing the canvas, use product state names a non-technical person can
+understand:
+
+- **Assistant map**: `.agentcanvas/canvas.ir.json` was authored or reviewed by
+  an agent or model from grounded evidence. Treat this as the preferred browser
+  display source of truth.
+- **Starter view**: AgentCanvas made a first view from indexed evidence because
+  no assistant map exists yet. Use it for orientation, then ask an agent or model
+  to write the cleaner map.
+- **Demo/example**: the map belongs to the bundled sample project, not the
+  user's repo.
+- **No map yet**: no readable map exists for the workspace yet. Tell the user
+  plainly: AgentCanvas has gathered project notes, but someone still needs to
+  turn those notes into the human-readable map.
+- **Stale saved map**: a saved assistant map exists, but the repo evidence was
+  refreshed after the map was written. Keep the readable map, label it stale,
+  and refresh it from the latest evidence before relying on it for new work.
+
 ## Check The CLI
 
 Start by checking the installed command:
@@ -337,3 +357,23 @@ When adding or reviewing language support, read
 
 Language modules should emit grounded facts with provenance. The projection
 layer can turn those facts into human-readable canvas flows.
+
+## Release Verification
+
+When working in the AgentCanvas source repo, run the release verifier before
+publishing or handing off release-sensitive work:
+
+```bash
+python3 scripts/verify_release.py
+```
+
+This runs Python unit tests, the CLI smoke test, and frontend builds for both
+packaged local web assets and the Cloudflare `/agentcanvas/` path.
+
+Use the Python-only verifier only when frontend output is out of scope, such as
+docs-only work, Python-only checks, or a machine that has not installed frontend
+dependencies:
+
+```bash
+python3 scripts/verify_release.py --skip-frontend
+```

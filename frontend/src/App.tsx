@@ -70,6 +70,13 @@ export default function App() {
   const location = useLocation()
   const path = location.pathname
   const onWelcome = path === "/welcome"
+  const launchParams = new URLSearchParams(location.search)
+  const hasRuntimeLaunchContext = Boolean(
+    launchParams.get("token") ||
+      launchParams.get("demo") ||
+      launchParams.get("sessionId") ||
+      launchParams.get("session_id")
+  )
   const journeyMatch = path.match(/^\/flows\/(.+?)\/?$/)
   const routeJourneyId = journeyMatch ? decodeURIComponent(journeyMatch[1]) : null
   const view = routeJourneyId ?? HOME
@@ -341,7 +348,8 @@ export default function App() {
 
   const inJourney = view !== HOME && !!activeJourney
   const appAvailable = !contextLoading && context.mode !== "landing"
-  const landing = onWelcome || (!contextLoading && context.mode === "landing")
+  const landing =
+    onWelcome || (!hasRuntimeLaunchContext && contextLoading) || (!contextLoading && context.mode === "landing")
   const loading = mappingActive
   const workspaceState =
     canvasState.kind === "loading" ||
@@ -353,6 +361,10 @@ export default function App() {
   const readyMapRefreshAction = canvasState.kind === "ready" && !model.isDemo ? mapRefreshAction : null
   const headerStatus = mappingActive ? MAPPING_STAGES[mappingStage] : canvasSource.shortLabel
 
+  if (landing) {
+    return <LandingPage onEnterApp={appAvailable ? () => go("/") : undefined} />
+  }
+
   if (contextLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
@@ -360,10 +372,6 @@ export default function App() {
         Opening AgentCanvas…
       </div>
     )
-  }
-
-  if (landing) {
-    return <LandingPage onEnterApp={appAvailable ? () => go("/") : undefined} />
   }
 
   return (

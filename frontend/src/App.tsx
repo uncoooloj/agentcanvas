@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import {
+  Check,
   ChevronLeft,
+  Clipboard,
   Lightbulb,
   Moon,
   PanelLeftClose,
@@ -14,6 +16,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { BrandMark } from "@/components/BrandMark"
 import { FlowColumn, type FlowAction } from "@/components/FlowCanvas"
 import { Overview } from "@/components/Overview"
@@ -53,6 +56,12 @@ type WorkspaceModelResult = {
   model: AppModel
   mapping?: CanvasMapping
   notice?: string
+}
+
+type MapRefreshAction = {
+  title: string
+  detail: string
+  prompt: string
 }
 
 export default function App() {
@@ -97,6 +106,10 @@ export default function App() {
   const canvasSource = useMemo(
     () => describeCanvasSource(context, model, canvasState),
     [context, model, canvasState]
+  )
+  const mapRefreshAction = useMemo(
+    () => describeMapRefreshAction(canvasSource, context, model.appName),
+    [canvasSource, context, model.appName]
   )
 
   useEffect(() => {
@@ -332,6 +345,7 @@ export default function App() {
     canvasState.kind === "error"
       ? canvasState
       : null
+  const readyMapRefreshAction = canvasState.kind === "ready" && !model.isDemo ? mapRefreshAction : null
   const headerStatus = mappingActive ? MAPPING_STAGES[mappingStage] : canvasSource.shortLabel
 
   if (contextLoading) {
@@ -411,9 +425,15 @@ export default function App() {
 
         <main className="min-w-0 flex-1 overflow-auto">
           {(model.isDemo || context.isDemo) && <DemoBanner thin={model.thin} />}
-          {!model.isDemo && canvasState.kind === "ready" && canvasState.notice && (
+          {readyMapRefreshAction ? (
+            <MapRefreshNotice
+              action={readyMapRefreshAction}
+              loading={loading}
+              onRefresh={() => load({ refresh: true })}
+            />
+          ) : !model.isDemo && canvasState.kind === "ready" && canvasState.notice ? (
             <WorkspaceNotice message={canvasState.notice} />
-          )}
+          ) : null}
           {workspaceState ? (
             <WorkspaceMappingState
               kind={workspaceState.kind}
@@ -542,7 +562,58 @@ function mapFallbackPrompt(result: WorkspaceModelResult, context: AppContext): s
   return [
     `Please ${action} for ${workspace}.`,
     "Use the current project as the source of truth.",
-    "Name the main user flows in plain English, save the AgentCanvas map, and tell me to refresh this page.",
+    "If anything is unclear, ask me a focused question before changing files.",
+    "Name the main user flows in plain English, save the AgentCanvas map to .agentcanvas/canvas.ir.json, and tell me to refresh this page.",
+  ].join(" ")
+}
+
+function describeMapRefreshAction(
+  source: CanvasSourceSummary,
+  context: AppContext,
+  appName: string
+): MapRefreshAction | null {
+  const workspace = context.workspace || appName || "this project"
+
+  if (source.kind === "stale-cache") {
+    return {
+      title: "This saved map may be out of date",
+      detail: "Refresh to check the project now, or ask your assistant to update the saved map.",
+      prompt: mapInstructionPrompt("refresh", workspace),
+    }
+  }
+
+  if (source.kind === "heuristic-projection") {
+    return {
+      title: "This is still a starter view",
+      detail: "Refresh to check for a newer map, or ask your assistant to finish this one.",
+      prompt: mapInstructionPrompt("starter", workspace),
+    }
+  }
+
+  if (source.kind === "no-flow") {
+    return {
+      title: "No map yet",
+      detail: "Refresh to check again, or ask your assistant to make one.",
+      prompt: mapInstructionPrompt("author", workspace),
+    }
+  }
+
+  return null
+}
+
+function mapInstructionPrompt(kind: "refresh" | "starter" | "author", workspace: string): string {
+  const opening =
+    kind === "refresh"
+      ? `Please refresh the AgentCanvas map for ${workspace}.`
+      : kind === "starter"
+        ? `Please turn the AgentCanvas starter view for ${workspace} into a clear plain-English map.`
+        : `Please make an AgentCanvas map for ${workspace}.`
+
+  return [
+    opening,
+    "Use the current project as the source of truth.",
+    "If anything is unclear, ask me a focused question before changing files.",
+    "Save the map to .agentcanvas/canvas.ir.json, then tell me to refresh this page.",
   ].join(" ")
 }
 
@@ -713,6 +784,60 @@ function plainLoadError(error: unknown): string {
     }
   }
   return "Try again, or restart AgentCanvas if the local app stopped."
+}
+
+function MapRefreshNotice({
+  action,
+  loading,
+  onRefresh,
+}: {
+  action: MapRefreshAction
+  loading: boolean
+  onRefresh: () => void
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "manual">("idle")
+
+  async function copyPrompt() {
+    try {
+      await navigator.clipboard.writeText(action.prompt)
+      setCopyState("copied")
+      window.setTimeout(() => setCopyState("idle"), 1600)
+    } catch {
+      setCopyState("manual")
+    }
+  }
+
+  return (
+    <div className="border-b bg-gold/10 px-4 py-2.5" aria-live="polite">
+      <div className="mx-auto flex max-w-6xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-foreground">{action.title}</p>
+          <p className="text-xs text-muted-foreground">{action.detail}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button type="button" size="sm" onClick={onRefresh} disabled={loading}>
+            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+            Refresh map
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={copyPrompt}>
+            {copyState === "copied" ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
+            {copyState === "copied" ? "Copied" : "Copy note for assistant"}
+          </Button>
+        </div>
+      </div>
+      {copyState === "manual" && (
+        <div className="mx-auto mt-2 max-w-6xl">
+          <Input
+            readOnly
+            value={action.prompt}
+            aria-label="Instruction to paste into your agent"
+            className="h-8 text-xs text-muted-foreground"
+            onFocus={(event) => event.currentTarget.select()}
+          />
+        </div>
+      )}
+    </div>
+  )
 }
 
 function WorkspaceNotice({ message }: { message: string }) {

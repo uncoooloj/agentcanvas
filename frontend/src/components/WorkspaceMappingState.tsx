@@ -57,6 +57,7 @@ export function WorkspaceMappingState({
         (kind === "empty"
           ? "AgentCanvas has looked at the project, but no readable flows are ready yet."
           : "AgentCanvas could not open a usable map for this project."))
+  const retryLabel = kind === "empty" ? "Refresh map" : "Try again"
 
   return (
     <div className="flex min-h-full items-center justify-center px-6 py-16" aria-live="polite">
@@ -120,12 +121,12 @@ export function WorkspaceMappingState({
             </div>
           </div>
         ) : (
-          <div className="mt-5 space-y-4">
-            {kind === "empty" && fallbackPrompt && <CopyMapPrompt prompt={fallbackPrompt} />}
-            <Button type="button" onClick={onRetry} className="gap-2">
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Button type="button" onClick={onRetry} className="w-full gap-2 sm:w-auto">
               <RefreshCw className="size-4" />
-              Try again
+              {retryLabel}
             </Button>
+            {kind === "empty" && fallbackPrompt && <CopyMapPrompt prompt={fallbackPrompt} />}
           </div>
         )}
       </div>
@@ -147,32 +148,29 @@ function CopyMapPrompt({ prompt }: { prompt: string }) {
   }
 
   return (
-    <div className="rounded-md border bg-secondary/30 p-3">
-      <p className="text-xs font-medium text-muted-foreground">Paste this into your agent</p>
-      <div className="mt-2 flex items-center gap-2">
-        <Input
-          readOnly
-          value={prompt}
-          aria-label="Instruction to paste into your agent"
-          className="h-9 min-w-0 flex-1 text-xs text-muted-foreground"
-          onFocus={(event) => event.currentTarget.select()}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="shrink-0"
-          onClick={copyPrompt}
-          aria-label="Copy agent instruction"
-        >
-          {copyState === "copied" ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
-          {copyState === "copied" ? "Copied" : "Copy"}
-        </Button>
-      </div>
+    <div className="min-w-0 flex-1">
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full shrink-0 sm:w-auto"
+        onClick={copyPrompt}
+      >
+        {copyState === "copied" ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
+        {copyState === "copied" ? "Copied" : "Copy note for assistant"}
+      </Button>
       {copyState === "manual" && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Clipboard blocked. Select the text above.
-        </p>
+        <div className="mt-3 rounded-md border bg-secondary/30 p-3">
+          <p className="text-xs font-medium text-muted-foreground">Clipboard blocked. Select this note.</p>
+          <div className="mt-2 flex items-center gap-2">
+            <Input
+              readOnly
+              value={prompt}
+              aria-label="Instruction to paste into your agent"
+              className="h-9 min-w-0 flex-1 text-xs text-muted-foreground"
+              onFocus={(event) => event.currentTarget.select()}
+            />
+          </div>
+        </div>
       )}
     </div>
   )

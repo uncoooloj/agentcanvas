@@ -22,8 +22,9 @@ canvas, edit the canvas, and use pending requests only for code implementation.
 - Treat `.agentcanvas/pending/*.md` as the human-readable implementation brief.
 - Treat `.agentcanvas/pending/*.json` as structured implementation context for
   tools.
-- The invoking agent should translate repo behavior into human-readable flows
-  and write/update `.agentcanvas/canvas.ir.json` progressively.
+- The invoking agent should translate repo behavior into plain-English,
+  non-technical flows and write/update `.agentcanvas/canvas.ir.json`
+  progressively.
 - Canvas edits, adds, removes, renames, and re-routes should update
   `.agentcanvas/canvas.ir.json`.
 - Do not edit source code just because a canvas node changed. Implement source
@@ -43,6 +44,38 @@ canvas, edit the canvas, and use pending requests only for code implementation.
 - Do not run migrations, seeds, deploys, or destructive commands without
   explicit user permission.
 - If no live agent/session is connected, use copy fallback.
+
+## Plain-English Map Authoring
+
+The default map audience is a non-technical project owner. Author the visible
+canvas as a plain-English map of what people can do, what the project does next,
+and what changes when a branch happens. This applies whether the invoking agent
+is Codex, Claude Code, Cursor, Antigravity, or any other coding agent.
+
+Visible map text means journey titles, step titles, branch labels, lane names,
+short summaries, and any text a person reads in the canvas. For visible text:
+
+- Use short 2-5 word titles, such as "Choose a plan" or "Send the receipt".
+- Prefer everyday verbs: choose, send, approve, review, pay, invite, upload,
+  fix, start, finish, remind, publish.
+- Avoid file paths, package names, model names, tool names, framework names, API
+  routes, schema terms, and implementation jargon.
+- Put technical provenance only in refs, details, evidence ids, or supporting
+  data. Source paths and tool names can help audit the map, but they should not
+  be the label a user sees first.
+- Match the workspace type. Use "project" as the safe default when the product
+  type is unclear; use "site", "store", "game", "lesson", "workflow",
+  "automation", "library", or another everyday noun only when the evidence
+  supports it.
+- Describe outcomes and user-visible behavior instead of internals. Prefer
+  "Check the booking" over "Validate reservation DTO".
+- Keep technical acronyms out of visible text unless they are part of the
+  product language the intended reader already uses.
+
+If a requested map change is ambiguous, would change what the map claims the
+workspace does, or could be interpreted in more than one user-visible way, ask a
+short plain-language question before writing or executing anything. Do not
+silently convert an unclear map change into source-code work.
 
 ## Check The CLI
 
@@ -86,7 +119,8 @@ the URL to the user.
 
 After indexing, make sure `.agentcanvas/canvas.ir.json` exists or is updated
 from the grounded evidence. Keep the display canvas human-readable: use journeys,
-steps, branches, lanes, and provenance instead of a raw file inventory.
+steps, branches, lanes, and provenance instead of a raw file inventory. Follow
+the plain-English map authoring rules for all visible titles and labels.
 
 ## No Workspace And Demo
 
@@ -177,6 +211,10 @@ If a requested canvas edit would make a repo behavior claim that is not grounded
 by the current evidence, ask a concise question or mark it as a planned canvas
 change rather than pretending the source already does it.
 
+If a requested canvas edit is ambiguous, ask before applying it. Clarify the
+user-visible outcome, affected journey or step, and whether the user wants a map
+change only or a separate implementation request.
+
 ## Copy Fallback
 
 When no adapter or live session is available, provide a copyable prompt instead
@@ -239,11 +277,17 @@ Generate journeys in AgentCanvas language:
 - `Do`: what the app does
 - `If`, `ElseIf`, `Else`: branches and outcomes
 
-Keep the canvas human-readable. Use `app_surfaces` as lanes, participants, or
-drilldowns inside a journey. Cite provenance with `fact_ids` on every operation
-and include useful evidence in node or edge data when it helps a person audit
-the result. Do not create top-level journeys from a raw file inventory; files,
-tests, services, and packages belong as supporting details.
+Keep the canvas human-readable and non-technical by default. Use `app_surfaces`
+as lanes, participants, or drilldowns inside a journey. Cite provenance with
+`fact_ids` on every operation and include useful evidence in node or edge data
+when it helps a person audit the result. Do not create top-level journeys from a
+raw file inventory; files, tests, services, packages, tools, routes, and schemas
+belong as supporting details, refs, or provenance, not visible map titles.
+
+For generated visible text, use 2-5 word titles, everyday verbs, and
+workspace-type-sensitive nouns. Use "project" when the workspace type is unclear
+and choose terms like "site", "store", "game", "lesson", "workflow", or
+"automation" only when the evidence supports them.
 
 If the intended journey, actor, outcome, affected surface, or evidence is
 unclear, ask concise clarifying questions before applying the result. Progressive

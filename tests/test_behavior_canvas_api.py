@@ -157,6 +157,28 @@ class BehaviorCanvasApiTests(unittest.TestCase):
             self.assertTrue(payload["canvas"]["journeys"])
             self.assertTrue((root / ".agentcanvas" / "canvas.ir.json").is_file())
 
+    def test_api_canvas_enriches_stale_cached_canvas_with_workspace_profile(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            _agentcanvas_like_workspace(root)
+            workflow_ir = index_workspace(root)
+            old_canvas = build_behavior_canvas(workflow_ir, workspace=root)
+            old_canvas["canvas"]["metadata"].pop("workspace_profile", None)
+            save_canvas_ir(root, old_canvas)
+            handler_cls = make_handler(
+                root,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/canvas?token=token"))
+
+            profile = fake.response["payload"]["canvas"]["metadata"]["workspace_profile"]
+            self.assertEqual("tool_product", profile["kind"])
+            self.assertEqual("tool", profile["product_language"]["singular"])
+
     def test_api_canvas_rebuilds_when_workflow_ir_is_newer_than_canvas(self):
         with tempfile.TemporaryDirectory() as temp_root:
             root = Path(temp_root)

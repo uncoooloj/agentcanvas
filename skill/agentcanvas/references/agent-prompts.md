@@ -6,6 +6,13 @@ coding agent. The base workflow does not depend on any adapter or vendor.
 For canvas-only edits, tell the agent to update `.agentcanvas/canvas.ir.json`
 directly and not change source code.
 
+For all generated visible map text, default to plain English for non-technical
+readers. Use short 2-5 word titles, everyday verbs, and workspace-type-sensitive
+language. Keep file paths, package names, tool names, framework names, API
+routes, schema terms, and other implementation jargon out of visible journey,
+step, branch, lane, and summary text. Put technical provenance only in refs,
+details, evidence ids, or supporting data.
+
 For source-code implementation, always keep the status loop in the prompt:
 inspect request, inspect workspace context, clarify if needed, implement only
 after the request is clear, verify, re-index to refresh evidence, update status.
@@ -25,7 +32,7 @@ Read .agentcanvas/workflow.ir.json for evidence and .agentcanvas/canvas.ir.json 
 Apply this canvas-only edit to .agentcanvas/canvas.ir.json:
 <canvas-edit>
 
-Keep the canvas human-readable. Preserve evidence ids, source paths, or provenance where possible. Do not edit source code, create a pending implementation request, or re-index unless the user explicitly asks for source-code implementation or evidence refresh.
+Keep the visible map plain-English and non-technical. Use short 2-5 word titles, everyday verbs, and language that matches this workspace type. Do not put file paths, tool names, API routes, schema terms, or implementation jargon in visible titles, labels, lanes, branches, or summaries. Preserve evidence ids, source paths, or provenance in refs/details where possible. If the requested map change is ambiguous, ask a short plain-language question before applying it. Do not edit source code, create a pending implementation request, or re-index unless the user explicitly asks for source-code implementation or evidence refresh.
 ```
 
 ## Portable Handoff Prompt
@@ -97,9 +104,9 @@ Use AgentCanvas projection for this workspace:
 
 Read .agentcanvas/workflow.ir.json, especially source_facts, projection_contract, and source_facts.repo.app_surfaces. If .agentcanvas/canvas.ir.json already exists, read it too so updates preserve the current display canvas.
 
-Generate agentcanvas.canvas_query.v1 JSON in llm-assisted mode. Use source_facts and app_surfaces as the only evidence. Create human-readable AgentCanvas journeys using When, Do, If, ElseIf, and Else. Use app_surfaces as lanes, participants, or drilldowns inside journeys. Cite fact_ids on every operation and include useful provenance in node or edge data. The query should materialize the display canvas in .agentcanvas/canvas.ir.json, not replace workflow facts.
+Generate agentcanvas.canvas_query.v1 JSON in llm-assisted mode. Use source_facts and app_surfaces as the only evidence. Create plain-English, non-technical AgentCanvas journeys using When, Do, If, ElseIf, and Else. The visible map is for a non-technical project owner by default: use short 2-5 word titles, everyday verbs, and language that fits the workspace type. Use "project" when the type is unclear; use terms like site, store, game, lesson, workflow, or automation only when the evidence supports them. Use app_surfaces as lanes, participants, or drilldowns inside journeys. Cite fact_ids on every operation and include useful provenance in node or edge data. The query should materialize the display canvas in .agentcanvas/canvas.ir.json, not replace workflow facts.
 
-Do not create top-level journeys from a raw file inventory. Files, tests, services, packages, and modules should appear as supporting details, provenance, or supporting nodes.
+Do not create top-level journeys from a raw file inventory. Files, tests, services, packages, modules, tool names, API routes, schema terms, and implementation jargon should appear only as supporting details, refs, provenance, or supporting nodes, not as visible journey or step titles.
 
 If the intended journey, actor, outcome, affected surface, or evidence is unclear, ask concise clarifying questions before applying the result. If only part of the app is grounded, return a partial projection with warnings instead of guessing.
 

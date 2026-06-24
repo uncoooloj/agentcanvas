@@ -3,6 +3,9 @@ import { useState, useEffect } from "react"
 export type AppContext = {
   workspace: string
   workspacePath: string
+  workspaceKind?: string
+  workspaceProfile?: WorkspaceProfile
+  productLanguage?: ProductLanguage
   assistant: string
   assistantId: string
   mode?: "landing" | "workspace" | "demo"
@@ -11,9 +14,23 @@ export type AppContext = {
   sessionId?: string | null
 }
 
+export type ProductLanguage = {
+  singular?: string
+  plural?: string
+  workspace_noun?: string
+  entry_noun?: string
+}
+
+export type WorkspaceProfile = {
+  kind?: string
+  label?: string
+  product_language?: ProductLanguage
+}
+
 const DEMO_CONTEXT: AppContext = {
   workspace: "Your project",
   workspacePath: "",
+  productLanguage: { singular: "project", workspace_noun: "project", entry_noun: "flow" },
   assistant: "Your assistant",
   assistantId: "generic",
   mode: "landing",
@@ -24,6 +41,7 @@ const DEMO_CONTEXT: AppContext = {
 const DEMO_FALLBACK: AppContext = {
   workspace: "Your online shop",
   workspacePath: "",
+  productLanguage: { singular: "app", workspace_noun: "app", entry_noun: "flow" },
   assistant: "Claude Code",
   assistantId: "claude-code",
   mode: "demo",

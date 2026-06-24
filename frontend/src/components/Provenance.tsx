@@ -12,6 +12,7 @@ export function Provenance({
   demoMode?: boolean
 }) {
   const isDemo = demoMode || context.isDemo
+  const noun = context.productLanguage?.workspace_noun || context.productLanguage?.singular || "project"
 
   useEffect(() => {
     useChanges.getState().setAssistantName(context.assistant || "your assistant")
@@ -29,7 +30,7 @@ export function Provenance({
           {context.workspace}
         </span>
         <span className="text-sm text-muted-foreground hidden md:inline truncate">
-          · what this project does
+          · what this {noun} does
         </span>
       </div>
 

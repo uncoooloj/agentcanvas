@@ -119,9 +119,12 @@ def load_or_build_canvas(workspace: Path, *, refresh: bool = False) -> Dict[str,
         try:
             canvas = load_canvas_ir(workspace)
             if is_agent_authored_canvas(canvas):
-                return preserve_agent_authored_canvas(workspace, canvas)
+                return with_workspace_profile(
+                    workspace,
+                    preserve_agent_authored_canvas(workspace, canvas),
+                )
             if canvas_cache_is_fresh(workspace):
-                return canvas
+                return with_workspace_profile(workspace, canvas)
         except FileNotFoundError:
             pass
     try:
@@ -130,7 +133,7 @@ def load_or_build_canvas(workspace: Path, *, refresh: bool = False) -> Dict[str,
         graph = index_workspace(workspace)
     canvas = build_behavior_canvas(graph, workspace=workspace)
     save_canvas_ir(workspace, canvas)
-    return canvas
+    return with_workspace_profile(workspace, canvas)
 
 
 def is_agent_authored_canvas(canvas: Dict[str, Any]) -> bool:
@@ -189,6 +192,22 @@ def load_workspace_profile(workspace: Path) -> Dict[str, Any]:
     except FileNotFoundError:
         graph = None
     return infer_workspace_profile(graph, workspace=workspace)
+
+
+def with_workspace_profile(workspace: Path, canvas: Dict[str, Any]) -> Dict[str, Any]:
+    body = canvas.get("canvas") if isinstance(canvas.get("canvas"), dict) else canvas
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    if isinstance(metadata.get("workspace_profile"), dict):
+        return canvas
+
+    next_canvas = deepcopy(canvas)
+    next_body = (
+        next_canvas.get("canvas")
+        if isinstance(next_canvas.get("canvas"), dict)
+        else next_canvas
+    )
+    next_body.setdefault("metadata", {})["workspace_profile"] = load_workspace_profile(workspace)
+    return next_canvas
 
 
 def make_handler(

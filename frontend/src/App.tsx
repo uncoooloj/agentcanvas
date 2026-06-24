@@ -427,6 +427,7 @@ export default function App() {
           ) : (
             <Overview
               appName={model.appName}
+              productLanguage={context.productLanguage}
               journeys={orderedJourneys}
               changes={localChanges}
               activity={journeyActivity}

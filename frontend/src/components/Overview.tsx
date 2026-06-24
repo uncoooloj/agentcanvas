@@ -18,19 +18,21 @@ import {
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { countSteps, type Journey } from "@/lib/types"
+import type { ProductLanguage } from "@/lib/appcontext"
 import type { ChangeEntry } from "@/lib/changeset"
 
 type JourneyActivity = "idle" | "edited" | "working"
 
 interface Props {
   appName: string
+  productLanguage?: ProductLanguage
   journeys: Journey[]
   changes: ChangeEntry[]
   activity: Map<string, JourneyActivity>
   onOpen: (id: string) => void
 }
 
-export function Overview({ appName, journeys, changes, activity, onOpen }: Props) {
+export function Overview({ appName, productLanguage, journeys, changes, activity, onOpen }: Props) {
   const [query, setQuery] = useState("")
 
   const pendingByJourney = useMemo(() => {
@@ -49,6 +51,7 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
   }, [journeys, query])
 
   const displayName = appName.trim() || "your project"
+  const entryNoun = productLanguage?.entry_noun || "flow"
   const total = journeys.length
   const hasQuery = query.trim().length > 0
 
@@ -59,7 +62,7 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
           What {displayName} does
         </h1>
         <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-muted-foreground">
-          Each card is a plain-English flow. Open one to see what happens and why.
+          Each card is a plain-English {entryNoun}. Open one to see what happens and why.
         </p>
       </header>
 
@@ -71,12 +74,14 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${total} ${total === 1 ? "flow" : "flows"}…`}
+              placeholder={`Search ${total} ${total === 1 ? entryNoun : `${entryNoun}s`}…`}
               className="h-11 rounded-full pl-10 text-[15px]"
             />
           </div>
           <span className="hidden shrink-0 text-sm text-muted-foreground sm:block">
-            {hasQuery ? `${filtered.length} of ${total}` : `${total} ${total === 1 ? "flow" : "flows"}`}
+            {hasQuery
+              ? `${filtered.length} of ${total}`
+              : `${total} ${total === 1 ? entryNoun : `${entryNoun}s`}`}
           </span>
         </div>
       </div>

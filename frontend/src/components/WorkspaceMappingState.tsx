@@ -3,10 +3,8 @@ import { AlertCircle, Check, Circle, Clipboard, Loader2, RefreshCw, Search, Spar
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
-import type { CanvasSourceSummary } from "@/lib/types"
+import { CanvasStateKind, type CanvasSourceSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
-
-export type WorkspaceMappingKind = "loading" | "reindexing" | "empty" | "error"
 
 const MAPPING_STAGES = [
   "Reading project",
@@ -16,7 +14,7 @@ const MAPPING_STAGES = [
 ]
 
 interface Props {
-  kind: WorkspaceMappingKind
+  kind: CanvasStateKind.Loading | CanvasStateKind.Reindexing | CanvasStateKind.Empty | CanvasStateKind.Error
   stageIndex: number
   workspaceName: string
   message?: string
@@ -38,17 +36,17 @@ export function WorkspaceMappingState({
   source,
   onRetry,
 }: Props) {
-  const active = kind === "loading" || kind === "reindexing"
+  const active = kind === CanvasStateKind.Loading || kind === CanvasStateKind.Reindexing
   const clampedStage = Math.min(Math.max(stageIndex, 0), MAPPING_STAGES.length - 1)
-  const progress = active ? ((clampedStage + 1) / MAPPING_STAGES.length) * 100 : kind === "empty" ? 100 : 0
-  const Icon = kind === "error" ? AlertCircle : kind === "empty" ? Search : Sparkles
+  const progress = active ? ((clampedStage + 1) / MAPPING_STAGES.length) * 100 : kind === CanvasStateKind.Empty ? 100 : 0
+  const Icon = kind === CanvasStateKind.Error ? AlertCircle : kind === CanvasStateKind.Empty ? Search : Sparkles
   const title =
     message ||
-    (kind === "reindexing"
+    (kind === CanvasStateKind.Reindexing
       ? "Refreshing this project"
-      : kind === "loading"
+      : kind === CanvasStateKind.Loading
         ? `Reading ${workspaceName || "your project"}`
-        : kind === "empty"
+        : kind === CanvasStateKind.Empty
           ? "No plain-English map yet"
           : "Couldn't open the project map")
   const body =
@@ -56,10 +54,10 @@ export function WorkspaceMappingState({
     (active
       ? MAPPING_STAGES[clampedStage]
       : source?.detail ||
-        (kind === "empty"
+        (kind === CanvasStateKind.Empty
           ? "AgentCanvas checked this project, but it does not have a clear list of the main things people can do yet."
           : "AgentCanvas could not open a usable map for this project."))
-  const retryLabel = kind === "empty" ? "Refresh map" : "Try again"
+  const retryLabel = kind === CanvasStateKind.Empty ? "Refresh map" : "Try again"
 
   return (
     <div className="flex min-h-full items-center justify-center px-6 py-16" aria-live="polite">
@@ -68,7 +66,7 @@ export function WorkspaceMappingState({
           <span
             className={cn(
               "flex size-11 shrink-0 items-center justify-center rounded-xl",
-              kind === "error" ? "bg-destructive/10 text-destructive" : "bg-when-bg text-when-fg"
+              kind === CanvasStateKind.Error ? "bg-destructive/10 text-destructive" : "bg-when-bg text-when-fg"
             )}
           >
             {active ? <Loader2 className="size-5 animate-spin" /> : <Icon className="size-5" />}
@@ -124,7 +122,7 @@ export function WorkspaceMappingState({
           </div>
         ) : (
           <div className="mt-5 space-y-4">
-            {kind === "empty" && nextSteps?.length ? (
+            {kind === CanvasStateKind.Empty && nextSteps?.length ? (
               <div className="rounded-lg border bg-secondary/35 p-3.5">
                 <p className="text-xs font-medium uppercase text-muted-foreground">Next</p>
                 <ol className="mt-2 space-y-1.5 text-sm leading-relaxed text-foreground">
@@ -142,7 +140,7 @@ export function WorkspaceMappingState({
                 <RefreshCw className="size-4" />
                 {retryLabel}
               </Button>
-              {kind === "empty" && fallbackPrompt && <CopyMapPrompt prompt={fallbackPrompt} />}
+              {kind === CanvasStateKind.Empty && fallbackPrompt && <CopyMapPrompt prompt={fallbackPrompt} />}
             </div>
           </div>
         )}

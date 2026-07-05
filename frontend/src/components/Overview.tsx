@@ -20,11 +20,9 @@ import {
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { countSteps, type CanvasSourceSummary, type Journey } from "@/lib/types"
+import { JourneyActivity, countSteps, type CanvasSourceSummary, type Journey } from "@/lib/types"
 import type { ProductLanguage } from "@/lib/appcontext"
 import type { ChangeEntry } from "@/lib/changeset"
-
-type JourneyActivity = "idle" | "edited" | "working"
 
 interface Props {
   appName: string
@@ -100,7 +98,7 @@ export function Overview({ appName, productLanguage, source, journeys, changes, 
               key={journey.id}
               journey={journey}
               pending={pendingByJourney.get(journey.id) ?? 0}
-              status={activity.get(journey.id) ?? "idle"}
+              status={activity.get(journey.id) ?? JourneyActivity.Idle}
               onOpen={() => onOpen(journey.id)}
             />
           ))}
@@ -167,7 +165,7 @@ function FlowCard({
         <span className="flex size-10 items-center justify-center rounded-xl bg-when-bg text-when-fg">
           <Icon className="size-[18px]" />
         </span>
-        {status === "working" ? (
+        {status === JourneyActivity.Working ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground">
             <Loader2 className="size-3 animate-spin" /> Updating
           </span>

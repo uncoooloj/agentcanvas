@@ -37,7 +37,17 @@ import {
 import { ApiError, fetchCanvas, reindexCanvas } from "@/lib/api"
 import { useAppContext, type AppContext } from "@/lib/appcontext"
 import type { EditRequest, StagedEdit } from "@/lib/edits"
-import { findNode, type AppModel, type CanvasMapping, type CanvasSourceSummary, type FlowNode, type Journey } from "@/lib/types"
+import {
+  CanvasStateKind,
+  CanvasSourceKind,
+  JourneyActivity,
+  findNode,
+  type AppModel,
+  type CanvasMapping,
+  type CanvasSourceSummary,
+  type FlowNode,
+  type Journey,
+} from "@/lib/types"
 
 const HOME = "__home__"
 const CANVAS_POLL_INTERVAL_MS = 2500
@@ -49,9 +59,9 @@ const MAPPING_STAGES = [
 ]
 
 type CanvasState =
-  | { kind: "idle" | "ready"; notice?: string; mapping?: CanvasMapping }
+  | { kind: CanvasStateKind.Idle | CanvasStateKind.Ready; notice?: string; mapping?: CanvasMapping }
   | {
-      kind: "loading" | "reindexing" | "empty" | "error"
+      kind: CanvasStateKind.Loading | CanvasStateKind.Reindexing | CanvasStateKind.Empty | CanvasStateKind.Error
       message?: string
       detail?: string
       nextSteps?: string[]
@@ -95,9 +105,9 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editRequest, setEditRequest] = useState<EditRequest | null>(null)
   const [leftOpen, setLeftOpen] = useState(true)
-  const [canvasState, setCanvasState] = useState<CanvasState>({ kind: "loading" })
+  const [canvasState, setCanvasState] = useState<CanvasState>({ kind: CanvasStateKind.Loading })
   const [dark, setDark] = useState(false)
-  const mappingActive = canvasState.kind === "loading" || canvasState.kind === "reindexing"
+  const mappingActive = canvasState.kind === CanvasStateKind.Loading || canvasState.kind === CanvasStateKind.Reindexing
   const [mappingStage, setMappingStage] = useState(0)
   const canvasSignatureRef = useRef<string | null>(null)
   const pollBlockedRef = useRef(false)
@@ -157,19 +167,19 @@ export default function App() {
     if (context.mode === "demo") {
       setModel((current) => preserveLocalJourneyRecency(DEMO_MODEL, current))
       setSelectedId(null)
-      setCanvasState({ kind: "ready" })
+      setCanvasState({ kind: CanvasStateKind.Ready })
       return
     }
 
     setMappingStage(0)
-    setCanvasState({ kind: refresh ? "reindexing" : "loading" })
+    setCanvasState({ kind: refresh ? CanvasStateKind.Reindexing : CanvasStateKind.Loading })
     try {
       const result = await loadWorkspaceModel(refresh)
       canvasSignatureRef.current = canvasSignature(result)
       if (isUnreadyMap(result.mapping)) {
         setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
         setCanvasState({
-          kind: "empty",
+          kind: CanvasStateKind.Empty,
           message: unreadyMapTitle(result),
           detail: starterMapDetail(result, context.assistant),
           nextSteps: mapNextSteps(result, context),
@@ -179,7 +189,7 @@ export default function App() {
       } else if (!result.model.journeys.length) {
         setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
         setCanvasState({
-          kind: "empty",
+          kind: CanvasStateKind.Empty,
           message: "No plain-English map yet",
           detail: emptyWorkspaceDetail(result),
           nextSteps: mapNextSteps(result, context),
@@ -188,12 +198,12 @@ export default function App() {
         })
       } else {
         setModel((current) => preserveLocalJourneyRecency(result.model, current))
-        setCanvasState({ kind: "ready", notice: result.notice, mapping: result.mapping })
+        setCanvasState({ kind: CanvasStateKind.Ready, notice: result.notice, mapping: result.mapping })
       }
     } catch (error) {
       setModel(emptyAppModel(context.workspace || model.appName || "Your app"))
       setCanvasState({
-        kind: "error",
+        kind: CanvasStateKind.Error,
         message: "Couldn't open the project map",
         detail: plainLoadError(error),
       })
@@ -228,7 +238,7 @@ export default function App() {
         if (isUnreadyMap(result.mapping)) {
           setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
           setCanvasState({
-            kind: "empty",
+            kind: CanvasStateKind.Empty,
             message: unreadyMapTitle(result),
             detail: starterMapDetail(result, context.assistant),
             nextSteps: mapNextSteps(result, context),
@@ -238,7 +248,7 @@ export default function App() {
         } else if (!result.model.journeys.length) {
           setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
           setCanvasState({
-            kind: "empty",
+            kind: CanvasStateKind.Empty,
             message: "No plain-English map yet",
             detail: emptyWorkspaceDetail(result),
             nextSteps: mapNextSteps(result, context),
@@ -247,7 +257,7 @@ export default function App() {
           })
         } else {
           setModel((current) => preserveLocalJourneyRecency(result.model, current))
-          setCanvasState({ kind: "ready", notice: result.notice, mapping: result.mapping })
+          setCanvasState({ kind: CanvasStateKind.Ready, notice: result.notice, mapping: result.mapping })
         }
       } catch {
         // Polling is quiet; keep the current canvas visible through transient read errors.
@@ -364,13 +374,13 @@ export default function App() {
     onWelcome || (!hasRuntimeLaunchContext && contextLoading) || (!contextLoading && context.mode === "landing")
   const loading = mappingActive
   const workspaceState =
-    canvasState.kind === "loading" ||
-    canvasState.kind === "reindexing" ||
-    canvasState.kind === "empty" ||
-    canvasState.kind === "error"
+    canvasState.kind === CanvasStateKind.Loading ||
+    canvasState.kind === CanvasStateKind.Reindexing ||
+    canvasState.kind === CanvasStateKind.Empty ||
+    canvasState.kind === CanvasStateKind.Error
       ? canvasState
       : null
-  const readyMapRefreshAction = canvasState.kind === "ready" && !model.isDemo ? mapRefreshAction : null
+  const readyMapRefreshAction = canvasState.kind === CanvasStateKind.Ready && !model.isDemo ? mapRefreshAction : null
   const headerStatus = mappingActive ? MAPPING_STAGES[mappingStage] : canvasSource.shortLabel
 
   if (landing) {
@@ -456,7 +466,7 @@ export default function App() {
               loading={loading}
               onRefresh={() => load({ refresh: true })}
             />
-          ) : !model.isDemo && canvasState.kind === "ready" && canvasState.notice ? (
+          ) : !model.isDemo && canvasState.kind === CanvasStateKind.Ready && canvasState.notice ? (
             <WorkspaceNotice message={canvasState.notice} />
           ) : null}
           {workspaceState ? (
@@ -628,7 +638,7 @@ function describeMapRefreshAction(
 ): MapRefreshAction | null {
   const workspace = context.workspace || appName || "this project"
 
-  if (source.kind === "stale-cache") {
+  if (source.kind === CanvasSourceKind.StaleCache) {
     return {
       title: "This saved map may be out of date",
       detail: "Refresh to check the project now, or ask your assistant to update the saved map.",
@@ -636,7 +646,7 @@ function describeMapRefreshAction(
     }
   }
 
-  if (source.kind === "heuristic-projection") {
+  if (source.kind === CanvasSourceKind.HeuristicProjection) {
     return {
       title: "Starter map needs review",
       detail: "Refresh to check for a newer map, or ask your assistant to rewrite this in plain English.",
@@ -644,7 +654,7 @@ function describeMapRefreshAction(
     }
   }
 
-  if (source.kind === "no-flow") {
+  if (source.kind === CanvasSourceKind.NoFlow) {
     return {
       title: "No plain-English map yet",
       detail: "Refresh to check again, or ask your assistant to make the first map.",
@@ -691,7 +701,7 @@ function describeCanvasSource(
 
   if (sourceKind === "demo-fallback" || mapping?.demoFallback || context.demoFallback) {
     return {
-      kind: "demo-fallback",
+      kind: CanvasSourceKind.DemoFallback,
       label: "Example map",
       shortLabel: "Example",
       detail: "This is sample content because no project was connected yet.",
@@ -702,7 +712,7 @@ function describeCanvasSource(
 
   if (model.isDemo || context.isDemo || context.isDemoContent || context.mode === "demo" || sourceKind === "demo") {
     return {
-      kind: "demo",
+      kind: CanvasSourceKind.Demo,
       label: "Example project",
       shortLabel: "Example",
       detail: "You are looking at sample flows, not your own project.",
@@ -711,20 +721,20 @@ function describeCanvasSource(
     }
   }
 
-  if (state.kind === "loading" || state.kind === "reindexing") {
+  if (state.kind === CanvasStateKind.Loading || state.kind === CanvasStateKind.Reindexing) {
     return {
-      kind: "loading",
-      label: state.kind === "reindexing" ? "Refreshing this project" : "Reading this project",
-      shortLabel: state.kind === "reindexing" ? "Refreshing" : "Reading",
+      kind: CanvasSourceKind.Loading,
+      label: state.kind === CanvasStateKind.Reindexing ? "Refreshing this project" : "Reading this project",
+      shortLabel: state.kind === CanvasStateKind.Reindexing ? "Refreshing" : "Reading",
       detail: "AgentCanvas is looking through the project and preparing the map.",
       tone: "info",
       flowCount,
     }
   }
 
-  if (state.kind === "error") {
+  if (state.kind === CanvasStateKind.Error) {
     return {
-      kind: "error",
+      kind: CanvasSourceKind.Error,
       label: "Map not available",
       shortLabel: "Needs attention",
       detail: "AgentCanvas could not open this project's map.",
@@ -733,9 +743,9 @@ function describeCanvasSource(
     }
   }
 
-  if (state.kind === "empty" || !model.journeys.length) {
+  if (state.kind === CanvasStateKind.Empty || !model.journeys.length) {
     return {
-      kind: "no-flow",
+      kind: CanvasSourceKind.NoFlow,
       label: "No map yet",
       shortLabel: "No map yet",
       detail: "AgentCanvas checked this project, but it does not have a clear plain-English map yet.",
@@ -746,7 +756,7 @@ function describeCanvasSource(
 
   if (isStaleMap(mapping)) {
     return {
-      kind: "stale-cache",
+      kind: CanvasSourceKind.StaleCache,
       label: "Saved map may be out of date",
       shortLabel: "Saved copy",
       detail: "The project changed after this map was saved. Ask your assistant to refresh it if the behavior changed.",
@@ -757,7 +767,7 @@ function describeCanvasSource(
 
   if (isAgentAuthoredMap(mapping)) {
     return {
-      kind: "agent-authored",
+      kind: CanvasSourceKind.AgentAuthored,
       label: "Made by your assistant",
       shortLabel: "Assistant map",
       detail: "These flows come from a saved map your assistant wrote from the project.",
@@ -768,7 +778,7 @@ function describeCanvasSource(
 
   if (isHeuristicMap(mapping)) {
     return {
-      kind: "heuristic-projection",
+      kind: CanvasSourceKind.HeuristicProjection,
       label: "Rough first pass",
       shortLabel: "Starter map",
       detail: "AgentCanvas made a rough first pass from what it found. Treat it as a starting point until your assistant reviews it.",
@@ -778,7 +788,7 @@ function describeCanvasSource(
   }
 
   return {
-    kind: "unknown",
+    kind: CanvasSourceKind.Unknown,
     label: source?.label || "Saved project map",
     shortLabel: "Saved map",
     detail: "These flows come from the current map saved for this project.",
@@ -788,15 +798,19 @@ function describeCanvasSource(
 }
 
 function isAgentAuthoredMap(mapping?: CanvasMapping): boolean {
-  return mapping?.mode === "agent-authored" || mapping?.primaryMode === "agent-authored" || mapping?.source?.kind === "agent-authored"
+  return (
+    mapping?.mode === CanvasSourceKind.AgentAuthored ||
+    mapping?.primaryMode === CanvasSourceKind.AgentAuthored ||
+    mapping?.source?.kind === CanvasSourceKind.AgentAuthored
+  )
 }
 
 function isHeuristicMap(mapping?: CanvasMapping): boolean {
   return (
     mapping?.mode === "heuristic" ||
-    mapping?.mode === "heuristic-projection" ||
+    mapping?.mode === CanvasSourceKind.HeuristicProjection ||
     mapping?.mode === "deterministic" ||
-    mapping?.source?.kind === "heuristic-projection"
+    mapping?.source?.kind === CanvasSourceKind.HeuristicProjection
   )
 }
 
@@ -981,7 +995,7 @@ function Rail({
       <div className="flex flex-col gap-0.5">
         {journeys.map((j) => {
           const active = j.id === activeId
-          const state = activity.get(j.id) ?? "idle"
+          const state = activity.get(j.id) ?? JourneyActivity.Idle
           return (
             <button
               key={j.id}
@@ -1002,10 +1016,8 @@ function Rail({
   )
 }
 
-type JourneyActivity = "idle" | "edited" | "working"
-
 function JourneyDot({ state, active }: { state: JourneyActivity; active: boolean }) {
-  if (state === "working") {
+  if (state === JourneyActivity.Working) {
     return <Loader2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
   }
   return (
@@ -1013,7 +1025,7 @@ function JourneyDot({ state, active }: { state: JourneyActivity; active: boolean
       aria-hidden="true"
       className={cn(
         "h-2.5 w-2.5 shrink-0 rounded-full",
-        state === "edited" ? "bg-when-accent" : "bg-muted-foreground/35",
+        state === JourneyActivity.Edited ? "bg-when-accent" : "bg-muted-foreground/35",
         active && "ring-4 ring-primary/10"
       )}
     />
@@ -1049,7 +1061,7 @@ function getJourneyActivity(
   const active = new Map<string, JourneyActivity>()
   for (const journey of journeys) {
     if (localChanges.some((change) => change.journeyId === journey.id)) {
-      active.set(journey.id, "edited")
+      active.set(journey.id, JourneyActivity.Edited)
     }
   }
 
@@ -1058,7 +1070,7 @@ function getJourneyActivity(
     for (const item of handoffItems) {
       if (item.status === HandoffItemStatus.InProgress || item.status === HandoffItemStatus.Implemented) {
         const change = changesById.get(item.changeId)
-        if (change) active.set(change.journeyId, "working")
+        if (change) active.set(change.journeyId, JourneyActivity.Working)
       }
     }
   }

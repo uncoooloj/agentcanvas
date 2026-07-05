@@ -99,6 +99,21 @@ export enum MappingStageStatus {
   Error = "error",
 }
 
+export enum CanvasStateKind {
+  Idle = "idle",
+  Ready = "ready",
+  Loading = "loading",
+  Reindexing = "reindexing",
+  Empty = "empty",
+  Error = "error",
+}
+
+export enum JourneyActivity {
+  Idle = "idle",
+  Edited = "edited",
+  Working = "working",
+}
+
 export interface CanvasMapping {
   schema?: string
   status?: string
@@ -128,16 +143,17 @@ export interface CanvasSourceMetadata {
   isEmpty?: boolean
 }
 
-export type CanvasSourceKind =
-  | "agent-authored"
-  | "heuristic-projection"
-  | "demo"
-  | "demo-fallback"
-  | "stale-cache"
-  | "no-flow"
-  | "loading"
-  | "error"
-  | "unknown"
+export enum CanvasSourceKind {
+  AgentAuthored = "agent-authored",
+  HeuristicProjection = "heuristic-projection",
+  Demo = "demo",
+  DemoFallback = "demo-fallback",
+  StaleCache = "stale-cache",
+  NoFlow = "no-flow",
+  Loading = "loading",
+  Error = "error",
+  Unknown = "unknown",
+}
 
 export interface CanvasSourceSummary {
   kind: CanvasSourceKind

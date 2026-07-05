@@ -3,24 +3,34 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
 import mimetypes
 import os
 import secrets
+import threading
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
+from .canvas_v2 import (
+    CanvasStoreError,
+    apply_operation_batch,
+    list_canvas_history,
+    restore_canvas_revision,
+)
 from .indexer import index_workspace
 from .ir import (
+    atomic_write_json,
     canvas_map_handoff,
     canvas_ir_path,
     list_pending,
     load_canvas_ir,
     load_ir,
     map_health,
+    now_utc,
     resolve_workspace,
     save_canvas_ir,
     state_paths,
@@ -47,6 +57,8 @@ _ASSISTANTS = {
 }
 DEMO_MARKER_FILENAME = ".agentcanvas-demo"
 CANVAS_V2_SCHEMA = "agentcanvas.canvas.v2"
+SERVER_HEARTBEAT_FILENAME = "server.heartbeat.json"
+HEARTBEAT_INTERVAL_SECONDS = 15
 
 
 def resolve_assistant(agent: Optional[str]) -> Tuple[str, str]:
@@ -95,6 +107,17 @@ def run_server(
     httpd = ThreadingHTTPServer((host, port), handler_class)
     actual_host, actual_port = httpd.server_address[:2]
     display_host = "127.0.0.1" if actual_host in {"0.0.0.0", "::"} else actual_host
+    heartbeat = None
+    if server_heartbeat_enabled(demo_mode=demo_mode, landing_mode=landing_mode):
+        heartbeat = start_server_heartbeat(
+            root,
+            host=display_host,
+            port=int(actual_port),
+            token=token,
+            session_id=session_id,
+            agent=assistant_id if assistant_id != "generic" else None,
+            agent_name=assistant_name if assistant_id != "generic" else None,
+        )
     query = {"token": token}
     if session_id:
         query["sessionId"] = session_id
@@ -115,6 +138,8 @@ def run_server(
     except KeyboardInterrupt:
         print("\nAgentCanvas stopped.", flush=True)
     finally:
+        if heartbeat is not None:
+            stop_server_heartbeat(heartbeat)
         httpd.server_close()
 
 
@@ -122,6 +147,136 @@ def ensure_ir(workspace: Path) -> None:
     _, ir_path, _ = state_paths(workspace)
     if not ir_path.exists():
         index_workspace(workspace)
+
+
+def server_heartbeat_enabled(*, demo_mode: bool, landing_mode: bool) -> bool:
+    return not demo_mode and not landing_mode
+
+
+def server_heartbeat_path(workspace: str | Path) -> Path:
+    state_dir, _, _ = state_paths(workspace)
+    return state_dir / SERVER_HEARTBEAT_FILENAME
+
+
+def token_hint(token: str) -> str:
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+    return "sha256:%s;len:%s" % (digest, len(token))
+
+
+def build_server_heartbeat(
+    workspace: str | Path,
+    *,
+    host: str,
+    port: int,
+    token: str,
+    session_id: Optional[str] = None,
+    agent: Optional[str] = None,
+    agent_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    timestamp = now_utc()
+    payload: Dict[str, Any] = {
+        "schema": "agentcanvas.server_heartbeat.v1",
+        "pid": os.getpid(),
+        "host": host,
+        "port": int(port),
+        "workspace": str(resolve_workspace(workspace)),
+        "updated_at": timestamp,
+        "last_seen": timestamp,
+        "token_hint": token_hint(token),
+    }
+    if session_id:
+        payload["session_id"] = session_id
+    if agent:
+        payload["agent"] = agent
+    if agent_name:
+        payload["agent_name"] = agent_name
+    return payload
+
+
+def write_server_heartbeat(
+    workspace: str | Path,
+    *,
+    host: str,
+    port: int,
+    token: str,
+    session_id: Optional[str] = None,
+    agent: Optional[str] = None,
+    agent_name: Optional[str] = None,
+) -> Path:
+    path = server_heartbeat_path(workspace)
+    atomic_write_json(
+        path,
+        build_server_heartbeat(
+            workspace,
+            host=host,
+            port=port,
+            token=token,
+            session_id=session_id,
+            agent=agent,
+            agent_name=agent_name,
+        ),
+    )
+    return path
+
+
+def start_server_heartbeat(
+    workspace: str | Path,
+    *,
+    host: str,
+    port: int,
+    token: str,
+    session_id: Optional[str] = None,
+    agent: Optional[str] = None,
+    agent_name: Optional[str] = None,
+    interval_seconds: int = HEARTBEAT_INTERVAL_SECONDS,
+) -> Tuple[threading.Event, threading.Thread]:
+    stop_event = threading.Event()
+
+    def refresh() -> None:
+        while not stop_event.wait(interval_seconds):
+            write_server_heartbeat(
+                workspace,
+                host=host,
+                port=port,
+                token=token,
+                session_id=session_id,
+                agent=agent,
+                agent_name=agent_name,
+            )
+
+    write_server_heartbeat(
+        workspace,
+        host=host,
+        port=port,
+        token=token,
+        session_id=session_id,
+        agent=agent,
+        agent_name=agent_name,
+    )
+    thread = threading.Thread(target=refresh, name="agentcanvas-heartbeat", daemon=True)
+    thread.start()
+    return stop_event, thread
+
+
+def stop_server_heartbeat(heartbeat: Tuple[threading.Event, threading.Thread]) -> None:
+    stop_event, thread = heartbeat
+    stop_event.set()
+    thread.join(timeout=1)
+
+
+def canvas_store_error_status(error: CanvasStoreError) -> HTTPStatus:
+    if error.code == "REVISION_CONFLICT":
+        return HTTPStatus.CONFLICT
+    return HTTPStatus.BAD_REQUEST
+
+
+def canvas_apply_author(workspace_assistant_id: str, payload: Dict[str, Any]) -> str:
+    authored_by = payload.get("authored_by")
+    if isinstance(authored_by, str) and authored_by.strip():
+        return authored_by.strip()
+    if workspace_assistant_id and workspace_assistant_id != "generic":
+        return workspace_assistant_id
+    return "agentcanvas-server"
 
 
 def load_or_build_canvas(
@@ -636,6 +791,15 @@ def make_handler(
                 self.write_json({"ok": True, **canvas})
                 return
 
+            if parsed.path == "/api/canvas/history":
+                try:
+                    history = list_canvas_history(workspace)
+                except CanvasStoreError as exc:
+                    self.write_json(exc.to_dict(), status=canvas_store_error_status(exc))
+                    return
+                self.write_json(history)
+                return
+
             if parsed.path == "/api/pending":
                 self.write_json({"ok": True, "pending": list_pending(workspace)})
                 return
@@ -753,6 +917,43 @@ def make_handler(
                         "summary": graph["summary"],
                     }
                 )
+                return
+
+            if parsed.path == "/api/canvas/apply":
+                payload = self.read_json_body()
+                if payload is None:
+                    return
+                try:
+                    result = apply_operation_batch(
+                        workspace,
+                        payload,
+                        base_revision=payload.get("base_revision"),
+                        authored_by=canvas_apply_author(assistant_id, payload),
+                    )
+                except CanvasStoreError as exc:
+                    self.write_json(
+                        exc.to_dict(),
+                        status=canvas_store_error_status(exc),
+                    )
+                    return
+                self.write_json(result)
+                return
+
+            if parsed.path == "/api/canvas/restore":
+                payload = self.read_json_body()
+                if payload is None:
+                    return
+                try:
+                    result = restore_canvas_revision(
+                        workspace,
+                        payload.get("revision"),
+                        base_revision=payload.get("base_revision"),
+                        authored_by=canvas_apply_author(assistant_id, payload),
+                    )
+                except CanvasStoreError as exc:
+                    self.write_json(exc.to_dict(), status=canvas_store_error_status(exc))
+                    return
+                self.write_json(result)
                 return
 
             if parsed.path == "/api/changes":

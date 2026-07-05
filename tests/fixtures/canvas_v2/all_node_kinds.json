@@ -1,0 +1,213 @@
+{
+  "schema": "agentcanvas.canvas.v2",
+  "revision": 0,
+  "authored_by": "agentcanvas-fixture",
+  "updated_at": null,
+  "evidence": {},
+  "app": {
+    "name": "Phase 0 fixture",
+    "summary": "A normalized canvas v2 fixture covering every Phase 0 node kind.",
+    "is_demo": false
+  },
+  "flows": [
+    {
+      "id": "flow:all-node-kinds",
+      "title": "All node kinds",
+      "summary": "Every Phase 0 node kind appears in a reachable graph.",
+      "entry_node": "n:all:start",
+      "altitude": "flow",
+      "nodes": [
+        {
+          "id": "n:all:start",
+          "kind": "When",
+          "title": "A customer starts checkout"
+        },
+        {
+          "id": "n:all:reserve",
+          "kind": "Do",
+          "title": "Reserve the cart"
+        },
+        {
+          "id": "n:all:eligible",
+          "kind": "Decision",
+          "title": "Can the checkout continue?"
+        },
+        {
+          "id": "n:all:retry-loop",
+          "kind": "Loop",
+          "title": "Retry payment attempts"
+        },
+        {
+          "id": "n:all:parallel",
+          "kind": "Parallel",
+          "title": "Prepare fulfillment work"
+        },
+        {
+          "id": "n:all:pack",
+          "kind": "Do",
+          "title": "Pack the order"
+        },
+        {
+          "id": "n:all:wait",
+          "kind": "Wait",
+          "title": "Carrier pickup window"
+        },
+        {
+          "id": "n:all:join",
+          "kind": "Join",
+          "title": "Bring fulfillment work together"
+        },
+        {
+          "id": "n:all:subflow",
+          "kind": "SubFlow",
+          "title": "Run receipt follow-up",
+          "flow_ref": "flow:receipt-follow-up"
+        },
+        {
+          "id": "n:all:done",
+          "kind": "End",
+          "title": "Checkout is complete"
+        },
+        {
+          "id": "n:all:stopped",
+          "kind": "End",
+          "title": "Checkout is stopped"
+        }
+      ],
+      "edges": [
+        {
+          "id": "e:all:start:reserve",
+          "source": "n:all:start",
+          "target": "n:all:reserve",
+          "kind": "normal"
+        },
+        {
+          "id": "e:all:reserve:eligible",
+          "source": "n:all:reserve",
+          "target": "n:all:eligible",
+          "kind": "normal"
+        },
+        {
+          "id": "e:all:eligible:retry-loop",
+          "source": "n:all:eligible",
+          "target": "n:all:retry-loop",
+          "kind": "branch",
+          "label": "Continue"
+        },
+        {
+          "id": "e:all:eligible:stopped",
+          "source": "n:all:eligible",
+          "target": "n:all:stopped",
+          "kind": "branch",
+          "label": "Stop",
+          "is_default": true
+        },
+        {
+          "id": "e:all:retry-loop:parallel",
+          "source": "n:all:retry-loop",
+          "target": "n:all:parallel",
+          "kind": "loop_body"
+        },
+        {
+          "id": "e:all:retry-loop:done",
+          "source": "n:all:retry-loop",
+          "target": "n:all:done",
+          "kind": "loop_exit"
+        },
+        {
+          "id": "e:all:parallel:pack",
+          "source": "n:all:parallel",
+          "target": "n:all:pack",
+          "kind": "parallel"
+        },
+        {
+          "id": "e:all:parallel:wait",
+          "source": "n:all:parallel",
+          "target": "n:all:wait",
+          "kind": "parallel"
+        },
+        {
+          "id": "e:all:pack:join",
+          "source": "n:all:pack",
+          "target": "n:all:join",
+          "kind": "normal"
+        },
+        {
+          "id": "e:all:wait:join",
+          "source": "n:all:wait",
+          "target": "n:all:join",
+          "kind": "normal"
+        },
+        {
+          "id": "e:all:join:subflow",
+          "source": "n:all:join",
+          "target": "n:all:subflow",
+          "kind": "normal"
+        },
+        {
+          "id": "e:all:subflow:retry-loop",
+          "source": "n:all:subflow",
+          "target": "n:all:retry-loop",
+          "kind": "loop_back"
+        },
+        {
+          "id": "e:all:subflow:done",
+          "source": "n:all:subflow",
+          "target": "n:all:done",
+          "kind": "normal"
+        }
+      ],
+      "lanes": [],
+      "tags": [],
+      "evidence_refs": [],
+      "confidence": {},
+      "metadata": {}
+    },
+    {
+      "id": "flow:receipt-follow-up",
+      "title": "Receipt follow-up",
+      "summary": "A small target flow used by the SubFlow node.",
+      "entry_node": "n:receipt:start",
+      "altitude": "flow",
+      "nodes": [
+        {
+          "id": "n:receipt:start",
+          "kind": "When",
+          "title": "Receipt follow-up starts"
+        },
+        {
+          "id": "n:receipt:send",
+          "kind": "Do",
+          "title": "Send the receipt"
+        },
+        {
+          "id": "n:receipt:done",
+          "kind": "End",
+          "title": "Receipt follow-up is complete"
+        }
+      ],
+      "edges": [
+        {
+          "id": "e:receipt:start:send",
+          "source": "n:receipt:start",
+          "target": "n:receipt:send",
+          "kind": "normal"
+        },
+        {
+          "id": "e:receipt:send:done",
+          "source": "n:receipt:send",
+          "target": "n:receipt:done",
+          "kind": "normal"
+        }
+      ],
+      "lanes": [],
+      "tags": [],
+      "evidence_refs": [],
+      "confidence": {},
+      "metadata": {}
+    }
+  ],
+  "metadata": {
+    "fixture": "all_node_kinds"
+  }
+}

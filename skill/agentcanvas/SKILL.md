@@ -178,7 +178,8 @@ user's own repo.
 
 Use this loop only for explicit source-code implementation work. For canvas-only
 requests like adding a step, removing a branch, renaming a journey, or re-routing
-a flow, run `agentcanvas canvas apply` and do not re-index.
+a flow, run `agentcanvas canvas apply --base-revision <revision> --input <ops.json>`
+and do not re-index.
 
 List pending requests:
 
@@ -339,14 +340,30 @@ Validate before writing:
 agentcanvas apply-query --workspace <workspace> --query <canvas-query.json> --dry-run
 ```
 
-Apply only after validation passes and the user wants the display canvas written:
+Apply only after validation passes and the user wants the canvas written:
 
 ```bash
 agentcanvas apply-query --workspace <workspace> --query <canvas-query.json>
 ```
 
-`apply-query` writes the display canvas. It does not overwrite
-`.agentcanvas/workflow.ir.json` or replace the raw facts.
+`apply-query` writes through the canvas v2 apply pipeline, so revision history,
+churn guards, pending refs, and legacy migration still apply. It does not
+overwrite `.agentcanvas/workflow.ir.json` or replace the raw facts.
+
+For direct canvas-only edits, inspect the current revision first, then apply a
+small operation batch:
+
+```bash
+agentcanvas canvas history --workspace <workspace>
+agentcanvas canvas apply --workspace <workspace> --base-revision <revision> --input <ops.json>
+```
+
+Use `allow_rewrite: {"reason": "..."}` only when the user intentionally wants
+to replace a large part of the map. To undo a canvas-only edit:
+
+```bash
+agentcanvas canvas restore --workspace <workspace> --revision <old-revision> --base-revision <current-revision>
+```
 
 If no live model or adapter is available, use copy/manual mode: give the
 projection prompt, response schema, source facts, dry-run command, and apply

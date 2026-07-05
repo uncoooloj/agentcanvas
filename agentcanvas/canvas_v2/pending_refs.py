@@ -125,11 +125,14 @@ def tombstone_deleted_refs(
     deleted_nodes: Iterable[str] = (),
     deleted_flows: Iterable[str] = (),
     timestamp: Optional[str] = None,
+    write: bool = True,
 ) -> List[Dict[str, Any]]:
     """Move refs for deleted nodes/flows into ``orphaned_refs``.
 
     Only open pending requests are modified. Tombstoned refs are removed from
-    ``refs`` and copied to ``orphaned_refs`` with ``orphaned_at``.
+    ``refs`` and copied to ``orphaned_refs`` with ``orphaned_at``. When
+    ``write`` is false, changed records are returned with ``json_path`` but not
+    persisted; callers can include them in a larger transaction.
     """
 
     deleted = set()
@@ -171,10 +174,13 @@ def tombstone_deleted_refs(
             else:
                 active_refs.append(ref)
 
-        if changed:
+        if changed and write:
             normalized["refs"] = _dedupe_refs(active_refs)
             normalized["orphaned_refs"] = _dedupe_refs(orphaned_refs)
             atomic_write_json(json_path, normalized)
+        elif changed:
+            normalized["refs"] = _dedupe_refs(active_refs)
+            normalized["orphaned_refs"] = _dedupe_refs(orphaned_refs)
         normalized["json_path"] = str(json_path)
         updated_records.append(normalized)
     return updated_records

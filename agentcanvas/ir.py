@@ -106,11 +106,14 @@ def build_canvas_map_instruction(workspace: str | Path) -> str:
     return (
         f"Read the workspace at {root}. If there is no readable canvas map, "
         "refresh or author the AgentCanvas behavior map from the current "
-        f"workspace evidence and write the output to {output_path} "
-        f"(`{relative_output}`). Describe user-visible behavior in plain "
-        "English, keep the map grounded in the files you inspected, and ask "
-        "clarifying questions before executing any user-requested edits when "
-        "scope, expected behavior, or missing details are unclear."
+        "workspace evidence. Update the stored canvas through "
+        "`agentcanvas canvas apply --base-revision <revision> --input <ops.json>` "
+        f"so revision checks, history, and pending refs stay intact; the result "
+        f"is stored at {output_path} (`{relative_output}`). Describe "
+        "user-visible behavior in plain English, keep the map grounded in the "
+        "files you inspected, and ask clarifying questions before executing any "
+        "user-requested edits when scope, expected behavior, or missing details "
+        "are unclear."
     )
 
 
@@ -371,6 +374,10 @@ def list_pending(workspace: str | Path) -> List[Dict[str, Any]]:
             }
 
         md_path = json_path.with_suffix(".md")
+        if isinstance(item, dict):
+            from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
+
+            item = normalize_pending_record(item)
         item.setdefault("id", json_path.stem)
         item.setdefault("title", item["id"])
         item.setdefault("status", "pending")
@@ -425,9 +432,11 @@ def _markdown_for_pending(record: Dict[str, Any]) -> str:
         "request is unclear, ask the user a focused clarification question before "
         "moving into execution.",
         "",
-        "If this is a canvas-authoring request, update "
-        "`.agentcanvas/canvas.ir.json` so the browser reflects the new map. "
-        "The map instruction is:",
+        "If this is a canvas-authoring request, do not hand-edit "
+        "`.agentcanvas/canvas.ir.json`. Apply a canvas v2 operation batch with "
+        "`agentcanvas canvas apply --base-revision <revision> --input <ops.json>` "
+        "so revision checks, history, and pending refs stay intact. The map "
+        "instruction is:",
         "",
         build_canvas_map_instruction(record.get("workspace") or "."),
         "",
@@ -511,6 +520,9 @@ def write_pending_change(
     }
     if session_id:
         record["sessionId"] = session_id
+    from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
+
+    record = normalize_pending_record(record)
 
     atomic_write_json(json_path, record)
     atomic_write_text(markdown_path, _markdown_for_pending(record))
@@ -558,6 +570,9 @@ def update_pending_status(
     record["status_history"] = history
     if note:
         record["note"] = note
+    from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
+
+    record = normalize_pending_record(record)
 
     atomic_write_json(json_path, record)
     markdown_path = json_path.with_suffix(".md")

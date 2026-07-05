@@ -191,7 +191,10 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                         "status": "pending",
                         "created_at": "2026-06-19T00:00:00Z",
                         "workspace": str(workspace),
-                        "change": {},
+                        "change": {
+                            "journeyId": "flow:checkout",
+                            "targetStep": "n:checkout:empty-cart",
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -227,6 +230,19 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 updated = json.load(handle)
             self.assertEqual(updated["status"], "in_progress")
             self.assertEqual(updated["note"], "Working on it.")
+            self.assertEqual(
+                updated["refs"],
+                [
+                    {"kind": "flow", "id": "flow:checkout", "source": "change.journeyId"},
+                    {
+                        "kind": "node",
+                        "id": "n:checkout:empty-cart",
+                        "flow": "flow:checkout",
+                        "source": "change.targetStep",
+                    },
+                ],
+            )
+            self.assertEqual(updated["orphaned_refs"], [])
 
     def test_health_command_reports_missing_map_files_without_writing_state(self):
         with tempfile.TemporaryDirectory() as temp_root:
@@ -414,15 +430,19 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 canvas_ir = json.load(handle)
 
             self.assertIn("source_facts", workflow_ir)
-            self.assertEqual(canvas_ir["schema"], "agentcanvas.behavior_canvas_response.v1")
-            self.assertEqual(canvas_ir["mapping"]["mode"], "agent-authored")
-            self.assertEqual(canvas_ir["mapping"]["flowCount"], 1)
-            journey = canvas_ir["canvas"]["journeys"][0]
-            self.assertEqual(journey["entry"], "Someone starts checkout")
+            self.assertEqual(canvas_ir["schema"], "agentcanvas.canvas.v2")
+            self.assertEqual(canvas_ir["revision"], 2)
+            self.assertEqual(canvas_ir["authored_by"], "apply-query")
+            self.assertEqual(canvas_ir["app"]["name"], "Sample js app")
+            self.assertEqual(len(canvas_ir["flows"]), 1)
+            flow = canvas_ir["flows"][0]
+            self.assertTrue(flow["entry_node"].startswith("agent:when-checkout"))
             self.assertEqual(
-                [node["text"] for node in journey["nodes"]],
+                [node["title"] for node in flow["nodes"]],
                 ["Someone starts checkout", "Submit the order"],
             )
+            self.assertTrue((workspace / ".agentcanvas" / "history" / "canvas.pre-v2.json").is_file())
+            self.assertTrue((workspace / ".agentcanvas" / "history" / "canvas.1.json").is_file())
 
 
 if __name__ == "__main__":

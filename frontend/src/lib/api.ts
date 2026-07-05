@@ -190,7 +190,7 @@ function normalizePending(item: unknown): PendingItem {
   }
 }
 
-function normalizeCanvasPayload(data: unknown): AppModel {
+export function normalizeCanvasPayload(data: unknown): AppModel {
   const payload = unwrapCanvasPayload(data)
   const journeys = Array.isArray(payload.journeys) ? payload.journeys : []
 

@@ -33,7 +33,9 @@ from .canvas_v2 import (
     CanvasStoreError,
     apply_operation_batch,
     detect_v1_canvas,
+    list_canvas_history,
     migrate_canvas_v1_to_v2,
+    restore_canvas_revision,
     validate_canvas_v2,
 )
 from .projection import ProjectionValidationError, materialize_canvas_model
@@ -158,6 +160,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     canvas_migrate_parser.set_defaults(func=cmd_canvas_migrate)
 
+    canvas_history_parser = canvas_subparsers.add_parser(
+        "history",
+        help="list v2 canvas history snapshots",
+    )
+    canvas_history_parser.add_argument("path", nargs="?", help="workspace path to inspect")
+    canvas_history_parser.add_argument("--workspace", help="workspace path to inspect")
+    canvas_history_parser.set_defaults(func=cmd_canvas_history)
+
+    canvas_restore_parser = canvas_subparsers.add_parser(
+        "restore",
+        help="restore a v2 canvas history snapshot as a new revision",
+    )
+    canvas_restore_parser.add_argument("path", nargs="?", help="workspace path to update")
+    canvas_restore_parser.add_argument("--workspace", help="workspace path to update")
+    canvas_restore_parser.add_argument("--revision", required=True, type=int, help="history revision to restore")
+    canvas_restore_parser.add_argument("--base-revision", type=int, help="expected current revision")
+    canvas_restore_parser.add_argument("--authored-by", help="agent or human author name")
+    canvas_restore_parser.set_defaults(func=cmd_canvas_restore)
+
     return parser
 
 
@@ -275,19 +296,121 @@ def cmd_apply_query(args: argparse.Namespace) -> int:
         workspace=workspace,
         canvas_query=canvas_query,
     )
+    try:
+        canvas_v2 = migrate_canvas_v1_to_v2(
+            canvas_ir,
+            authored_by="apply-query",
+            updated_at=now_utc(),
+        )
+        batch, base_revision = _operation_batch_from_projected_canvas(
+            workspace,
+            canvas_v2,
+        )
+    except (CanvasStoreError, ValueError) as exc:
+        print(f"Canvas query could not be converted to canvas v2: {exc}")
+        return 1
 
     if args.dry_run:
+        try:
+            result = apply_operation_batch(
+                workspace,
+                batch,
+                base_revision=base_revision,
+                authored_by="apply-query",
+                dry_run=True,
+            )
+        except CanvasStoreError as exc:
+            print(json.dumps(exc.to_dict(), indent=2, sort_keys=True))
+            return 1
         print("Canvas query is valid.")
-        flow_count = len((canvas_ir.get("canvas") or {}).get("journeys") or [])
+        flow_count = len(canvas_v2.get("flows") or [])
         print(f"Display canvas flows: {flow_count}")
+        print(f"Canvas v2 revision would be: {result['revision']}")
         return 0
 
-    path = save_canvas_ir(workspace, canvas_ir)
+    try:
+        result = apply_operation_batch(
+            workspace,
+            batch,
+            base_revision=base_revision,
+            authored_by="apply-query",
+        )
+    except CanvasStoreError as exc:
+        print(json.dumps(exc.to_dict(), indent=2, sort_keys=True))
+        return 1
+
+    path = canvas_ir_path(workspace)
     print(f"Applied canvas query to {path}")
     print(f"Workflow evidence remains in {ir_path}")
-    flow_count = len((canvas_ir.get("canvas") or {}).get("journeys") or [])
+    flow_count = len(canvas_v2.get("flows") or [])
     print(f"Display canvas flows: {flow_count}")
+    print(f"Canvas v2 revision: {result['revision']}")
     return 0
+
+
+def _operation_batch_from_projected_canvas(
+    workspace: Path,
+    canvas_v2: dict,
+) -> tuple[dict, int]:
+    current_payload = None
+    current_is_v2 = False
+    try:
+        current_payload = load_canvas_ir(workspace)
+    except FileNotFoundError:
+        current_payload = None
+    except json.JSONDecodeError as exc:
+        raise CanvasStoreError(
+            "INVALID_CANVAS_JSON",
+            "canvas.ir.json must be valid JSON before apply-query can merge",
+            details={"path": str(canvas_ir_path(workspace)), "reason": str(exc)},
+        )
+
+    if isinstance(current_payload, dict) and current_payload.get("schema") == CANVAS_V2_SCHEMA:
+        current_v2 = current_payload
+        current_is_v2 = True
+    elif isinstance(current_payload, dict) and detect_v1_canvas(current_payload):
+        current_v2 = migrate_canvas_v1_to_v2(
+            current_payload,
+            authored_by="apply-query-preview",
+            updated_at=now_utc(),
+        )
+    else:
+        current_v2 = {"revision": 0, "flows": []}
+
+    current_flow_ids = {
+        flow.get("id")
+        for flow in current_v2.get("flows") or []
+        if isinstance(flow, dict) and isinstance(flow.get("id"), str)
+    }
+    next_flows = [
+        flow
+        for flow in canvas_v2.get("flows") or []
+        if isinstance(flow, dict) and isinstance(flow.get("id"), str)
+    ]
+    next_flow_ids = {flow["id"] for flow in next_flows}
+    operations = [
+        {
+            "op": "set_app",
+            "app": canvas_v2.get("app") if isinstance(canvas_v2.get("app"), dict) else {},
+        }
+    ]
+    operations.extend({"op": "upsert_flow", "flow": flow} for flow in next_flows)
+    operations.extend(
+        {"op": "delete_flow", "target": flow_id}
+        for flow_id in sorted(current_flow_ids - next_flow_ids)
+    )
+
+    base_revision = int(current_v2.get("revision") or 0)
+    batch = {
+        "base_revision": base_revision,
+        "authored_by": "apply-query",
+        "operations": operations,
+    }
+    if not current_is_v2:
+        batch["allow_rewrite"] = {
+            "reason": "Initial canvas projection from apply-query.",
+        }
+    return batch, base_revision
 
 
 def cmd_canvas_apply(args: argparse.Namespace) -> int:
@@ -415,6 +538,49 @@ def cmd_canvas_migrate(args: argparse.Namespace) -> int:
         save_canvas_ir(workspace, migrated)
         result["history_path"] = str(history_path)
 
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_canvas_history(args: argparse.Namespace) -> int:
+    if args.workspace and args.path:
+        error = CanvasStoreError(
+            "WORKSPACE_AMBIGUOUS",
+            "pass either --workspace or positional path, not both",
+            details={"workspace": args.workspace, "path": args.path},
+        )
+        print(json.dumps(error.to_dict(), indent=2, sort_keys=True))
+        return 1
+    workspace = resolve_workspace(selected_workspace(args))
+    try:
+        result = list_canvas_history(workspace)
+    except CanvasStoreError as exc:
+        print(json.dumps(exc.to_dict(), indent=2, sort_keys=True))
+        return 1
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_canvas_restore(args: argparse.Namespace) -> int:
+    if args.workspace and args.path:
+        error = CanvasStoreError(
+            "WORKSPACE_AMBIGUOUS",
+            "pass either --workspace or positional path, not both",
+            details={"workspace": args.workspace, "path": args.path},
+        )
+        print(json.dumps(error.to_dict(), indent=2, sort_keys=True))
+        return 1
+    workspace = resolve_workspace(selected_workspace(args))
+    try:
+        result = restore_canvas_revision(
+            workspace,
+            args.revision,
+            base_revision=getattr(args, "base_revision", None),
+            authored_by=getattr(args, "authored_by", None),
+        )
+    except CanvasStoreError as exc:
+        print(json.dumps(exc.to_dict(), indent=2, sort_keys=True))
+        return 1
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

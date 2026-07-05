@@ -5,14 +5,15 @@ read.
 
 AgentCanvas does not need to be the model provider. It prepares grounded facts;
 the invoking agent or caller model turns those facts into human-readable flows,
-validates the result, and writes the display canvas.
+validates the result, and writes the stored canvas through the v2 apply
+pipeline.
 
 The caller may be any coding agent, model wrapper, MCP tool, local API client, or
 manual copy/paste flow. The contract is the same in each path.
 
 ## File Contract
 
-The current contract separates raw evidence from the browser canvas:
+The current contract separates raw evidence from the revisioned browser canvas:
 
 ```text
 <workspace>/.agentcanvas/workflow.ir.json
@@ -22,17 +23,19 @@ The current contract separates raw evidence from the browser canvas:
 `workflow.ir.json` is the raw index and evidence grounding file. Re-indexing
 refreshes this file from the repo.
 
-`canvas.ir.json` is the browser display canvas source of truth. The invoking
+`canvas.ir.json` is the stored revisioned canvas source of truth. The invoking
 agent should translate repo behavior into readable AgentCanvas flows and update
-this file progressively as the user edits the canvas.
+this file progressively through `agentcanvas canvas apply` as the user edits the
+canvas.
 
 Canvas-only edits, such as adding a step, removing a branch, renaming a journey,
 or re-routing a flow, should update `canvas.ir.json`. They should not require
 re-indexing, because no repo evidence changed.
 
 `agentcanvas.canvas_query.v1` and `agentcanvas apply-query` are still useful as a
-validation and materialization path. Applying a query writes the display canvas.
-It does not overwrite `workflow.ir.json` or rewrite repo facts.
+validation and materialization path. Applying a query writes through the same v2
+revision/history pipeline as direct canvas edits. It does not overwrite
+`workflow.ir.json` or rewrite repo facts.
 
 ## Source-Truth States
 
@@ -142,8 +145,9 @@ Write only after validation passes:
 agentcanvas apply-query --workspace <workspace> --query canvas-query.json
 ```
 
-This command materializes the display canvas. It should preserve the raw
-grounding file and should not be described as overwriting workflow facts.
+This command materializes the stored v2 canvas through the apply pipeline. It
+should preserve the raw grounding file and should not be described as
+overwriting workflow facts.
 
 ## What Facts Should Look Like
 

@@ -21,8 +21,10 @@ this exact code change."
 
 - It indexes your repo into `.agentcanvas/workflow.ir.json`.
 - It lets the invoking agent turn that evidence into readable flows through
-  `agentcanvas canvas apply`, stored in `.agentcanvas/canvas.ir.json`.
-- It shows the display canvas from `.agentcanvas/canvas.ir.json`.
+  `agentcanvas canvas apply`, stored as a revisioned v2 canvas in
+  `.agentcanvas/canvas.ir.json`.
+- It shows that stored canvas in the current browser UI through a compatibility
+  display layer.
 - It lets you add, remove, rename, or re-route canvas steps without changing
   source code.
 - It creates implementation requests only when you explicitly ask for source
@@ -52,7 +54,7 @@ The core loop is intentionally small:
 2. It writes the raw evidence index to `.agentcanvas/workflow.ir.json`.
 3. The invoking agent translates repo behavior into readable flows and writes
    them with `agentcanvas canvas apply`.
-4. The browser shows `.agentcanvas/canvas.ir.json` as the display canvas.
+4. The browser shows `.agentcanvas/canvas.ir.json` as a plain-English canvas.
 5. Canvas-only edits update the stored canvas through `agentcanvas canvas apply`.
 6. If you ask for source-code changes, AgentCanvas creates a Markdown brief and
    a JSON brief in `.agentcanvas/pending/`.
@@ -223,10 +225,11 @@ AgentCanvas writes all local state under the selected repo:
 ```
 
 `workflow.ir.json` is the raw index and evidence grounding file.
-`canvas.ir.json` is the stored browser canvas. Agents should update it through
-`agentcanvas canvas apply` so revision checks, validation, and automatic legacy
-migration run before the browser reads it. Pending Markdown and JSON files are
-for implementation requests, not normal canvas-only edits.
+`canvas.ir.json` is the stored revisioned canvas. Agents should update it
+through `agentcanvas canvas apply` so revision checks, validation, history,
+pending references, and automatic legacy migration run before the browser reads
+it. Pending Markdown and JSON files are for implementation requests, not normal
+canvas-only edits.
 
 The invoking agent authors the display canvas. In plain English:
 
@@ -242,6 +245,13 @@ Legacy display canvases created by older AgentCanvas builds are upgraded
 automatically the first time `agentcanvas canvas apply` touches them. Use
 `agentcanvas canvas migrate --dry-run` only when you want to preview that
 upgrade without applying an edit.
+
+Inspect or undo canvas-only edits with:
+
+```bash
+agentcanvas canvas history --workspace /path/to/your/project
+agentcanvas canvas restore --workspace /path/to/your/project --revision 3 --base-revision 8
+```
 
 Preserve evidence links where possible, and use plain language over file
 inventory language. A person should see what the project does, not just which
@@ -406,8 +416,10 @@ Write only after validation passes:
 agentcanvas apply-query --workspace /path/to/your/project --query canvas-query.json
 ```
 
-`apply-query` writes the display canvas. It does not overwrite
-`.agentcanvas/workflow.ir.json` or replace repo facts.
+`apply-query` validates the projection query and writes the resulting canvas
+through the same v2 apply pipeline, so revision history and safeguards still
+apply. It does not overwrite `.agentcanvas/workflow.ir.json` or replace repo
+facts.
 
 See [docs/projection.md](docs/projection.md).
 

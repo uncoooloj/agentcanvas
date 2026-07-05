@@ -1,0 +1,222 @@
+{
+  "schema": "agentcanvas.canvas.v2",
+  "revision": 0,
+  "authored_by": "agentcanvas-fixture",
+  "updated_at": null,
+  "evidence": {},
+  "app": {
+    "name": "Photo Upload",
+    "summary": "People upload photos, receive warnings for degraded paths, and fail fast on errors.",
+    "is_demo": false
+  },
+  "flows": [
+    {
+      "id": "flow:photo-upload",
+      "title": "Upload photos",
+      "summary": "A combined Phase 0 flow with loop, decision, parallel work, join, warning path, and failure end.",
+      "entry_node": "n:upload:start",
+      "altitude": "flow",
+      "nodes": [
+        {
+          "id": "n:upload:start",
+          "kind": "When",
+          "title": "A person chooses photos"
+        },
+        {
+          "id": "n:upload:select",
+          "kind": "Do",
+          "title": "Collect selected photo files"
+        },
+        {
+          "id": "n:upload:loop",
+          "kind": "Loop",
+          "title": "Process each selected photo"
+        },
+        {
+          "id": "n:upload:check",
+          "kind": "Decision",
+          "title": "Can this photo be uploaded?"
+        },
+        {
+          "id": "n:upload:warn",
+          "kind": "Do",
+          "title": "Show a warning and continue",
+          "metadata": {
+            "severity": "warning",
+            "reason": "The photo can continue after user-visible degradation."
+          }
+        },
+        {
+          "id": "n:upload:parallel",
+          "kind": "Parallel",
+          "title": "Prepare upload assets in parallel"
+        },
+        {
+          "id": "n:upload:store-original",
+          "kind": "Do",
+          "title": "Store the original photo"
+        },
+        {
+          "id": "n:upload:create-thumbnail",
+          "kind": "Do",
+          "title": "Create a thumbnail"
+        },
+        {
+          "id": "n:upload:join",
+          "kind": "Join",
+          "title": "Join prepared upload assets"
+        },
+        {
+          "id": "n:upload:wait",
+          "kind": "Wait",
+          "title": "Wait for moderation result"
+        },
+        {
+          "id": "n:upload:publish",
+          "kind": "Do",
+          "title": "Publish the photo"
+        },
+        {
+          "id": "n:upload:more",
+          "kind": "Decision",
+          "title": "Are there more photos?"
+        },
+        {
+          "id": "n:upload:done",
+          "kind": "End",
+          "title": "Upload is complete"
+        },
+        {
+          "id": "n:upload:failed",
+          "kind": "End",
+          "title": "Upload failed"
+        }
+      ],
+      "edges": [
+        {
+          "id": "e:upload:start:select",
+          "source": "n:upload:start",
+          "target": "n:upload:select",
+          "kind": "normal"
+        },
+        {
+          "id": "e:upload:select:loop",
+          "source": "n:upload:select",
+          "target": "n:upload:loop",
+          "kind": "normal"
+        },
+        {
+          "id": "e:upload:loop:check",
+          "source": "n:upload:loop",
+          "target": "n:upload:check",
+          "kind": "loop_body"
+        },
+        {
+          "id": "e:upload:loop:done",
+          "source": "n:upload:loop",
+          "target": "n:upload:done",
+          "kind": "loop_exit",
+          "label": "No photos left"
+        },
+        {
+          "id": "e:upload:check:parallel",
+          "source": "n:upload:check",
+          "target": "n:upload:parallel",
+          "kind": "branch",
+          "label": "Ready"
+        },
+        {
+          "id": "e:upload:check:warn",
+          "source": "n:upload:check",
+          "target": "n:upload:warn",
+          "kind": "branch",
+          "label": "Warning path"
+        },
+        {
+          "id": "e:upload:warn:parallel",
+          "source": "n:upload:warn",
+          "target": "n:upload:parallel",
+          "kind": "normal"
+        },
+        {
+          "id": "e:upload:check:failed",
+          "source": "n:upload:check",
+          "target": "n:upload:failed",
+          "kind": "error",
+          "label": "Unsupported file"
+        },
+        {
+          "id": "e:upload:parallel:store-original",
+          "source": "n:upload:parallel",
+          "target": "n:upload:store-original",
+          "kind": "parallel"
+        },
+        {
+          "id": "e:upload:parallel:create-thumbnail",
+          "source": "n:upload:parallel",
+          "target": "n:upload:create-thumbnail",
+          "kind": "parallel"
+        },
+        {
+          "id": "e:upload:store-original:join",
+          "source": "n:upload:store-original",
+          "target": "n:upload:join",
+          "kind": "normal"
+        },
+        {
+          "id": "e:upload:create-thumbnail:join",
+          "source": "n:upload:create-thumbnail",
+          "target": "n:upload:join",
+          "kind": "normal"
+        },
+        {
+          "id": "e:upload:store-original:failed",
+          "source": "n:upload:store-original",
+          "target": "n:upload:failed",
+          "kind": "error",
+          "label": "Storage failed"
+        },
+        {
+          "id": "e:upload:join:wait",
+          "source": "n:upload:join",
+          "target": "n:upload:wait",
+          "kind": "normal"
+        },
+        {
+          "id": "e:upload:wait:publish",
+          "source": "n:upload:wait",
+          "target": "n:upload:publish",
+          "kind": "normal"
+        },
+        {
+          "id": "e:upload:publish:more",
+          "source": "n:upload:publish",
+          "target": "n:upload:more",
+          "kind": "normal"
+        },
+        {
+          "id": "e:upload:more:loop",
+          "source": "n:upload:more",
+          "target": "n:upload:loop",
+          "kind": "loop_back",
+          "label": "More photos"
+        },
+        {
+          "id": "e:upload:more:done",
+          "source": "n:upload:more",
+          "target": "n:upload:done",
+          "kind": "loop_exit",
+          "label": "All photos uploaded"
+        }
+      ],
+      "lanes": [],
+      "tags": [],
+      "evidence_refs": [],
+      "confidence": {},
+      "metadata": {}
+    }
+  ],
+  "metadata": {
+    "fixture": "photo_upload_combined"
+  }
+}

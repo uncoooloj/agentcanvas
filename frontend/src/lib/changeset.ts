@@ -1,7 +1,14 @@
 import { create } from "zustand"
 import { fetchPending, postChange, type ChangeRequest } from "./api"
 import type { FlowAction } from "@/components/FlowCanvas"
-import type { AppModel, BranchNode, FlowNode, PendingItem, PendingStatus, StepNode } from "./types"
+import {
+  PendingStatus,
+  type AppModel,
+  type BranchNode,
+  type FlowNode,
+  type PendingItem,
+  type StepNode,
+} from "./types"
 
 // ---- Change-set model ----
 
@@ -21,8 +28,27 @@ export interface ChangeEntry {
   updatedAt: number
 }
 
-export type Phase = "composing" | "sending" | "working" | "done" | "needs_input" | "blocked"
-export type HandoffItemStatus = "queued" | Exclude<PendingStatus, "pending">
+export enum HandoffPhase {
+  Composing = "composing",
+  Sending = "sending",
+  Working = "working",
+  Done = "done",
+  NeedsInput = "needs_input",
+  Blocked = "blocked",
+  Stopped = "stopped",
+}
+export enum HandoffItemStatus {
+  Queued = "queued",
+  Sent = "sent",
+  InProgress = "in_progress",
+  Implemented = "implemented",
+  NeedsInput = "needs_input",
+  Blocked = "blocked",
+  Verified = "verified",
+  Done = "done",
+  Cancelled = "cancelled",
+  Rejected = "rejected",
+}
 
 export interface HandoffItem {
   changeId: string
@@ -36,7 +62,7 @@ export interface HandoffItem {
 }
 
 export interface HandoffState {
-  phase: Phase
+  phase: HandoffPhase
   items: HandoffItem[]
   summary?: string
   question?: string
@@ -87,13 +113,14 @@ interface ChangeStore {
   send: () => void
   refreshHandoff: () => Promise<void>
   acknowledgeDone: () => ChangeEntry[] // returns the applied changes so the caller can update the model
+  dismissHandoff: () => void
   badgeForNode: (nodeId: string) => ChangeKind | null
 }
 
 let counter = 0
 const newId = () => `c${Date.now().toString(36)}${counter++}`
 
-const idle: HandoffState = { phase: "composing", items: [] }
+const idle: HandoffState = { phase: HandoffPhase.Composing, items: [] }
 
 export const useChanges = create<ChangeStore>((set, get) => ({
   changes: [],
@@ -112,7 +139,7 @@ export const useChanges = create<ChangeStore>((set, get) => ({
       createdAt: now,
       updatedAt: now,
     }
-    const working = get().handoff.phase !== "composing"
+    const working = get().handoff.phase !== HandoffPhase.Composing
     if (working) {
       set((s) => ({ queuedNext: [...s.queuedNext, entry] }))
     } else {
@@ -140,14 +167,14 @@ export const useChanges = create<ChangeStore>((set, get) => ({
 
   send: () => {
     const { changes, handoff } = get()
-    if (handoff.phase !== "composing" || !changes.length) return
+    if (handoff.phase !== HandoffPhase.Composing || !changes.length) return
 
     const items: HandoffItem[] = changes.map((c) => ({
       changeId: c.id,
       label: `${VERB[c.kind]}: ${c.summary}`,
-      status: "queued",
+      status: HandoffItemStatus.Queued,
     }))
-    set({ handoff: { phase: "sending", items, prompt: buildHandoffPrompt(changes, get().assistantName) } })
+    set({ handoff: { phase: HandoffPhase.Sending, items, prompt: buildHandoffPrompt(changes, get().assistantName) } })
 
     Promise.allSettled(changes.map((change) => postChange(changeRequestFor(change))))
       .then((results) => {
@@ -182,7 +209,7 @@ export const useChanges = create<ChangeStore>((set, get) => ({
           return {
             handoff: {
               ...s.handoff,
-              phase: "blocked",
+              phase: HandoffPhase.Blocked,
               error: message,
               items: nextItems,
               question: "AgentCanvas could not write the pending files. Copy the fallback prompt below and paste it into your assistant instead.",
@@ -195,7 +222,13 @@ export const useChanges = create<ChangeStore>((set, get) => ({
 
   refreshHandoff: async () => {
     const handoff = get().handoff
-    if (handoff.phase === "composing" || handoff.phase === "done") return
+    if (
+      handoff.phase === HandoffPhase.Composing ||
+      handoff.phase === HandoffPhase.Done ||
+      handoff.phase === HandoffPhase.Stopped
+    ) {
+      return
+    }
     try {
       const pending = await fetchPending()
       const byId = new Map(pending.map((item) => [item.id, item]))
@@ -206,16 +239,19 @@ export const useChanges = create<ChangeStore>((set, get) => ({
           return pendingItem ? handoffItemFromPending(item, pendingItem) : item
         })
         const phase = phaseForItems(items)
-        const needsInput = items.find((item) => item.status === "needs_input")
-        const blocked = items.find((item) => item.status === "blocked")
+        const needsInput = items.find((item) => item.status === HandoffItemStatus.NeedsInput)
+        const blocked = items.find((item) => STOPPED_STATUSES.has(item.status))
         return {
           handoff: {
             ...s.handoff,
             phase,
             items,
-            summary: phase === "done" ? summarize(get().changes) : s.handoff.summary,
+            summary: phase === HandoffPhase.Done ? summarize(get().changes) : s.handoff.summary,
             question: needsInput?.note || blocked?.note || s.handoff.question,
-            error: phase === "working" || phase === "done" ? undefined : s.handoff.error,
+            error:
+              phase === HandoffPhase.Working || phase === HandoffPhase.Done
+                ? undefined
+                : blocked?.note || s.handoff.error,
             prompt: buildHandoffPrompt(s.changes, s.assistantName, items),
           },
         }
@@ -233,10 +269,15 @@ export const useChanges = create<ChangeStore>((set, get) => ({
   },
 
   acknowledgeDone: () => {
+    if (get().handoff.phase !== HandoffPhase.Done) return []
     const applied = get().changes
     const promoted = get().queuedNext
     set({ changes: promoted, queuedNext: [], handoff: idle })
     return applied
+  },
+
+  dismissHandoff: () => {
+    set({ handoff: idle })
   },
 
   badgeForNode: (nodeId) => {
@@ -267,7 +308,7 @@ function handoffItemFromPending(item: HandoffItem, pending: PendingItem): Handof
   const status = normalizePendingStatus(pending.status)
   return {
     ...item,
-    status: status === "pending" ? "sent" : status,
+    status: status === PendingStatus.Pending ? HandoffItemStatus.Sent : status,
     pendingId: pending.id,
     title: pending.title,
     note: pending.note || pending.error,
@@ -277,21 +318,46 @@ function handoffItemFromPending(item: HandoffItem, pending: PendingItem): Handof
 }
 
 function blockedHandoffItem(item: HandoffItem, note: string): HandoffItem {
-  return { ...item, status: "blocked", note }
+  return { ...item, status: HandoffItemStatus.Blocked, note }
 }
 
-function normalizePendingStatus(status: PendingStatus): HandoffItemStatus | "pending" {
-  return status
+function normalizePendingStatus(status: PendingStatus): HandoffItemStatus | PendingStatus.Pending {
+  if (status === PendingStatus.Pending) return PendingStatus.Pending
+  return PENDING_TO_HANDOFF_STATUS[status]
 }
 
-function phaseForItems(items: HandoffItem[]): Phase {
-  if (!items.length) return "composing"
-  if (items.some((item) => item.status === "queued")) return "sending"
-  if (items.every((item) => item.status === "done")) return "done"
-  if (items.some((item) => item.status === "sent" || item.status === "in_progress")) return "working"
-  if (items.some((item) => item.status === "blocked")) return "blocked"
-  if (items.some((item) => item.status === "needs_input")) return "needs_input"
-  return "working"
+const PENDING_TO_HANDOFF_STATUS: Record<Exclude<PendingStatus, PendingStatus.Pending>, HandoffItemStatus> = {
+  [PendingStatus.Sent]: HandoffItemStatus.Sent,
+  [PendingStatus.InProgress]: HandoffItemStatus.InProgress,
+  [PendingStatus.Implemented]: HandoffItemStatus.Implemented,
+  [PendingStatus.NeedsInput]: HandoffItemStatus.NeedsInput,
+  [PendingStatus.Blocked]: HandoffItemStatus.Blocked,
+  [PendingStatus.Verified]: HandoffItemStatus.Verified,
+  [PendingStatus.Done]: HandoffItemStatus.Done,
+  [PendingStatus.Cancelled]: HandoffItemStatus.Cancelled,
+  [PendingStatus.Rejected]: HandoffItemStatus.Rejected,
+}
+
+const FINISHED_STATUSES = new Set<HandoffItemStatus>([HandoffItemStatus.Done, HandoffItemStatus.Verified])
+const WORKING_STATUSES = new Set<HandoffItemStatus>([
+  HandoffItemStatus.Sent,
+  HandoffItemStatus.InProgress,
+  HandoffItemStatus.Implemented,
+])
+const STOPPED_STATUSES = new Set<HandoffItemStatus>([
+  HandoffItemStatus.Blocked,
+  HandoffItemStatus.Cancelled,
+  HandoffItemStatus.Rejected,
+])
+
+function phaseForItems(items: HandoffItem[]): HandoffPhase {
+  if (!items.length) return HandoffPhase.Composing
+  if (items.some((item) => item.status === HandoffItemStatus.Queued)) return HandoffPhase.Sending
+  if (items.every((item) => FINISHED_STATUSES.has(item.status))) return HandoffPhase.Done
+  if (items.some((item) => STOPPED_STATUSES.has(item.status))) return HandoffPhase.Stopped
+  if (items.some((item) => item.status === HandoffItemStatus.NeedsInput)) return HandoffPhase.NeedsInput
+  if (items.some((item) => WORKING_STATUSES.has(item.status))) return HandoffPhase.Working
+  return HandoffPhase.Working
 }
 
 function rejectionMessage(result: PromiseSettledResult<PendingItem> | undefined): string {
@@ -346,13 +412,20 @@ export function buildHandoffPrompt(changes: ChangeEntry[], assistantName = "your
 }
 
 function statusLabel(status?: HandoffItemStatus): string {
-  if (status === "queued") return "creating pending file"
-  if (status === "sent") return "sent"
-  if (status === "in_progress") return "in progress"
-  if (status === "done") return "done"
-  if (status === "needs_input") return "needs input"
-  if (status === "blocked") return "blocked"
-  return "not sent"
+  return status ? STATUS_LABELS[status] : "not sent"
+}
+
+const STATUS_LABELS: Record<HandoffItemStatus, string> = {
+  [HandoffItemStatus.Queued]: "creating pending file",
+  [HandoffItemStatus.Sent]: "sent",
+  [HandoffItemStatus.InProgress]: "in progress",
+  [HandoffItemStatus.Implemented]: "implemented",
+  [HandoffItemStatus.Verified]: "verified",
+  [HandoffItemStatus.Done]: "done",
+  [HandoffItemStatus.NeedsInput]: "needs input",
+  [HandoffItemStatus.Blocked]: "blocked",
+  [HandoffItemStatus.Cancelled]: "cancelled",
+  [HandoffItemStatus.Rejected]: "rejected",
 }
 
 // ---- Optimistic apply: reflect staged changes on the model when the assistant "finishes" ----

@@ -26,7 +26,14 @@ import { BottomDock } from "@/components/BottomDock"
 import { LandingPage } from "@/components/LandingPage"
 import { WorkspaceMappingState } from "@/components/WorkspaceMappingState"
 import { DEMO_MODEL, emptyAppModel } from "@/lib/behavioral"
-import { applyChanges, useChanges, type ChangeEntry, type HandoffItem, type Phase } from "@/lib/changeset"
+import {
+  HandoffItemStatus,
+  HandoffPhase,
+  applyChanges,
+  useChanges,
+  type ChangeEntry,
+  type HandoffItem,
+} from "@/lib/changeset"
 import { ApiError, fetchCanvas, reindexCanvas } from "@/lib/api"
 import { useAppContext, type AppContext } from "@/lib/appcontext"
 import type { EditRequest, StagedEdit } from "@/lib/edits"
@@ -101,12 +108,12 @@ export default function App() {
   const queuedNext = useChanges((s) => s.queuedNext)
   const orderingChanges = useMemo(() => [...stagedChanges, ...queuedNext], [queuedNext, stagedChanges])
   const localChanges = useMemo(
-    () => (phase === "composing" ? stagedChanges : queuedNext),
+    () => (phase === HandoffPhase.Composing ? stagedChanges : queuedNext),
     [phase, queuedNext, stagedChanges]
   )
-  const locked = phase === "sending" || phase === "working"
+  const locked = phase === HandoffPhase.Sending || phase === HandoffPhase.Working
   const hasLocalPendingChanges =
-    Boolean(editRequest) || stagedChanges.length > 0 || queuedNext.length > 0 || phase !== "composing"
+    Boolean(editRequest) || stagedChanges.length > 0 || queuedNext.length > 0 || phase !== HandoffPhase.Composing
   const journeyActivity = useMemo(
     () => getJourneyActivity(model.journeys, localChanges, orderingChanges, phase, handoffItems),
     [handoffItems, localChanges, model.journeys, orderingChanges, phase]
@@ -325,6 +332,7 @@ export default function App() {
 
   function onHandoffDone() {
     const applied = useChanges.getState().acknowledgeDone()
+    if (!applied.length) return
     const editedAtByJourney = new Map<string, number>()
     for (const change of applied) {
       const editedAt = change.updatedAt || change.createdAt
@@ -344,6 +352,10 @@ export default function App() {
       }
     })
     setSelectedId(null)
+  }
+
+  function onHandoffDismiss() {
+    useChanges.getState().dismissHandoff()
   }
 
   const inJourney = view !== HOME && !!activeJourney
@@ -514,6 +526,7 @@ export default function App() {
               onSubmitEdit={stageEdit}
               onCancelEdit={() => setEditRequest(null)}
               onHandoffDone={onHandoffDone}
+              onHandoffDismiss={onHandoffDismiss}
               onSelectChange={selectChange}
               onModifyChange={modifyChange}
             />
@@ -1030,7 +1043,7 @@ function getJourneyActivity(
   journeys: Journey[],
   localChanges: ChangeEntry[],
   orderingChanges: ChangeEntry[],
-  phase: Phase,
+  phase: HandoffPhase,
   handoffItems: HandoffItem[]
 ) {
   const active = new Map<string, JourneyActivity>()
@@ -1040,10 +1053,10 @@ function getJourneyActivity(
     }
   }
 
-  if (phase === "sending" || phase === "working") {
+  if (phase === HandoffPhase.Sending || phase === HandoffPhase.Working) {
     const changesById = new Map(orderingChanges.map((change) => [change.id, change]))
     for (const item of handoffItems) {
-      if (item.status === "in_progress") {
+      if (item.status === HandoffItemStatus.InProgress || item.status === HandoffItemStatus.Implemented) {
         const change = changesById.get(item.changeId)
         if (change) active.set(change.journeyId, "working")
       }

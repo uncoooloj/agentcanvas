@@ -87,8 +87,16 @@ export interface AppModel {
 export interface MappingStage {
   id: string
   label: string
-  status: "pending" | "active" | "done" | "ready" | "error"
+  status: MappingStageStatus
   detail?: string
+}
+
+export enum MappingStageStatus {
+  Pending = "pending",
+  Active = "active",
+  Done = "done",
+  Ready = "ready",
+  Error = "error",
 }
 
 export interface CanvasMapping {
@@ -140,7 +148,18 @@ export interface CanvasSourceSummary {
   flowCount?: number
 }
 
-export type PendingStatus = "pending" | "sent" | "in_progress" | "done" | "needs_input" | "blocked"
+export enum PendingStatus {
+  Pending = "pending",
+  Sent = "sent",
+  InProgress = "in_progress",
+  Implemented = "implemented",
+  NeedsInput = "needs_input",
+  Blocked = "blocked",
+  Verified = "verified",
+  Done = "done",
+  Cancelled = "cancelled",
+  Rejected = "rejected",
+}
 
 export interface PendingStatusHistoryEntry {
   status: PendingStatus

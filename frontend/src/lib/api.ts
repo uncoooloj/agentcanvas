@@ -1,16 +1,17 @@
-import type {
-  AppModel,
-  BranchNode,
-  CanvasMapping,
-  CanvasSourceMetadata,
-  CodeGraph,
-  FlowNode,
-  Journey,
-  MappingStage,
-  PendingItem,
+import {
+  MappingStageStatus,
   PendingStatus,
-  PendingStatusHistoryEntry,
-  StepNode,
+  type AppModel,
+  type BranchNode,
+  type CanvasMapping,
+  type CanvasSourceMetadata,
+  type CodeGraph,
+  type FlowNode,
+  type Journey,
+  type MappingStage,
+  type PendingItem,
+  type PendingStatusHistoryEntry,
+  type StepNode,
 } from "./types"
 
 export class ApiError extends Error {
@@ -276,12 +277,17 @@ function normalizeMappingStage(value: unknown): MappingStage | null {
   return {
     id,
     label,
-    status:
-      status === "pending" || status === "active" || status === "done" || status === "ready" || status === "error"
-        ? status
-        : "pending",
+    status: normalizeMappingStageStatus(status),
     detail: stringValue(stage.detail),
   }
+}
+
+const MAPPING_STAGE_STATUSES = new Set<string>(Object.values(MappingStageStatus))
+
+function normalizeMappingStageStatus(status: string | undefined): MappingStageStatus {
+  return status && MAPPING_STAGE_STATUSES.has(status)
+    ? (status as MappingStageStatus)
+    : MappingStageStatus.Pending
 }
 
 function unwrapCanvasPayload(data: unknown): Record<string, unknown> {
@@ -553,12 +559,12 @@ export function hasToken(): boolean {
   return Boolean(token())
 }
 
-const PENDING_STATUSES: PendingStatus[] = ["pending", "sent", "in_progress", "done", "needs_input", "blocked"]
+const PENDING_STATUSES = new Set<string>(Object.values(PendingStatus))
 
 function normalizePendingStatus(status: unknown): PendingStatus {
-  const value = String(status || "pending")
-  if ((PENDING_STATUSES as string[]).includes(value)) return value as PendingStatus
-  return value === "queued" ? "pending" : "blocked"
+  const value = String(status || PendingStatus.Pending)
+  if (PENDING_STATUSES.has(value)) return value as PendingStatus
+  return value === "queued" ? PendingStatus.Pending : PendingStatus.Rejected
 }
 
 function normalizeStatusHistory(value: unknown): PendingStatusHistoryEntry[] | undefined {

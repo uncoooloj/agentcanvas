@@ -1,29 +1,30 @@
 import { useEffect, useState } from "react"
 import { AlertCircle, Check, CircleCheck, Clipboard, Clock, Loader2, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useChanges, type HandoffItem, type HandoffItemStatus } from "@/lib/changeset"
+import { HandoffItemStatus, HandoffPhase, useChanges, type HandoffItem } from "@/lib/changeset"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 interface Props {
   onAcknowledge: () => void
+  onDismiss: () => void
 }
 
-export function HandoffOverlay({ onAcknowledge }: Props) {
+export function HandoffOverlay({ onAcknowledge, onDismiss }: Props) {
   const { handoff, assistantName, refreshHandoff } = useChanges()
   const { phase, items, summary, question, prompt, error } = handoff
 
   useEffect(() => {
-    if (phase === "composing" || phase === "done") return
+    if (phase === HandoffPhase.Composing || phase === HandoffPhase.Done) return
     const id = window.setInterval(() => {
       refreshHandoff()
     }, 2500)
     return () => window.clearInterval(id)
   }, [phase, refreshHandoff])
 
-  if (phase === "composing") return null
+  if (phase === HandoffPhase.Composing) return null
 
-  if (phase === "sending" || phase === "working") {
+  if (phase === HandoffPhase.Sending || phase === HandoffPhase.Working) {
     return (
       <div className="w-full max-w-lg animate-fade-in rounded-lg border border-border bg-card shadow-lg">
         <div className="flex items-center gap-3 px-5 py-4">
@@ -56,7 +57,7 @@ export function HandoffOverlay({ onAcknowledge }: Props) {
     )
   }
 
-  if (phase === "done") {
+  if (phase === HandoffPhase.Done) {
     return (
       <div className="w-full max-w-lg animate-fade-in rounded-lg border border-border bg-card shadow-lg">
         <div className="flex items-start gap-3 px-5 py-5">
@@ -81,8 +82,8 @@ export function HandoffOverlay({ onAcknowledge }: Props) {
     )
   }
 
-  if (phase === "needs_input" || phase === "blocked") {
-    const blocked = phase === "blocked"
+  if (phase === HandoffPhase.NeedsInput || phase === HandoffPhase.Blocked || phase === HandoffPhase.Stopped) {
+    const blocked = phase === HandoffPhase.Blocked || phase === HandoffPhase.Stopped
     return (
       <div className="w-full max-w-lg animate-fade-in rounded-lg border border-border bg-card shadow-lg">
         <div className="flex items-start gap-3 px-5 py-5">
@@ -98,7 +99,7 @@ export function HandoffOverlay({ onAcknowledge }: Props) {
         <HandoffItemList items={items} />
         {prompt && <CopyPrompt prompt={prompt} />}
         <div className="border-t border-border px-5 py-4">
-          <Button onClick={onAcknowledge}>Got it</Button>
+          <Button onClick={onDismiss}>Got it</Button>
         </div>
       </div>
     )
@@ -117,44 +118,72 @@ const STATUS_VIEW: Record<
     badgeClassName: string
   }
 > = {
-  queued: {
+  [HandoffItemStatus.Queued]: {
     label: "Creating",
     detail: "Writing pending files",
     Icon: Clock,
     iconClassName: "text-muted-foreground",
     badgeClassName: "border-border bg-secondary text-muted-foreground",
   },
-  sent: {
+  [HandoffItemStatus.Sent]: {
     label: "Sent",
     detail: "Pending file created",
     Icon: Clock,
     iconClassName: "text-muted-foreground",
     badgeClassName: "border-border bg-secondary text-muted-foreground",
   },
-  in_progress: {
+  [HandoffItemStatus.InProgress]: {
     label: "In progress",
     detail: "Agent started work",
     Icon: Loader2,
     iconClassName: "animate-spin text-primary",
     badgeClassName: "border-primary/20 bg-accent text-accent-foreground",
   },
-  done: {
+  [HandoffItemStatus.Implemented]: {
+    label: "Implemented",
+    detail: "Waiting for verification",
+    Icon: Clock,
+    iconClassName: "text-primary",
+    badgeClassName: "border-primary/20 bg-accent text-accent-foreground",
+  },
+  [HandoffItemStatus.Verified]: {
+    label: "Verified",
+    detail: "Checks passed",
+    Icon: CircleCheck,
+    iconClassName: "text-act-fg",
+    badgeClassName: "border-act-accent/20 bg-act-bg text-act-fg",
+  },
+  [HandoffItemStatus.Done]: {
     label: "Done",
     detail: "Implemented",
     Icon: CircleCheck,
     iconClassName: "text-act-fg",
     badgeClassName: "border-act-accent/20 bg-act-bg text-act-fg",
   },
-  needs_input: {
+  [HandoffItemStatus.NeedsInput]: {
     label: "Needs input",
     detail: "Waiting on a reply",
     Icon: AlertCircle,
     iconClassName: "text-when-fg",
     badgeClassName: "border-when-accent/30 bg-when-bg text-when-fg",
   },
-  blocked: {
+  [HandoffItemStatus.Blocked]: {
     label: "Blocked",
     detail: "Cannot continue yet",
+    Icon: AlertCircle,
+    iconClassName: "text-destructive",
+    badgeClassName: "border-destructive/20 bg-destructive/10 text-destructive",
+  },
+  [HandoffItemStatus.Cancelled]: {
+    label: "Cancelled",
+    detail: "Stopped before completion",
+    Icon: AlertCircle,
+    iconClassName: "text-muted-foreground",
+    badgeClassName: "border-border bg-secondary text-muted-foreground",
+  },
+  [HandoffItemStatus.Rejected]: {
+    label: "Rejected",
+    detail: "Will not be applied",
     Icon: AlertCircle,
     iconClassName: "text-destructive",
     badgeClassName: "border-destructive/20 bg-destructive/10 text-destructive",

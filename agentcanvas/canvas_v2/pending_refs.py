@@ -13,9 +13,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from agentcanvas.ir import STATE_DIR_NAME, atomic_write_json, now_utc, resolve_workspace
+from agentcanvas.lifecycle import REF_PROTECTING
+from agentcanvas.workspace_lock import workspace_write_lock
 
 
-OPEN_PENDING_STATUSES = {"pending", "sent", "in_progress", "needs_input", "blocked"}
+OPEN_PENDING_STATUSES = REF_PROTECTING
 
 _FLOW_KEYS = {
     "flow",
@@ -83,6 +85,14 @@ def migrate_pending_refs(workspace: str | Path, *, write: bool = True) -> List[D
     records include ``json_path`` for the file that was read.
     """
 
+    root = resolve_workspace(workspace)
+    if write:
+        with workspace_write_lock(root, writer="pending-ref-migrate"):
+            return _migrate_pending_refs_locked(root, write=True)
+    return _migrate_pending_refs_locked(root, write=False)
+
+
+def _migrate_pending_refs_locked(workspace: str | Path, *, write: bool) -> List[Dict[str, Any]]:
     pending_dir = _pending_dir(workspace)
     if not pending_dir.is_dir():
         return []
@@ -135,6 +145,33 @@ def tombstone_deleted_refs(
     persisted; callers can include them in a larger transaction.
     """
 
+    root = resolve_workspace(workspace)
+    if write:
+        with workspace_write_lock(root, writer="pending-ref-tombstone"):
+            return _tombstone_deleted_refs_locked(
+                root,
+                deleted_nodes=deleted_nodes,
+                deleted_flows=deleted_flows,
+                timestamp=timestamp,
+                write=True,
+            )
+    return _tombstone_deleted_refs_locked(
+        root,
+        deleted_nodes=deleted_nodes,
+        deleted_flows=deleted_flows,
+        timestamp=timestamp,
+        write=False,
+    )
+
+
+def _tombstone_deleted_refs_locked(
+    workspace: str | Path,
+    *,
+    deleted_nodes: Iterable[str] = (),
+    deleted_flows: Iterable[str] = (),
+    timestamp: Optional[str] = None,
+    write: bool,
+) -> List[Dict[str, Any]]:
     deleted = set()
     for item_id in deleted_nodes:
         if item_id:

@@ -937,14 +937,19 @@ class CanvasV2StoreCliTests(unittest.TestCase):
             finally:
                 canvas_store.CRASH_AFTER_CANVAS_REPLACE_FOR_TESTS = original_flag
 
+            txn_paths = list((workspace / ".agentcanvas" / "history").glob("canvas.txn.*.json"))
+            self.assertEqual(len(txn_paths), 1)
+            txn_payload = _read_json(txn_paths[0])
+            txn_payload["pid"] = 999999
+            txn_payload["started_at_epoch"] = 0
+            txn_paths[0].write_text(json.dumps(txn_payload), encoding="utf-8")
+
             recovered = load_canvas_document(workspace)
 
             self.assertEqual(recovered, original_canvas)
             self.assertEqual(_read_json(pending_path), original_pending)
             self.assertFalse((workspace / ".agentcanvas" / "history" / "canvas.1.json").exists())
-            self.assertFalse(
-                (workspace / ".agentcanvas" / "history" / "canvas.txn.json").exists()
-            )
+            self.assertEqual(list((workspace / ".agentcanvas" / "history").glob("canvas.txn.*.json")), [])
 
     def test_history_lists_snapshots_and_restore_writes_new_revision(self):
         with tempfile.TemporaryDirectory() as temp_root:

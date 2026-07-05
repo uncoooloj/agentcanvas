@@ -72,10 +72,36 @@ def _node_script():
         }).outputText;
 
         const localModule = { exports: {} };
+        const localRequire = (id) => {
+          if (id === "./types") {
+            return {
+              MappingStageStatus: {
+                Pending: "pending",
+                Active: "active",
+                Done: "done",
+                Ready: "ready",
+                Error: "error",
+              },
+              PendingStatus: {
+                Pending: "pending",
+                Sent: "sent",
+                InProgress: "in_progress",
+                Implemented: "implemented",
+                NeedsInput: "needs_input",
+                Blocked: "blocked",
+                Verified: "verified",
+                Done: "done",
+                Cancelled: "cancelled",
+                Rejected: "rejected",
+              },
+            };
+          }
+          return require(id);
+        };
         const context = {
           module: localModule,
           exports: localModule.exports,
-          require,
+          require: localRequire,
           URL,
           URLSearchParams,
           fetch: async () => { throw new Error("fetch should not be called"); },

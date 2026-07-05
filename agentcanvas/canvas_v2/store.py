@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 import uuid
 from copy import deepcopy
@@ -22,6 +23,13 @@ from agentcanvas.ir import (
     now_utc,
     resolve_workspace,
     state_paths,
+)
+from agentcanvas.lifecycle import REF_PROTECTING
+from agentcanvas.workspace_lock import (
+    DEFAULT_LOCK_LEASE_SECONDS,
+    WorkspaceLockBusy,
+    is_stale_process_claim,
+    workspace_write_lock,
 )
 
 CANVAS_V2_SCHEMA = "agentcanvas.canvas.v2"
@@ -46,13 +54,15 @@ KNOWN_EDGE_KINDS = {
     "error",
     "async",
 }
-OPEN_PENDING_STATUSES = {"pending", "sent", "in_progress", "needs_input", "blocked"}
+OPEN_PENDING_STATUSES = REF_PROTECTING
 HISTORY_DIR_NAME = "history"
 HISTORY_HEAD_FILENAME = "canvas.head.json"
 HISTORY_TXN_FILENAME = "canvas.txn.json"
+HISTORY_TXN_PREFIX = "canvas.txn."
 HISTORY_MAX_REVISIONS = 50
 HISTORY_MAX_BYTES = 20 * 1024 * 1024
 HISTORY_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+TRANSACTION_STALE_SECONDS = DEFAULT_LOCK_LEASE_SECONDS
 CRASH_AFTER_CANVAS_REPLACE_FOR_TESTS = False
 
 
@@ -96,6 +106,14 @@ def load_canvas_document(workspace: str | Path) -> Dict[str, Any]:
     """Load the current v2 canvas, or return an empty revision-0 document."""
 
     root = resolve_workspace(workspace)
+    try:
+        with workspace_write_lock(root, writer="canvas-load"):
+            return _load_canvas_document_locked(root, reconcile=True)
+    except WorkspaceLockBusy as exc:
+        raise _workspace_busy_error(exc)
+
+
+def _load_canvas_document_locked(root: Path, *, reconcile: bool) -> Dict[str, Any]:
     path = canvas_ir_path(root)
     _recover_incomplete_transaction(root)
     if not path.exists():
@@ -122,7 +140,7 @@ def load_canvas_document(workspace: str | Path) -> Dict[str, Any]:
             "canvas.ir.json must be agentcanvas.canvas.v2 for canvas apply",
             details={"schema": payload.get("schema")},
         )
-    return _load_v2_payload(root, payload, reconcile=True)
+    return _load_v2_payload(root, payload, reconcile=reconcile)
 
 
 def apply_operation_batch(
@@ -140,6 +158,29 @@ def apply_operation_batch(
 
     root = resolve_workspace(workspace)
     writer = authored_by or _optional_string(batch.get("authored_by")) or "agentcanvas-cli"
+    try:
+        with workspace_write_lock(root, writer=writer) as lock:
+            return _apply_operation_batch_locked(
+                root,
+                batch,
+                base_revision=base_revision,
+                writer=writer,
+                dry_run=dry_run,
+                broken_locks=_lock_breaks(lock),
+            )
+    except WorkspaceLockBusy as exc:
+        raise _workspace_busy_error(exc)
+
+
+def _apply_operation_batch_locked(
+    root: Path,
+    batch: Mapping[str, Any],
+    *,
+    base_revision: Optional[int],
+    writer: str,
+    dry_run: bool,
+    broken_locks: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     current, legacy_payload = _load_canvas_document_for_apply(
         root,
         writer=writer,
@@ -159,6 +200,7 @@ def apply_operation_batch(
                 "changed_since": _changed_since_summary(current, expected_revision),
             },
         )
+    _pause_after_revision_check_for_tests()
 
     operations = batch.get("operations")
     if not isinstance(operations, list):
@@ -213,7 +255,15 @@ def apply_operation_batch(
     if not dry_run:
         if legacy_payload is not None:
             _write_legacy_snapshot(root, legacy_payload)
-        _write_revision(root, current, updated, pending_updates=pending_updates)
+        _write_revision(
+            root,
+            current,
+            updated,
+            pending_updates=pending_updates,
+            writer=writer,
+            broken_locks=broken_locks,
+            expected_current=legacy_payload if legacy_payload is not None else current,
+        )
     return {
         "ok": True,
         "auto_migrated": legacy_payload is not None,
@@ -320,7 +370,15 @@ def list_canvas_history(workspace: str | Path) -> Dict[str, Any]:
     """Return available canvas snapshots plus current revision metadata."""
 
     root = resolve_workspace(workspace)
-    current = load_canvas_document(root)
+    try:
+        with workspace_write_lock(root, writer="canvas-history"):
+            return _list_canvas_history_locked(root)
+    except WorkspaceLockBusy as exc:
+        raise _workspace_busy_error(exc)
+
+
+def _list_canvas_history_locked(root: Path) -> Dict[str, Any]:
+    current = _load_canvas_document_locked(root, reconcile=True)
     entries = []
     for path in _history_snapshot_paths(root):
         snapshot = _read_json_object(path)
@@ -346,7 +404,29 @@ def restore_canvas_revision(
     """Restore a snapshot as a new canvas revision."""
 
     root = resolve_workspace(workspace)
-    current = load_canvas_document(root)
+    writer = authored_by or "agentcanvas-restore"
+    try:
+        with workspace_write_lock(root, writer=writer) as lock:
+            return _restore_canvas_revision_locked(
+                root,
+                revision,
+                base_revision=base_revision,
+                authored_by=writer,
+                broken_locks=_lock_breaks(lock),
+            )
+    except WorkspaceLockBusy as exc:
+        raise _workspace_busy_error(exc)
+
+
+def _restore_canvas_revision_locked(
+    root: Path,
+    revision: int,
+    *,
+    base_revision: Optional[int],
+    authored_by: str,
+    broken_locks: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    current = _load_canvas_document_locked(root, reconcile=True)
     current_revision = _revision(current)
     if base_revision is not None and int(base_revision) != current_revision:
         raise CanvasStoreError(
@@ -376,13 +456,13 @@ def restore_canvas_revision(
 
     updated = deepcopy(snapshot)
     updated["revision"] = current_revision + 1
-    updated["authored_by"] = authored_by or "agentcanvas-restore"
+    updated["authored_by"] = authored_by
     updated["updated_at"] = now_utc()
     metadata = updated.setdefault("metadata", {})
     if isinstance(metadata, dict):
         metadata["restored_from_revision"] = target_revision
 
-    _write_revision(root, current, updated)
+    _write_revision(root, current, updated, writer=authored_by, broken_locks=broken_locks, expected_current=current)
     return {
         "ok": True,
         "revision": updated["revision"],
@@ -693,7 +773,7 @@ def _reconcile_manual_edit(root: Path, document: Dict[str, Any]) -> Dict[str, An
             "detected_from_revision": _revision(previous_document),
             "detected_at": reconciled["updated_at"],
         }
-    _write_revision(root, previous_document, reconciled)
+    _write_revision(root, previous_document, reconciled, writer="manual-edit", expected_current=document)
     return reconciled
 
 
@@ -703,13 +783,16 @@ def _write_revision(
     updated: Dict[str, Any],
     *,
     pending_updates: Optional[List[Dict[str, Any]]] = None,
+    writer: str = "agentcanvas",
+    broken_locks: Optional[List[Dict[str, Any]]] = None,
+    expected_current: Optional[Mapping[str, Any]] = None,
 ) -> None:
     ensure_state_dirs(root)
     history_dir = root / STATE_DIR_NAME / HISTORY_DIR_NAME
     history_dir.mkdir(parents=True, exist_ok=True)
     history_path = history_dir / ("canvas.%s.json" % _revision(previous))
     head_path = history_dir / HISTORY_HEAD_FILENAME
-    txn_path = history_dir / HISTORY_TXN_FILENAME
+    txn_path = _transaction_path(history_dir)
     canvas_path = canvas_ir_path(root)
     pending_updates = pending_updates or []
     pending_before = _pending_before_images(pending_updates)
@@ -723,10 +806,13 @@ def _write_revision(
             pending_before=pending_before,
             history_path=history_path,
             head_path=head_path,
+            writer=writer,
+            broken_locks=broken_locks or [],
         )
         tmp_history.write_text(json.dumps(previous, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         tmp_canvas.write_text(json.dumps(updated, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         tmp_head.write_text(json.dumps(_history_head(updated), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        _assert_canvas_head_matches(root, expected_current if expected_current is not None else previous)
         tmp_history.replace(history_path)
         tmp_canvas.replace(canvas_path)
         if CRASH_AFTER_CANVAS_REPLACE_FOR_TESTS:
@@ -751,10 +837,17 @@ def _write_transaction_journal(
     pending_before: List[Dict[str, Any]],
     history_path: Path,
     head_path: Path,
+    writer: str,
+    broken_locks: List[Dict[str, Any]],
 ) -> None:
     payload = {
         "schema": "agentcanvas.canvas_transaction.v1",
+        "pid": os.getpid(),
+        "writer": writer,
+        "nonce": txn_path.name,
         "created_at": now_utc(),
+        "started_at_epoch": time.time(),
+        "broken_locks": broken_locks,
         "previous_canvas": _normalize_document(previous),
         "pending_before": pending_before,
         "history_before": {
@@ -776,9 +869,15 @@ def _write_transaction_journal(
 
 
 def _recover_incomplete_transaction(root: Path) -> None:
-    txn_path = root / STATE_DIR_NAME / HISTORY_DIR_NAME / HISTORY_TXN_FILENAME
+    for txn_path in _transaction_paths(root):
+        _recover_transaction_path(root, txn_path)
+
+
+def _recover_transaction_path(root: Path, txn_path: Path) -> None:
     txn = _read_json_object(txn_path)
     if not isinstance(txn, Mapping):
+        return
+    if not _transaction_is_recoverable(txn):
         return
     current_canvas = _read_json_object(canvas_ir_path(root))
     head = _read_history_head(root)
@@ -809,6 +908,112 @@ def _recover_incomplete_transaction(root: Path) -> None:
             continue
         _restore_transaction_file(item)
     _unlink_if_exists(txn_path)
+
+
+def _transaction_paths(root: Path) -> List[Path]:
+    history_dir = root / STATE_DIR_NAME / HISTORY_DIR_NAME
+    if not history_dir.is_dir():
+        return []
+    paths = []
+    legacy = history_dir / HISTORY_TXN_FILENAME
+    if legacy.exists():
+        paths.append(legacy)
+    paths.extend(sorted(history_dir.glob("%s*.json" % HISTORY_TXN_PREFIX)))
+    return paths
+
+
+def _transaction_path(history_dir: Path) -> Path:
+    return history_dir / ("%s%s-%s.json" % (HISTORY_TXN_PREFIX, os.getpid(), uuid.uuid4().hex[:10]))
+
+
+def _transaction_is_recoverable(txn: Mapping[str, Any]) -> bool:
+    return is_stale_process_claim(txn, lease_seconds=TRANSACTION_STALE_SECONDS)
+
+
+def _assert_canvas_head_matches(root: Path, expected_payload: Mapping[str, Any]) -> None:
+    current_payload = _read_json_object(canvas_ir_path(root))
+    if current_payload is None:
+        if _revision(expected_payload) == 0:
+            return
+        raise CanvasStoreError(
+            "REVISION_CONFLICT",
+            "canvas changed before AgentCanvas could replace it",
+            revision=0,
+            details={
+                "base_revision": _revision(expected_payload),
+                "current_revision": 0,
+                "repair_hint": "Refetch the latest canvas revision and retry the operation.",
+            },
+        )
+    if _document_sha256(current_payload) == _document_sha256(expected_payload):
+        return
+    if not isinstance(current_payload, Mapping) or current_payload.get("schema") != CANVAS_V2_SCHEMA:
+        from .migration import detect_v1_canvas
+
+        if _revision(expected_payload) == 1 and isinstance(current_payload, Mapping) and detect_v1_canvas(current_payload):
+            return
+        raise CanvasStoreError(
+            "REVISION_CONFLICT",
+            "canvas schema changed before AgentCanvas could replace it",
+            revision=0,
+            details={
+                "schema": current_payload.get("schema") if isinstance(current_payload, Mapping) else None,
+                "repair_hint": "Refetch the latest canvas revision and retry the operation.",
+            },
+        )
+    current = _normalize_document(current_payload)
+    expected = _normalize_document(expected_payload)
+    if _revision(current) == _revision(expected) and _document_sha256(current) == _document_sha256(expected):
+        return
+    raise CanvasStoreError(
+        "REVISION_CONFLICT",
+        "canvas changed before AgentCanvas could replace it",
+        revision=_revision(current),
+        details={
+            "base_revision": _revision(expected),
+            "current_revision": _revision(current),
+            "changed_since": _changed_since_summary(current, _revision(expected)),
+            "repair_hint": "Refetch the latest canvas revision and retry the operation.",
+        },
+    )
+
+
+def _workspace_busy_error(error: WorkspaceLockBusy) -> CanvasStoreError:
+    return CanvasStoreError(
+        "WORKSPACE_BUSY",
+        "AgentCanvas workspace is busy; another writer is updating local state",
+        details={
+            "path": str(getattr(error, "path", getattr(error, "lock_path", ""))),
+            "writer": getattr(error, "writer", "agentcanvas"),
+            "retryable": True,
+            "details": getattr(error, "details", {}),
+            "repair_hint": "Wait briefly, refetch the latest revision, and retry the operation.",
+        },
+    )
+
+
+def _lock_breaks(lock: Any) -> List[Dict[str, Any]]:
+    events = getattr(lock, "break_events", None)
+    if events is None:
+        events = getattr(lock, "broken_locks", [])
+    return [dict(event) for event in events if isinstance(event, Mapping)]
+
+
+def _pause_after_revision_check_for_tests() -> None:
+    marker = os.environ.get("AGENTCANVAS_TEST_PAUSE_AFTER_REVISION_CHECK")
+    if not marker:
+        return
+    release = os.environ.get("AGENTCANVAS_TEST_RELEASE_AFTER_REVISION_CHECK")
+    timeout = float(os.environ.get("AGENTCANVAS_TEST_PAUSE_TIMEOUT_SECONDS", "10"))
+    Path(marker).write_text(str(os.getpid()), encoding="utf-8")
+    if not release:
+        return
+    release_path = Path(release)
+    deadline = time.monotonic() + timeout
+    while not release_path.exists():
+        if time.monotonic() >= deadline:
+            raise RuntimeError("timed out waiting for test revision-check release")
+        time.sleep(0.01)
 
 
 def _restore_transaction_file(item: Mapping[str, Any]) -> None:

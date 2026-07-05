@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
+from agentcanvas.lifecycle import PENDING_STATUSES, transition_record
+from agentcanvas.workspace_lock import WorkspaceLockBusy, workspace_write_lock
+
 SCHEMA = "agentcanvas.workflow.v1"
 IR_FILENAME = "workflow.ir.json"
 CANVAS_IR_FILENAME = "canvas.ir.json"
@@ -16,14 +19,6 @@ STATE_DIR_NAME = ".agentcanvas"
 PENDING_DIR_NAME = "pending"
 CANVAS_MAP_HANDOFF_SCHEMA = "agentcanvas.canvas_map_handoff.v1"
 MAP_HEALTH_SCHEMA = "agentcanvas.map_health.v1"
-PENDING_STATUSES = {
-    "pending",
-    "sent",
-    "in_progress",
-    "done",
-    "needs_input",
-    "blocked",
-}
 
 
 def now_utc() -> str:
@@ -79,9 +74,14 @@ def save_ir(workspace: str | Path, workflow_ir: Dict[str, Any]) -> Path:
 
 
 def save_canvas_ir(workspace: str | Path, canvas_ir: Dict[str, Any]) -> Path:
-    ensure_state_dirs(workspace)
-    path = canvas_ir_path(workspace)
-    atomic_write_json(path, canvas_ir)
+    root = resolve_workspace(workspace)
+    ensure_state_dirs(root)
+    path = canvas_ir_path(root)
+    try:
+        with workspace_write_lock(root, writer="save-canvas-ir"):
+            atomic_write_json(path, canvas_ir)
+    except WorkspaceLockBusy as exc:
+        raise ValueError(str(exc))
     return path
 
 
@@ -487,45 +487,46 @@ def write_pending_change(
         raise ValueError("change payload must be a JSON object")
 
     root = resolve_workspace(workspace)
-    _, _, pending_dir = ensure_state_dirs(root)
-    created_at = now_utc()
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    title = _first_text(
-        [change.get("title"), change.get("name"), change.get("summary")],
-        "Canvas change request",
-    )
-    pending_id = f"{stamp}-{slugify(title)}-{uuid.uuid4().hex[:8]}"
-    json_path = pending_dir / f"{pending_id}.json"
-    markdown_path = pending_dir / f"{pending_id}.md"
+    with workspace_write_lock(root, writer="pending-create"):
+        _, _, pending_dir = ensure_state_dirs(root)
+        created_at = now_utc()
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        title = _first_text(
+            [change.get("title"), change.get("name"), change.get("summary")],
+            "Canvas change request",
+        )
+        pending_id = f"{stamp}-{slugify(title)}-{uuid.uuid4().hex[:8]}"
+        json_path = pending_dir / f"{pending_id}.json"
+        markdown_path = pending_dir / f"{pending_id}.md"
 
-    graph_snapshot = None
-    if workflow_ir:
-        graph_snapshot = {
-            "schema": workflow_ir.get("schema"),
-            "generated_at": workflow_ir.get("generated_at"),
-            "summary": summarize_ir(workflow_ir),
+        graph_snapshot = None
+        if workflow_ir:
+            graph_snapshot = {
+                "schema": workflow_ir.get("schema"),
+                "generated_at": workflow_ir.get("generated_at"),
+                "summary": summarize_ir(workflow_ir),
+            }
+
+        record: Dict[str, Any] = {
+            "id": pending_id,
+            "title": title,
+            "summary": _first_text([change.get("summary")], ""),
+            "status": "pending",
+            "created_at": created_at,
+            "workspace": str(root),
+            "source": "agentcanvas",
+            "kind": "graph_edit",
+            "change": change,
+            "graph": graph_snapshot,
         }
+        if session_id:
+            record["sessionId"] = session_id
+        from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
 
-    record: Dict[str, Any] = {
-        "id": pending_id,
-        "title": title,
-        "summary": _first_text([change.get("summary")], ""),
-        "status": "pending",
-        "created_at": created_at,
-        "workspace": str(root),
-        "source": "agentcanvas",
-        "kind": "graph_edit",
-        "change": change,
-        "graph": graph_snapshot,
-    }
-    if session_id:
-        record["sessionId"] = session_id
-    from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
+        record = normalize_pending_record(record)
 
-    record = normalize_pending_record(record)
-
-    atomic_write_json(json_path, record)
-    atomic_write_text(markdown_path, _markdown_for_pending(record))
+        atomic_write_json(json_path, record)
+        atomic_write_text(markdown_path, _markdown_for_pending(record))
 
     return {
         **record,
@@ -539,45 +540,46 @@ def update_pending_status(
     pending_id: str,
     status: str,
     note: str | None = None,
+    *,
+    actor: str = "agentcanvas",
+    evidence: Dict[str, Any] | None = None,
+    enforce_transitions: bool = False,
 ) -> Dict[str, Any]:
     if status not in PENDING_STATUSES:
         allowed = ", ".join(sorted(PENDING_STATUSES))
         raise ValueError(f"status must be one of: {allowed}")
 
-    _, _, pending_dir = state_paths(workspace)
-    json_path = pending_dir / f"{pending_id}.json"
-    if not json_path.exists():
-        matches = sorted(pending_dir.glob(f"*{pending_id}*.json"))
-        if len(matches) == 1:
-            json_path = matches[0]
-        else:
-            raise FileNotFoundError(f"pending request not found: {pending_id}")
+    root = resolve_workspace(workspace)
+    with workspace_write_lock(root, writer="pending-status"):
+        _, _, pending_dir = state_paths(root)
+        json_path = pending_dir / f"{pending_id}.json"
+        if not json_path.exists():
+            matches = sorted(pending_dir.glob(f"*{pending_id}*.json"))
+            if len(matches) == 1:
+                json_path = matches[0]
+            else:
+                raise FileNotFoundError(f"pending request not found: {pending_id}")
 
-    with json_path.open("r", encoding="utf-8") as handle:
-        record = json.load(handle)
+        with json_path.open("r", encoding="utf-8") as handle:
+            record = json.load(handle)
 
-    updated_at = now_utc()
-    history = list(record.get("status_history") or [])
-    history.append(
-        {
-            "status": status,
-            "updated_at": updated_at,
-            **({"note": note} if note else {}),
-        }
-    )
-    record["status"] = status
-    record["updated_at"] = updated_at
-    record["status_history"] = history
-    if note:
-        record["note"] = note
-    from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
+        record = transition_record(
+            record,
+            status,
+            at=now_utc(),
+            actor=actor,
+            note=note,
+            evidence=evidence,
+            enforce_transitions=enforce_transitions,
+        )
+        from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
 
-    record = normalize_pending_record(record)
+        record = normalize_pending_record(record)
 
-    atomic_write_json(json_path, record)
-    markdown_path = json_path.with_suffix(".md")
-    if markdown_path.exists():
-        atomic_write_text(markdown_path, _markdown_for_pending(record))
+        atomic_write_json(json_path, record)
+        markdown_path = json_path.with_suffix(".md")
+        if markdown_path.exists():
+            atomic_write_text(markdown_path, _markdown_for_pending(record))
 
     return {
         **record,

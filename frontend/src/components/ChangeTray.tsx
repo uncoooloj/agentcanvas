@@ -1,6 +1,6 @@
 import { Pencil, Plus, Send, Trash2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useChanges, type ChangeEntry, type ChangeKind } from "@/lib/changeset"
+import { HandoffPhase, useChanges, type ChangeEntry, type ChangeKind } from "@/lib/changeset"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
@@ -40,7 +40,7 @@ interface Props {
 export function ChangeTray({ onSelectChange, onModifyChange }: Props) {
   const { changes, handoff, assistantName, undoChange, discardAll, send } = useChanges()
 
-  if (changes.length === 0 || handoff.phase !== "composing") return null
+  if (changes.length === 0 || handoff.phase !== HandoffPhase.Composing) return null
 
   const count = changes.length
   const headingText = `${count} ${count === 1 ? "change" : "changes"} ready`

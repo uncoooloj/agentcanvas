@@ -267,6 +267,8 @@ def stop_server_heartbeat(heartbeat: Tuple[threading.Event, threading.Thread]) -
 def canvas_store_error_status(error: CanvasStoreError) -> HTTPStatus:
     if error.code == "REVISION_CONFLICT":
         return HTTPStatus.CONFLICT
+    if error.code == "WORKSPACE_BUSY":
+        return HTTPStatus.LOCKED
     return HTTPStatus.BAD_REQUEST
 
 

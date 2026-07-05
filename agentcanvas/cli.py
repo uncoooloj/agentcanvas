@@ -23,6 +23,7 @@ from .ir import (
     update_pending_status,
 )
 from .core import build_agent_authored_canvas
+from .canvas_v2 import CanvasStoreError, apply_operation_batch
 from .projection import ProjectionValidationError, materialize_canvas_model
 from .server import run_server
 
@@ -105,6 +106,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="validate and summarize without writing canvas IR",
     )
     apply_parser.set_defaults(func=cmd_apply_query)
+
+    canvas_parser = subparsers.add_parser("canvas", help="work with the v2 canvas store")
+    canvas_subparsers = canvas_parser.add_subparsers(dest="canvas_command", required=True)
+
+    canvas_apply_parser = canvas_subparsers.add_parser(
+        "apply",
+        help="apply a v2 canvas operation batch",
+    )
+    canvas_apply_parser.add_argument("path", nargs="?", help="workspace path to update")
+    canvas_apply_parser.add_argument("--workspace", help="workspace path to update")
+    canvas_apply_parser.add_argument("--base-revision", required=True, type=int)
+    canvas_apply_parser.add_argument("--input", required=True, help="operation batch JSON file")
+    canvas_apply_parser.add_argument("--authored-by", help="agent or human author name")
+    canvas_apply_parser.set_defaults(func=cmd_canvas_apply)
 
     return parser
 
@@ -235,6 +250,26 @@ def cmd_apply_query(args: argparse.Namespace) -> int:
     print(f"Workflow evidence remains in {ir_path}")
     flow_count = len((canvas_ir.get("canvas") or {}).get("journeys") or [])
     print(f"Display canvas flows: {flow_count}")
+    return 0
+
+
+def cmd_canvas_apply(args: argparse.Namespace) -> int:
+    workspace = resolve_workspace(selected_workspace(args))
+    with Path(args.input).expanduser().open(encoding="utf-8") as handle:
+        batch = json.load(handle)
+
+    try:
+        result = apply_operation_batch(
+            workspace,
+            batch,
+            base_revision=args.base_revision,
+            authored_by=getattr(args, "authored_by", None),
+        )
+    except CanvasStoreError as exc:
+        print(json.dumps(exc.to_dict(), indent=2, sort_keys=True))
+        return 1
+
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 

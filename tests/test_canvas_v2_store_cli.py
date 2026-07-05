@@ -319,15 +319,125 @@ class CanvasV2StoreCliTests(unittest.TestCase):
             output = json.loads(completed.stdout)
             self.assertEqual(output["error"]["code"], "INPUT_NOT_READABLE")
 
-    def test_cli_canvas_apply_requires_migration_for_legacy_canvas(self):
+    def test_cli_canvas_apply_auto_migrates_legacy_canvas(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = self._workspace(temp_root)
             state_dir = workspace / ".agentcanvas"
             state_dir.mkdir()
-            (state_dir / "canvas.ir.json").write_text(
+            canvas_path = state_dir / "canvas.ir.json"
+            canvas_path.write_text(
                 json.dumps(_legacy_canvas_wrapper()),
                 encoding="utf-8",
             )
+            input_path = Path(temp_root) / "ops.json"
+            input_path.write_text(
+                json.dumps(
+                    {
+                        "base_revision": 0,
+                        "operations": [
+                            {
+                                "op": "set_app",
+                                "app": {"name": "Auto migrated app"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "agentcanvas",
+                    "canvas",
+                    "apply",
+                    "--workspace",
+                    str(workspace),
+                    "--base-revision",
+                    "0",
+                    "--input",
+                    str(input_path),
+                ],
+                cwd=temp_root,
+                env=_agentcanvas_env(),
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            output = json.loads(completed.stdout)
+            self.assertTrue(output["auto_migrated"])
+            self.assertEqual(output["base_revision"], 1)
+            self.assertEqual(output["revision"], 2)
+            canvas = _read_json(canvas_path)
+            self.assertEqual(canvas["schema"], CANVAS_V2_SCHEMA)
+            self.assertEqual(canvas["app"]["name"], "Auto migrated app")
+            self.assertTrue((state_dir / "history" / "canvas.pre-v2.json").is_file())
+            self.assertTrue((state_dir / "history" / "canvas.1.json").is_file())
+
+    def test_cli_canvas_apply_dry_run_auto_migration_preserves_legacy_canvas(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            state_dir = workspace / ".agentcanvas"
+            state_dir.mkdir()
+            canvas_path = state_dir / "canvas.ir.json"
+            canvas_path.write_text(json.dumps(_legacy_canvas_wrapper()), encoding="utf-8")
+            input_path = Path(temp_root) / "ops.json"
+            input_path.write_text(
+                json.dumps(
+                    {
+                        "base_revision": 0,
+                        "operations": [
+                            {
+                                "op": "set_app",
+                                "app": {"name": "Dry run migrated app"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "agentcanvas",
+                    "canvas",
+                    "apply",
+                    "--workspace",
+                    str(workspace),
+                    "--base-revision",
+                    "0",
+                    "--input",
+                    str(input_path),
+                    "--dry-run",
+                ],
+                cwd=temp_root,
+                env=_agentcanvas_env(),
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            output = json.loads(completed.stdout)
+            self.assertTrue(output["auto_migrated"])
+            self.assertTrue(output["dry_run"])
+            self.assertEqual(output["revision"], 2)
+            self.assertNotEqual(_read_json(canvas_path)["schema"], CANVAS_V2_SCHEMA)
+            self.assertFalse((state_dir / "history" / "canvas.pre-v2.json").exists())
+            self.assertFalse((state_dir / "history" / "canvas.1.json").exists())
+
+    def test_cli_canvas_apply_auto_migration_accepts_migrated_base_revision(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            state_dir = workspace / ".agentcanvas"
+            state_dir.mkdir()
+            canvas_path = state_dir / "canvas.ir.json"
+            canvas_path.write_text(json.dumps(_legacy_canvas_wrapper()), encoding="utf-8")
             input_path = Path(temp_root) / "ops.json"
             input_path.write_text(
                 json.dumps(
@@ -336,7 +446,7 @@ class CanvasV2StoreCliTests(unittest.TestCase):
                         "operations": [
                             {
                                 "op": "set_app",
-                                "app": {"name": "Still legacy"},
+                                "app": {"name": "Base one migrated app"},
                             }
                         ],
                     }
@@ -365,10 +475,12 @@ class CanvasV2StoreCliTests(unittest.TestCase):
                 timeout=15,
             )
 
-            self.assertEqual(completed.returncode, 1)
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
             output = json.loads(completed.stdout)
-            self.assertEqual(output["error"]["code"], "MIGRATION_REQUIRED")
-            self.assertIn("canvas migrate", output["error"]["details"]["suggested_command"])
+            self.assertTrue(output["auto_migrated"])
+            self.assertEqual(output["base_revision"], 1)
+            self.assertEqual(output["revision"], 2)
+            self.assertEqual(_read_json(canvas_path)["app"]["name"], "Base one migrated app")
 
     def test_cli_canvas_migrate_dry_run_and_apply_unblock_v2_apply(self):
         with tempfile.TemporaryDirectory() as temp_root:

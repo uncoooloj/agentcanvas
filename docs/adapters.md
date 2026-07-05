@@ -12,12 +12,14 @@ The stable file contract is:
 <workspace>/.agentcanvas/pending/*.json
 ```
 
-`workflow.ir.json` is raw repo evidence. `canvas.ir.json` is the browser display
-canvas. Pending files are for explicit source-code implementation requests.
+`workflow.ir.json` is raw repo evidence. `canvas.ir.json` is the stored browser
+canvas. Agents should update it through `agentcanvas canvas apply` so revision
+checks, validation, and automatic legacy migration run before the browser reads
+it. Pending files are for explicit source-code implementation requests.
 
 An adapter should do two small jobs:
 
-- For canvas edits, help the agent update `.agentcanvas/canvas.ir.json`.
+- For canvas edits, help the agent run `agentcanvas canvas apply`.
 - For implementation requests, help the agent clarify, implement, verify,
   update status, and re-index to refresh evidence.
 
@@ -40,9 +42,13 @@ The skill tells the agent to:
 1. run `agentcanvas --help`
 2. index or start the workspace
 3. treat `.agentcanvas/workflow.ir.json` as evidence
-4. treat `.agentcanvas/canvas.ir.json` as the display canvas source of truth
-5. update `.agentcanvas/canvas.ir.json` for canvas-only edits
+4. treat `.agentcanvas/canvas.ir.json` as the stored browser canvas
+5. update the canvas with `agentcanvas canvas apply` for canvas-only edits
 6. read `.agentcanvas/pending/*.md` and matching `.json` only for implementation
+
+Legacy display canvases from older AgentCanvas builds auto-migrate on
+`agentcanvas canvas apply`. Use `agentcanvas canvas migrate --dry-run` for
+diagnostics, not as a normal user step.
    requests
 7. inspect the current workspace context before source-code editing
 8. ask concise clarifying questions if the request is ambiguous, risky, or

@@ -4,7 +4,7 @@
 
 ## What it is
 
-AgentCanvas is a local, agent-agnostic tool. It indexes a workspace into `.agentcanvas/workflow.ir.json`, then the invoking agent turns that evidence into simple **journeys** in `.agentcanvas/canvas.ir.json`: **When / Do / If** steps with if/else branches. A person can edit a step ("add a step", "change what happens", "add a rule", "remove a step") in their own words. Canvas-only edits update the display canvas, not source code.
+AgentCanvas is a local, agent-agnostic tool. It indexes a workspace into `.agentcanvas/workflow.ir.json`, then the invoking agent turns that evidence into simple **journeys** stored in `.agentcanvas/canvas.ir.json`: **When / Do / If** steps with if/else branches. Use `agentcanvas canvas apply` to update that canvas so validation, revision checks, and automatic legacy migration run before the browser reads it. A person can edit a step ("add a step", "change what happens", "add a rule", "remove a step") in their own words. Canvas-only edits update the display canvas, not source code.
 
 ## Who it's for
 
@@ -13,8 +13,8 @@ Non-technical people (operators, founders, power users) who want to understand a
 ## How an AI coding agent uses it
 
 1. Start it: `agentcanvas start --workspace .` (install: `pip install use-agentcanvas`). It serves a local web canvas and prints a URL.
-2. Read `.agentcanvas/workflow.ir.json` as raw evidence and write/update `.agentcanvas/canvas.ir.json` as the browser display canvas.
-3. For canvas edits, update `.agentcanvas/canvas.ir.json` progressively. Do not re-index unless evidence needs to be refreshed.
+2. Read `.agentcanvas/workflow.ir.json` as raw evidence and write/update the browser canvas with `agentcanvas canvas apply`.
+3. For canvas edits, keep applying operation batches through `agentcanvas canvas apply`. Do not re-index unless evidence needs to be refreshed.
 4. For explicit source-code implementation requests, read `.agentcanvas/pending/`, implement the change in code, run the relevant tests, re-index with `agentcanvas index --workspace .` to refresh evidence, and report what changed.
 
 Works with Claude Code, Codex, Cursor, Antigravity, or any agent that can read files and run commands. Copy-paste fallback is always available.
@@ -24,5 +24,6 @@ Works with Claude Code, Codex, Cursor, Antigravity, or any agent that can read f
 - Local-first, runs from the command line.
 - Agent-agnostic (no vendor lock-in).
 - `.agentcanvas/workflow.ir.json` is the raw index/evidence file.
-- `.agentcanvas/canvas.ir.json` is the display canvas source of truth.
+- `.agentcanvas/canvas.ir.json` is the stored browser canvas; update it through `agentcanvas canvas apply`.
+- Legacy display canvases auto-migrate the first time `agentcanvas canvas apply` edits them.
 - Canvas edits are canvas changes, not direct code changes, unless the user explicitly asks for implementation.

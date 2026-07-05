@@ -20,8 +20,8 @@ AgentCanvas helps with the messy part between "this flow is wrong" and "make
 this exact code change."
 
 - It indexes your repo into `.agentcanvas/workflow.ir.json`.
-- It lets the invoking agent turn that evidence into readable flows in
-  `.agentcanvas/canvas.ir.json`.
+- It lets the invoking agent turn that evidence into readable flows through
+  `agentcanvas canvas apply`, stored in `.agentcanvas/canvas.ir.json`.
 - It shows the display canvas from `.agentcanvas/canvas.ir.json`.
 - It lets you add, remove, rename, or re-route canvas steps without changing
   source code.
@@ -51,9 +51,9 @@ The core loop is intentionally small:
 1. Point AgentCanvas at a workspace.
 2. It writes the raw evidence index to `.agentcanvas/workflow.ir.json`.
 3. The invoking agent translates repo behavior into readable flows and writes
-   `.agentcanvas/canvas.ir.json`.
+   them with `agentcanvas canvas apply`.
 4. The browser shows `.agentcanvas/canvas.ir.json` as the display canvas.
-5. Canvas-only edits update `.agentcanvas/canvas.ir.json` progressively.
+5. Canvas-only edits update the stored canvas through `agentcanvas canvas apply`.
 6. If you ask for source-code changes, AgentCanvas creates a Markdown brief and
    a JSON brief in `.agentcanvas/pending/`.
 7. A coding agent picks up that implementation request, verifies the change, and
@@ -167,9 +167,8 @@ For a new or stale map, the agent should:
 
 1. Read `.agentcanvas/workflow.ir.json`.
 2. Turn the useful repo behavior into a plain-English canvas.
-3. Write or update `.agentcanvas/canvas.ir.json`.
-4. Validate before writing when using a generated canvas query:
-   `agentcanvas apply-query --workspace /path/to/project --query canvas-query.json --dry-run`.
+3. Write or update the canvas with `agentcanvas canvas apply`.
+4. Use `--dry-run` first when the operation batch is generated or uncertain.
 
 For a user-requested source-code change, the agent should:
 
@@ -224,19 +223,25 @@ AgentCanvas writes all local state under the selected repo:
 ```
 
 `workflow.ir.json` is the raw index and evidence grounding file.
-`canvas.ir.json` is the browser display canvas source of truth. Pending
-Markdown and JSON files are for implementation requests, not normal canvas-only
-edits.
+`canvas.ir.json` is the stored browser canvas. Agents should update it through
+`agentcanvas canvas apply` so revision checks, validation, and automatic legacy
+migration run before the browser reads it. Pending Markdown and JSON files are
+for implementation requests, not normal canvas-only edits.
 
 The invoking agent authors the display canvas. In plain English:
 
 1. AgentCanvas indexes the repo into `workflow.ir.json`.
 2. The agent reads that evidence and asks questions if the intended journey,
    actor, outcome, or source evidence is unclear.
-3. The agent writes or updates `canvas.ir.json` with human-readable flows.
+3. The agent writes or updates the canvas with `agentcanvas canvas apply`.
 4. The browser reads `canvas.ir.json`.
-5. Canvas-only edits keep updating `canvas.ir.json`.
+5. Canvas-only edits keep updating the canvas through the same command.
 6. Explicit implementation requests create pending Markdown and JSON files.
+
+Legacy display canvases created by older AgentCanvas builds are upgraded
+automatically the first time `agentcanvas canvas apply` touches them. Use
+`agentcanvas canvas migrate --dry-run` only when you want to preview that
+upgrade without applying an edit.
 
 Preserve evidence links where possible, and use plain language over file
 inventory language. A person should see what the project does, not just which
@@ -246,7 +251,7 @@ files exist.
 
 Use this loop only when the user explicitly wants source-code implementation.
 Canvas edits like "add this step", "remove that branch", or "re-route this flow"
-should update `.agentcanvas/canvas.ir.json` instead.
+should update the stored canvas through `agentcanvas canvas apply` instead.
 
 An agent can list pending requests:
 
@@ -408,7 +413,7 @@ See [docs/projection.md](docs/projection.md).
 
 ## Safety Rules
 
-- Canvas-only edits update `.agentcanvas/canvas.ir.json`.
+- Canvas-only edits update the stored canvas through `agentcanvas canvas apply`.
 - AgentCanvas creates requests before source code changes.
 - Agents should read the request before editing.
 - Agents should ask with `needs_input` when the request is unclear.

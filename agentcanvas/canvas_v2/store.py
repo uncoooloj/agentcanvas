@@ -125,10 +125,12 @@ def apply_operation_batch(
         raise CanvasStoreError("INVALID_BATCH", "operation batch must be a JSON object")
 
     root = resolve_workspace(workspace)
-    current = load_canvas_document(root)
+    writer = authored_by or _optional_string(batch.get("authored_by")) or "agentcanvas-cli"
+    current, legacy_payload = _load_canvas_document_for_apply(root, writer=writer)
     current_revision = _revision(current)
     expected_revision = _coalesce_base_revision(base_revision, batch)
-    if expected_revision != current_revision:
+    accepted_legacy_base = legacy_payload is not None and expected_revision == 0 and current_revision == 1
+    if expected_revision != current_revision and not accepted_legacy_base:
         raise CanvasStoreError(
             "REVISION_CONFLICT",
             "base_revision does not match the current canvas revision",
@@ -144,7 +146,6 @@ def apply_operation_batch(
     if not isinstance(operations, list):
         raise CanvasStoreError("INVALID_BATCH", "operations must be a list")
 
-    writer = authored_by or _optional_string(batch.get("authored_by")) or "agentcanvas-cli"
     allow_rewrite = batch.get("allow_rewrite")
     if allow_rewrite is not None and not isinstance(allow_rewrite, Mapping):
         raise CanvasStoreError("INVALID_BATCH", "allow_rewrite must be null or an object")
@@ -162,14 +163,50 @@ def apply_operation_batch(
     # TODO(canvas-v2): replace this minimal guard with the full layered churn
     # guard and pending tombstone transaction from the v2 spec.
     if not dry_run:
+        if legacy_payload is not None:
+            _write_legacy_snapshot(root, legacy_payload)
         _write_revision(root, current, updated)
     return {
         "ok": True,
+        "auto_migrated": legacy_payload is not None,
         "dry_run": bool(dry_run),
         "revision": next_revision,
         "base_revision": current_revision,
         "path": str(canvas_ir_path(root)),
     }
+
+
+def _load_canvas_document_for_apply(
+    root: Path,
+    *,
+    writer: str,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    path = canvas_ir_path(root)
+    if not path.exists():
+        return _empty_document(), None
+
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise CanvasStoreError("INVALID_CANVAS", "canvas.ir.json must be a JSON object")
+    if payload.get("schema") == CANVAS_V2_SCHEMA:
+        return _normalize_document(payload), None
+
+    from .migration import detect_v1_canvas, migrate_canvas_v1_to_v2
+
+    if detect_v1_canvas(payload):
+        migrated = migrate_canvas_v1_to_v2(
+            payload,
+            authored_by=writer,
+            updated_at=now_utc(),
+        )
+        return _normalize_document(migrated), deepcopy(payload)
+
+    raise CanvasStoreError(
+        "UNSUPPORTED_CANVAS_SCHEMA",
+        "canvas.ir.json must be agentcanvas.canvas.v2 or a recognized legacy AgentCanvas canvas",
+        details={"schema": payload.get("schema")},
+    )
 
 
 def _apply_operations(document: Dict[str, Any], operations: Iterable[Any]) -> None:
@@ -384,6 +421,20 @@ def _write_revision(root: Path, previous: Dict[str, Any], updated: Dict[str, Any
             tmp_history.unlink()
         if tmp_canvas.exists():
             tmp_canvas.unlink()
+
+
+def _write_legacy_snapshot(root: Path, payload: Dict[str, Any]) -> None:
+    ensure_state_dirs(root)
+    history_dir = root / STATE_DIR_NAME / "history"
+    history_dir.mkdir(parents=True, exist_ok=True)
+    history_path = history_dir / "canvas.pre-v2.json"
+    tmp_history = history_path.with_name(".%s.%s.tmp" % (history_path.name, uuid.uuid4().hex))
+    try:
+        tmp_history.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp_history.replace(history_path)
+    finally:
+        if tmp_history.exists():
+            tmp_history.unlink()
 
 
 def _empty_document() -> Dict[str, Any]:

@@ -17,16 +17,18 @@ canvas, edit the canvas, and use pending requests only for code implementation.
 - Treat `.agentcanvas/` as the shared contract.
 - Treat `.agentcanvas/workflow.ir.json` as the raw index and evidence grounding
   file.
-- Treat `.agentcanvas/canvas.ir.json` as the browser display canvas source of
-  truth.
+- Treat `.agentcanvas/canvas.ir.json` as the stored browser canvas.
 - Treat `.agentcanvas/pending/*.md` as the human-readable implementation brief.
 - Treat `.agentcanvas/pending/*.json` as structured implementation context for
   tools.
 - The invoking agent should translate repo behavior into plain-English,
-  non-technical flows and write/update `.agentcanvas/canvas.ir.json`
+  non-technical flows and update the canvas with `agentcanvas canvas apply`
   progressively.
 - Canvas edits, adds, removes, renames, and re-routes should update
-  `.agentcanvas/canvas.ir.json`.
+  the canvas through `agentcanvas canvas apply`.
+- If the existing canvas is from an older AgentCanvas build, `agentcanvas canvas
+  apply` auto-migrates it before applying the edit. Use `agentcanvas canvas
+  migrate --dry-run` only when you need to inspect that upgrade.
 - Do not edit source code just because a canvas node changed. Implement source
   code only when the user explicitly asks or when there is an explicit pending
   implementation request.
@@ -83,8 +85,8 @@ When describing the canvas, use product state names a non-technical person can
 understand:
 
 - **Assistant map**: `.agentcanvas/canvas.ir.json` was authored or reviewed by
-  an agent or model from grounded evidence. Treat this as the preferred browser
-  display source of truth.
+  an agent or model from grounded evidence. Treat this as the stored browser
+  canvas and update it through `agentcanvas canvas apply`.
 - **Starter view**: AgentCanvas made a first view from indexed evidence because
   no assistant map exists yet. Use it for orientation, then ask an agent or model
   to write the cleaner map.
@@ -176,7 +178,7 @@ user's own repo.
 
 Use this loop only for explicit source-code implementation work. For canvas-only
 requests like adding a step, removing a branch, renaming a journey, or re-routing
-a flow, update `.agentcanvas/canvas.ir.json` and do not re-index.
+a flow, run `agentcanvas canvas apply` and do not re-index.
 
 List pending requests:
 

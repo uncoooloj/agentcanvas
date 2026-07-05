@@ -221,6 +221,255 @@ class CanvasV2StoreCliTests(unittest.TestCase):
             canvas = _read_json(workspace / ".agentcanvas" / "canvas.ir.json")
             self.assertEqual(canvas["schema"], CANVAS_V2_SCHEMA)
 
+    def test_cli_canvas_apply_dry_run_validates_without_writing(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            input_path = Path(temp_root) / "ops.json"
+            input_path.write_text(json.dumps(self._initial_batch()), encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "agentcanvas",
+                    "canvas",
+                    "apply",
+                    "--workspace",
+                    str(workspace),
+                    "--base-revision",
+                    "0",
+                    "--input",
+                    str(input_path),
+                    "--dry-run",
+                ],
+                cwd=temp_root,
+                env=_agentcanvas_env(),
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            output = json.loads(completed.stdout)
+            self.assertTrue(output["dry_run"])
+            self.assertEqual(output["revision"], 1)
+            self.assertFalse((workspace / ".agentcanvas" / "canvas.ir.json").exists())
+
+    def test_cli_canvas_apply_rejects_ambiguous_workspace_selection(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            other_workspace = Path(temp_root) / "other"
+            other_workspace.mkdir()
+            input_path = Path(temp_root) / "ops.json"
+            input_path.write_text(json.dumps(self._initial_batch()), encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "agentcanvas",
+                    "canvas",
+                    "apply",
+                    str(other_workspace),
+                    "--workspace",
+                    str(workspace),
+                    "--base-revision",
+                    "0",
+                    "--input",
+                    str(input_path),
+                ],
+                cwd=temp_root,
+                env=_agentcanvas_env(),
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+
+            self.assertEqual(completed.returncode, 1)
+            output = json.loads(completed.stdout)
+            self.assertEqual(output["error"]["code"], "WORKSPACE_AMBIGUOUS")
+
+    def test_cli_canvas_apply_reports_unreadable_input_without_traceback(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "agentcanvas",
+                    "canvas",
+                    "apply",
+                    "--workspace",
+                    str(workspace),
+                    "--base-revision",
+                    "0",
+                    "--input",
+                    str(Path(temp_root) / "missing.json"),
+                ],
+                cwd=temp_root,
+                env=_agentcanvas_env(),
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertNotIn("Traceback", completed.stderr + completed.stdout)
+            output = json.loads(completed.stdout)
+            self.assertEqual(output["error"]["code"], "INPUT_NOT_READABLE")
+
+    def test_cli_canvas_apply_requires_migration_for_legacy_canvas(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            state_dir = workspace / ".agentcanvas"
+            state_dir.mkdir()
+            (state_dir / "canvas.ir.json").write_text(
+                json.dumps(_legacy_canvas_wrapper()),
+                encoding="utf-8",
+            )
+            input_path = Path(temp_root) / "ops.json"
+            input_path.write_text(
+                json.dumps(
+                    {
+                        "base_revision": 1,
+                        "operations": [
+                            {
+                                "op": "set_app",
+                                "app": {"name": "Still legacy"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "agentcanvas",
+                    "canvas",
+                    "apply",
+                    "--workspace",
+                    str(workspace),
+                    "--base-revision",
+                    "1",
+                    "--input",
+                    str(input_path),
+                ],
+                cwd=temp_root,
+                env=_agentcanvas_env(),
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+
+            self.assertEqual(completed.returncode, 1)
+            output = json.loads(completed.stdout)
+            self.assertEqual(output["error"]["code"], "MIGRATION_REQUIRED")
+            self.assertIn("canvas migrate", output["error"]["details"]["suggested_command"])
+
+    def test_cli_canvas_migrate_dry_run_and_apply_unblock_v2_apply(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            state_dir = workspace / ".agentcanvas"
+            state_dir.mkdir()
+            canvas_path = state_dir / "canvas.ir.json"
+            canvas_path.write_text(json.dumps(_legacy_canvas_wrapper()), encoding="utf-8")
+
+            dry_run = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "agentcanvas",
+                    "canvas",
+                    "migrate",
+                    "--workspace",
+                    str(workspace),
+                    "--dry-run",
+                ],
+                cwd=temp_root,
+                env=_agentcanvas_env(),
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+
+            self.assertEqual(dry_run.returncode, 0, dry_run.stdout + dry_run.stderr)
+            dry_run_output = json.loads(dry_run.stdout)
+            self.assertTrue(dry_run_output["dry_run"])
+            self.assertEqual(dry_run_output["schema"], CANVAS_V2_SCHEMA)
+            self.assertNotEqual(_read_json(canvas_path)["schema"], CANVAS_V2_SCHEMA)
+
+            migrate = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "agentcanvas",
+                    "canvas",
+                    "migrate",
+                    "--workspace",
+                    str(workspace),
+                    "--apply",
+                    "--authored-by",
+                    "codex-migration-test",
+                ],
+                cwd=temp_root,
+                env=_agentcanvas_env(),
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+
+            self.assertEqual(migrate.returncode, 0, migrate.stdout + migrate.stderr)
+            migrate_output = json.loads(migrate.stdout)
+            self.assertFalse(migrate_output["dry_run"])
+            migrated = _read_json(canvas_path)
+            self.assertEqual(migrated["schema"], CANVAS_V2_SCHEMA)
+            self.assertEqual(migrated["authored_by"], "codex-migration-test")
+            self.assertTrue((state_dir / "history" / "canvas.pre-v2.json").is_file())
+
+            ops_path = Path(temp_root) / "ops.json"
+            ops_path.write_text(
+                json.dumps(
+                    {
+                        "base_revision": 1,
+                        "operations": [
+                            {
+                                "op": "set_app",
+                                "app": {"name": "Migrated app"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            apply = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "agentcanvas",
+                    "canvas",
+                    "apply",
+                    "--workspace",
+                    str(workspace),
+                    "--base-revision",
+                    "1",
+                    "--input",
+                    str(ops_path),
+                ],
+                cwd=temp_root,
+                env=_agentcanvas_env(),
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+
+            self.assertEqual(apply.returncode, 0, apply.stdout + apply.stderr)
+            self.assertEqual(json.loads(apply.stdout)["revision"], 2)
+            self.assertEqual(_read_json(canvas_path)["app"]["name"], "Migrated app")
+
     def test_open_pending_reference_blocks_delete(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = self._workspace(temp_root)
@@ -260,3 +509,39 @@ class CanvasV2StoreCliTests(unittest.TestCase):
                 )
 
             self.assertEqual(raised.exception.code, "REFERENCED_ID_REMOVED")
+
+
+def _legacy_canvas_wrapper():
+    return {
+        "schema": "agentcanvas.behavior_canvas_response.v1",
+        "version": "0.1.0",
+        "canvas": {
+            "schema": "agentcanvas.behavior_canvas.v1",
+            "appName": "Legacy app",
+            "journeys": [
+                {
+                    "id": "flow:legacy",
+                    "title": "Legacy signup",
+                    "summary": "A legacy display canvas.",
+                    "nodes": [
+                        {
+                            "kind": "step",
+                            "id": "n:start",
+                            "role": "when",
+                            "text": "Someone starts",
+                        },
+                        {
+                            "kind": "step",
+                            "id": "n:finish",
+                            "role": "do",
+                            "text": "Finish setup",
+                        },
+                    ],
+                }
+            ],
+        },
+        "mapping": {
+            "schema": "agentcanvas.canvas_mapping.v1",
+            "mode": "agent-authored",
+        },
+    }

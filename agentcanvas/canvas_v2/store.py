@@ -92,6 +92,17 @@ def load_canvas_document(workspace: str | Path) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise CanvasStoreError("INVALID_CANVAS", "canvas.ir.json must be a JSON object")
     if payload.get("schema") != CANVAS_V2_SCHEMA:
+        from .migration import detect_v1_canvas
+
+        if detect_v1_canvas(payload):
+            raise CanvasStoreError(
+                "MIGRATION_REQUIRED",
+                "canvas.ir.json is a legacy AgentCanvas canvas; migrate it before applying v2 operations",
+                details={
+                    "schema": payload.get("schema"),
+                    "suggested_command": "agentcanvas canvas migrate --workspace <workspace> --apply",
+                },
+            )
         raise CanvasStoreError(
             "UNSUPPORTED_CANVAS_SCHEMA",
             "canvas.ir.json must be agentcanvas.canvas.v2 for canvas apply",
@@ -106,6 +117,7 @@ def apply_operation_batch(
     *,
     base_revision: Optional[int] = None,
     authored_by: Optional[str] = None,
+    dry_run: bool = False,
 ) -> Dict[str, Any]:
     """Apply a v2 operation batch atomically and return a structured result."""
 
@@ -142,16 +154,20 @@ def apply_operation_batch(
     _validate_referenced_deletes(root, operations, allow_rewrite=allow_rewrite)
     _validate_document(updated)
 
-    updated["revision"] = current_revision + 1
+    next_revision = current_revision + 1
+    updated["revision"] = next_revision
     updated["authored_by"] = writer
     updated["updated_at"] = now_utc()
 
     # TODO(canvas-v2): replace this minimal guard with the full layered churn
     # guard and pending tombstone transaction from the v2 spec.
-    _write_revision(root, current, updated)
+    if not dry_run:
+        _write_revision(root, current, updated)
     return {
         "ok": True,
-        "revision": updated["revision"],
+        "dry_run": bool(dry_run),
+        "revision": next_revision,
+        "base_revision": current_revision,
         "path": str(canvas_ir_path(root)),
     }
 

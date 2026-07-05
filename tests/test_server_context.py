@@ -311,13 +311,13 @@ class ServerContextTests(unittest.TestCase):
 
     def test_context_includes_learning_program_workspace_profile(self):
         with tempfile.TemporaryDirectory() as temp_root:
-            workspace = Path(temp_root) / "robotics-adventure"
+            workspace = Path(temp_root) / "learning-lab"
             workspace.mkdir()
             _write(
                 workspace,
                 "README.md",
                 (
-                    "# Robotics Adventure\n\n"
+                    "# Learning Lab\n\n"
                     "A curriculum project with lessons, modules, and student labs.\n"
                 ),
             )

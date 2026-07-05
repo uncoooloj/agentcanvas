@@ -12,18 +12,30 @@ from .demo import demo_workspace
 from .indexer import format_index_summary, index_workspace
 from .ir import (
     PENDING_STATUSES,
+    atomic_write_json,
     build_canvas_map_instruction,
+    canvas_ir_path,
+    ensure_state_dirs,
     format_map_health,
     list_pending,
     load_ir,
+    load_canvas_ir,
     map_health,
+    now_utc,
     resolve_workspace,
     save_canvas_ir,
     state_paths,
     update_pending_status,
 )
 from .core import build_agent_authored_canvas
-from .canvas_v2 import CanvasStoreError, apply_operation_batch
+from .canvas_v2 import (
+    CANVAS_V2_SCHEMA,
+    CanvasStoreError,
+    apply_operation_batch,
+    detect_v1_canvas,
+    migrate_canvas_v1_to_v2,
+    validate_canvas_v2,
+)
 from .projection import ProjectionValidationError, materialize_canvas_model
 from .server import run_server
 
@@ -119,7 +131,32 @@ def build_parser() -> argparse.ArgumentParser:
     canvas_apply_parser.add_argument("--base-revision", required=True, type=int)
     canvas_apply_parser.add_argument("--input", required=True, help="operation batch JSON file")
     canvas_apply_parser.add_argument("--authored-by", help="agent or human author name")
+    canvas_apply_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate and summarize without writing canvas IR",
+    )
     canvas_apply_parser.set_defaults(func=cmd_canvas_apply)
+
+    canvas_migrate_parser = canvas_subparsers.add_parser(
+        "migrate",
+        help="migrate a legacy canvas map to the v2 canvas store format",
+    )
+    canvas_migrate_parser.add_argument("path", nargs="?", help="workspace path to migrate")
+    canvas_migrate_parser.add_argument("--workspace", help="workspace path to migrate")
+    canvas_migrate_parser.add_argument("--authored-by", help="agent or human author name")
+    migrate_mode = canvas_migrate_parser.add_mutually_exclusive_group(required=True)
+    migrate_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate and summarize without writing canvas IR",
+    )
+    migrate_mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="write the migrated v2 canvas IR",
+    )
+    canvas_migrate_parser.set_defaults(func=cmd_canvas_migrate)
 
     return parser
 
@@ -254,9 +291,34 @@ def cmd_apply_query(args: argparse.Namespace) -> int:
 
 
 def cmd_canvas_apply(args: argparse.Namespace) -> int:
+    if args.workspace and args.path:
+        error = CanvasStoreError(
+            "WORKSPACE_AMBIGUOUS",
+            "pass either --workspace or positional path, not both",
+            details={"workspace": args.workspace, "path": args.path},
+        )
+        print(json.dumps(error.to_dict(), indent=2, sort_keys=True))
+        return 1
     workspace = resolve_workspace(selected_workspace(args))
-    with Path(args.input).expanduser().open(encoding="utf-8") as handle:
-        batch = json.load(handle)
+    try:
+        with Path(args.input).expanduser().open(encoding="utf-8") as handle:
+            batch = json.load(handle)
+    except OSError as exc:
+        error = CanvasStoreError(
+            "INPUT_NOT_READABLE",
+            "could not read canvas operation input file",
+            details={"path": args.input, "reason": str(exc)},
+        )
+        print(json.dumps(error.to_dict(), indent=2, sort_keys=True))
+        return 1
+    except ValueError as exc:
+        error = CanvasStoreError(
+            "INVALID_INPUT_JSON",
+            "canvas operation input must be valid JSON",
+            details={"path": args.input, "reason": str(exc)},
+        )
+        print(json.dumps(error.to_dict(), indent=2, sort_keys=True))
+        return 1
 
     try:
         result = apply_operation_batch(
@@ -264,10 +326,94 @@ def cmd_canvas_apply(args: argparse.Namespace) -> int:
             batch,
             base_revision=args.base_revision,
             authored_by=getattr(args, "authored_by", None),
+            dry_run=bool(getattr(args, "dry_run", False)),
         )
     except CanvasStoreError as exc:
         print(json.dumps(exc.to_dict(), indent=2, sort_keys=True))
         return 1
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_canvas_migrate(args: argparse.Namespace) -> int:
+    if args.workspace and args.path:
+        error = CanvasStoreError(
+            "WORKSPACE_AMBIGUOUS",
+            "pass either --workspace or positional path, not both",
+            details={"workspace": args.workspace, "path": args.path},
+        )
+        print(json.dumps(error.to_dict(), indent=2, sort_keys=True))
+        return 1
+
+    workspace = resolve_workspace(selected_workspace(args))
+    try:
+        current = load_canvas_ir(workspace)
+    except FileNotFoundError:
+        error = CanvasStoreError(
+            "CANVAS_NOT_FOUND",
+            "canvas.ir.json was not found",
+            details={"path": str(canvas_ir_path(workspace))},
+        )
+        print(json.dumps(error.to_dict(), indent=2, sort_keys=True))
+        return 1
+    except json.JSONDecodeError as exc:
+        error = CanvasStoreError(
+            "INVALID_CANVAS_JSON",
+            "canvas.ir.json must be valid JSON",
+            details={"path": str(canvas_ir_path(workspace)), "reason": str(exc)},
+        )
+        print(json.dumps(error.to_dict(), indent=2, sort_keys=True))
+        return 1
+
+    if isinstance(current, dict) and current.get("schema") == CANVAS_V2_SCHEMA:
+        result = {
+            "ok": True,
+            "dry_run": bool(args.dry_run),
+            "already_v2": True,
+            "schema": CANVAS_V2_SCHEMA,
+            "revision": current.get("revision", 0),
+            "path": str(canvas_ir_path(workspace)),
+        }
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if not detect_v1_canvas(current):
+        error = CanvasStoreError(
+            "UNSUPPORTED_CANVAS_SCHEMA",
+            "canvas.ir.json is not a recognized legacy AgentCanvas canvas",
+            details={
+                "schema": current.get("schema") if isinstance(current, dict) else None,
+                "path": str(canvas_ir_path(workspace)),
+            },
+        )
+        print(json.dumps(error.to_dict(), indent=2, sort_keys=True))
+        return 1
+
+    migrated = migrate_canvas_v1_to_v2(
+        current,
+        authored_by=getattr(args, "authored_by", None) or "agentcanvas-cli",
+        updated_at=now_utc(),
+    )
+    summary = validate_canvas_v2(migrated)
+    result = {
+        "ok": True,
+        "dry_run": bool(args.dry_run),
+        "already_v2": False,
+        "schema": CANVAS_V2_SCHEMA,
+        "revision": migrated.get("revision", 0),
+        "path": str(canvas_ir_path(workspace)),
+        "summary": summary,
+    }
+
+    if args.apply:
+        state_dir, _ir_path, _pending_dir = ensure_state_dirs(workspace)
+        history_dir = state_dir / "history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        history_path = history_dir / "canvas.pre-v2.json"
+        atomic_write_json(history_path, current)
+        save_canvas_ir(workspace, migrated)
+        result["history_path"] = str(history_path)
 
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

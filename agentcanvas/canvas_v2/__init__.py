@@ -8,6 +8,7 @@ from .store import (
     apply_operation_batch,
     load_canvas_document,
 )
+from .validation import validate_canvas_v2
 
 __all__ = [
     "CANVAS_V2_SCHEMA",
@@ -17,4 +18,5 @@ __all__ = [
     "flatten_canvas_v2",
     "load_canvas_document",
     "migrate_canvas_v1_to_v2",
+    "validate_canvas_v2",
 ]

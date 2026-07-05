@@ -144,6 +144,80 @@ class ServerContextTests(unittest.TestCase):
                 health["pendingFiles"]["path"],
             )
 
+    def test_canvas_api_serves_v2_compatibility_envelope(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            canvas_v2 = {
+                "schema": "agentcanvas.canvas.v2",
+                "revision": 4,
+                "app": {
+                    "name": "Sunset Photos",
+                    "summary": "People upload and share photos.",
+                    "is_demo": False,
+                },
+                "flows": [
+                    {
+                        "id": "flow:signup",
+                        "title": "Signing up",
+                        "summary": "How a new person gets an account.",
+                        "entry_node": "n:signup:visit",
+                        "nodes": [
+                            {
+                                "id": "n:signup:visit",
+                                "kind": "When",
+                                "title": "Someone opens signup",
+                                "status": "verified",
+                            },
+                            {
+                                "id": "n:signup:create",
+                                "kind": "Do",
+                                "title": "Create the account",
+                                "detail": "Stores the new account.",
+                                "evidence_refs": ["src/signup.ts"],
+                                "status": "verified",
+                            },
+                        ],
+                        "edges": [
+                            {
+                                "id": "e:signup:visit:create",
+                                "source": "n:signup:visit",
+                                "target": "n:signup:create",
+                                "kind": "normal",
+                            }
+                        ],
+                    }
+                ],
+            }
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps(canvas_v2),
+            )
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/canvas?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            payload = fake.response["payload"]
+            self.assertEqual("agentcanvas.behavior_canvas_response.v1", payload["schema"])
+            self.assertEqual(4, payload["revision"])
+            self.assertEqual(canvas_v2, payload["canvas_v2"])
+            self.assertEqual("Sunset Photos", payload["canvas"]["appName"])
+            self.assertEqual("Signing up", payload["canvas"]["journeys"][0]["title"])
+            self.assertEqual(
+                ["Someone opens signup", "Create the account"],
+                [node["text"] for node in payload["canvas"]["journeys"][0]["nodes"]],
+            )
+            self.assertEqual("agent-authored", payload["mapping"]["mode"])
+            self.assertEqual(1, payload["mapping"]["flowCount"])
+
     def test_demo_context_uses_workspace_name(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "agentcanvas-demo"

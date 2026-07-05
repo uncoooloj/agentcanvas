@@ -287,8 +287,9 @@ function normalizeMappingStage(value: unknown): MappingStage | null {
 function unwrapCanvasPayload(data: unknown): Record<string, unknown> {
   const root = recordValue(data)
   if (!root) throw new Error("Canvas response was empty.")
+  const displayCanvas = recordValue(root.canvas)
+  if (displayCanvas) return displayCanvas
   return (
-    recordValue(root.canvas) ||
     recordValue(root.canvas_model) ||
     recordValue(root.canvasModel) ||
     recordValue(root.model) ||

@@ -28,6 +28,9 @@ from .ir import (
     write_pending_change,
 )
 from .core.behavior_canvas import (
+    BEHAVIOR_CANVAS_SCHEMA,
+    BEHAVIOR_CANVAS_WRAPPER_SCHEMA,
+    CANVAS_MAPPING_SCHEMA,
     build_behavior_canvas,
     canvas_source_metadata,
 )
@@ -43,6 +46,7 @@ _ASSISTANTS = {
     "generic": "Your assistant",
 }
 DEMO_MARKER_FILENAME = ".agentcanvas-demo"
+CANVAS_V2_SCHEMA = "agentcanvas.canvas.v2"
 
 
 def resolve_assistant(agent: Optional[str]) -> Tuple[str, str]:
@@ -131,6 +135,15 @@ def load_or_build_canvas(
     if not refresh:
         try:
             canvas = load_canvas_ir(workspace)
+            if is_canvas_v2_document(canvas):
+                return with_workspace_profile(
+                    workspace,
+                    with_runtime_source_status(
+                        canvas_v2_compat_envelope(workspace, canvas),
+                        demo_content=demo_content,
+                        demo_fallback=demo_fallback,
+                    ),
+                )
             if is_agent_authored_canvas(canvas):
                 return with_workspace_profile(
                     workspace,
@@ -165,7 +178,197 @@ def load_or_build_canvas(
     return with_workspace_profile(workspace, canvas)
 
 
+def is_canvas_v2_document(canvas: Dict[str, Any]) -> bool:
+    return canvas.get("schema") == CANVAS_V2_SCHEMA
+
+
+def canvas_v2_compat_envelope(workspace: Path, canvas_v2: Dict[str, Any]) -> Dict[str, Any]:
+    display_canvas = flatten_canvas_v2_for_display(workspace, canvas_v2)
+    flow_count = len(canvas_v2.get("flows") or [])
+    display_flow_count = len(display_canvas.get("journeys") or [])
+    source = canvas_source_metadata(
+        "agent-authored",
+        "ready",
+        is_empty=flow_count == 0,
+        flow_count=flow_count,
+    )
+    metadata = display_canvas.setdefault("metadata", {})
+    if isinstance(metadata, dict):
+        metadata["source"] = source
+        projection = metadata.setdefault("projection", {})
+        if isinstance(projection, dict):
+            projection.setdefault("mode", "v2-compat")
+            projection.setdefault("engine", "canvas-v2-flatten")
+            projection.setdefault("displayFlowCount", display_flow_count)
+            projection.setdefault("warnings", [])
+
+    return {
+        "schema": BEHAVIOR_CANVAS_WRAPPER_SCHEMA,
+        "version": "0.1.0",
+        "revision": canvas_v2.get("revision", 0),
+        "canvas": display_canvas,
+        "canvas_v2": deepcopy(canvas_v2),
+        "mapping": {
+            "schema": CANVAS_MAPPING_SCHEMA,
+            "status": "ready",
+            "mode": "agent-authored",
+            "primaryMode": "agent-authored",
+            "flowCount": flow_count,
+            "displayFlowCount": display_flow_count,
+            "source": source,
+            "stale": False,
+            "empty": flow_count == 0,
+            "demoFallback": False,
+            "warnings": [],
+        },
+    }
+
+
+def flatten_canvas_v2_for_display(workspace: Path, canvas_v2: Dict[str, Any]) -> Dict[str, Any]:
+    external = load_canvas_v2_flattener()
+    if external:
+        flattened = call_canvas_v2_flattener(external, canvas_v2, workspace)
+        if isinstance(flattened, dict):
+            canvas = flattened.get("canvas") if isinstance(flattened.get("canvas"), dict) else flattened
+            if isinstance(canvas.get("journeys"), list):
+                return deepcopy(canvas)
+    return fallback_flatten_canvas_v2(canvas_v2)
+
+
+def load_canvas_v2_flattener():
+    for module_name in (
+        "agentcanvas.canvas_v2",
+        "agentcanvas.core.canvas_v2",
+        "agentcanvas.projection.canvas_v2",
+    ):
+        try:
+            module = __import__(module_name, fromlist=["flatten_canvas_v2"])
+        except ImportError:
+            continue
+        flattener = getattr(module, "flatten_canvas_v2", None)
+        if callable(flattener):
+            return flattener
+    return None
+
+
+def call_canvas_v2_flattener(flattener, canvas_v2: Dict[str, Any], workspace: Path):
+    try:
+        return flattener(canvas_v2, workspace=workspace)
+    except TypeError:
+        return flattener(canvas_v2)
+
+
+def fallback_flatten_canvas_v2(canvas_v2: Dict[str, Any]) -> Dict[str, Any]:
+    app = canvas_v2.get("app") if isinstance(canvas_v2.get("app"), dict) else {}
+    journeys = [
+        fallback_flatten_v2_flow(flow)
+        for flow in canvas_v2.get("flows") or []
+        if isinstance(flow, dict)
+    ]
+    journeys = [journey for journey in journeys if journey is not None]
+    return {
+        "schema": BEHAVIOR_CANVAS_SCHEMA,
+        "version": "0.1.0",
+        "appName": str(app.get("name") or "Your app"),
+        "journeys": journeys,
+        "isDemo": bool(app.get("is_demo")),
+        "thin": len(journeys) <= 2,
+        "metadata": {
+            "source_schema": canvas_v2.get("schema"),
+            "projection": {
+                "mode": "v2-compat",
+                "engine": "local-fallback",
+                "displayFlowCount": len(journeys),
+                "warnings": [],
+            },
+        },
+    }
+
+
+def fallback_flatten_v2_flow(flow: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    ordered_nodes = ordered_v2_nodes(flow)
+    if not ordered_nodes:
+        return None
+    title = str(flow.get("title") or flow.get("id") or "Workspace flow")
+    first = ordered_nodes[0]
+    return {
+        "id": str(flow.get("id") or title),
+        "title": title,
+        "summary": str(flow.get("summary") or "Mapped from your workspace canvas."),
+        "entry": str(first.get("title") or title),
+        "nodes": [
+            fallback_v2_node_to_display(node, index == 0)
+            for index, node in enumerate(ordered_nodes)
+        ],
+    }
+
+
+def ordered_v2_nodes(flow: Dict[str, Any]) -> list[Dict[str, Any]]:
+    nodes = [node for node in flow.get("nodes") or [] if isinstance(node, dict)]
+    if not nodes:
+        return []
+    by_id = {str(node.get("id")): node for node in nodes if node.get("id")}
+    outgoing: Dict[str, list[str]] = {}
+    for edge in flow.get("edges") or []:
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("source")
+        target = edge.get("target")
+        if source and target:
+            outgoing.setdefault(str(source), []).append(str(target))
+
+    ordered: list[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def visit(node_id: str) -> None:
+        if node_id in seen:
+            return
+        node = by_id.get(node_id)
+        if not node:
+            return
+        seen.add(node_id)
+        ordered.append(node)
+        for target_id in outgoing.get(node_id, []):
+            visit(target_id)
+
+    entry_node = flow.get("entry_node")
+    if entry_node:
+        visit(str(entry_node))
+    for node in nodes:
+        node_id = str(node.get("id") or "")
+        if node_id and node_id not in seen:
+            visit(node_id)
+        elif not node_id:
+            ordered.append(node)
+    return ordered
+
+
+def fallback_v2_node_to_display(node: Dict[str, Any], first: bool) -> Dict[str, Any]:
+    kind = str(node.get("kind") or "Do")
+    role = "when" if first or kind == "When" else "do"
+    refs = [
+        str(ref)
+        for ref in node.get("evidence_refs") or []
+        if isinstance(ref, (str, int, float))
+    ]
+    display: Dict[str, Any] = {
+        "kind": "step",
+        "id": str(node.get("id") or node.get("title") or role),
+        "role": role,
+        "text": str(node.get("title") or node.get("detail") or "Mapped step"),
+    }
+    if node.get("detail"):
+        display["detail"] = str(node["detail"])
+    if node.get("status") in {"inferred", "proposed", "stale"}:
+        display["uncertain"] = True
+    if refs:
+        display["tech"] = {"refs": refs}
+    return display
+
+
 def is_agent_authored_canvas(canvas: Dict[str, Any]) -> bool:
+    if is_canvas_v2_document(canvas):
+        return True
     mapping = canvas.get("mapping") if isinstance(canvas.get("mapping"), dict) else {}
     if mapping.get("mode") == "agent-authored":
         return True

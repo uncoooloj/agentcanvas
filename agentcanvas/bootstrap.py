@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import re
 import shlex
-from pathlib import Path
+from importlib import resources
 from string import Template
 
 
 DEFAULT_AGENT_LABEL = "the calling coding agent"
+SUPPORTED_SETUP_AGENTS = {"claude-code", "codex", "cursor", "antigravity", "generic", "auto"}
 
 
 def render_bootstrap_prompt(
@@ -25,6 +26,7 @@ def render_bootstrap_prompt(
     template = _bootstrap_template()
     return template.substitute(
         agent_label=label,
+        agent_setup_arg=_agent_setup_arg(label),
         workspace=str(workspace),
         workspace_shell=shlex.quote(str(workspace)),
         workflow_relative_path=workflow_relative_path,
@@ -40,8 +42,11 @@ def _clean_agent_label(agent_label: str | None) -> str:
     return label[:80] if label else DEFAULT_AGENT_LABEL
 
 
+def _agent_setup_arg(agent_label: str) -> str:
+    key = re.sub(r"[^a-z0-9]+", "-", agent_label.lower()).strip("-")
+    return key if key in SUPPORTED_SETUP_AGENTS else "auto"
+
+
 def _bootstrap_template() -> Template:
-    text = (Path(__file__).resolve().parent / "templates" / "bootstrap_prompt.md").read_text(
-        encoding="utf-8"
-    )
+    text = resources.files("agentcanvas").joinpath("templates/bootstrap_prompt.md").read_text(encoding="utf-8")
     return Template(text)

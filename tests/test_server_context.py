@@ -56,6 +56,8 @@ class ServerContextTests(unittest.TestCase):
             self.assertIn("pip install use-agentcanvas", instruction)
             self.assertNotRegex(instruction, r"pip install\s+agentcanvas\b")
             self.assertNotIn("agentcanvas start", instruction)
+            self.assertIn("uvx --from use-agentcanvas agentcanvas setup --agent auto", instruction)
+            self.assertIn("agentcanvas up --workspace", instruction)
             self.assertIn("ask clarifying questions", instruction)
             for agent_name in ["Codex", "Claude", "Cursor", "Antigravity"]:
                 self.assertNotIn(agent_name, instruction)
@@ -101,6 +103,7 @@ class ServerContextTests(unittest.TestCase):
             self.assertIn(str(resolved), handoff["instruction"])
             self.assertIn(".agentcanvas/canvas.ir.json", handoff["instruction"])
             self.assertNotIn("agentcanvas start", handoff["instruction"])
+            self.assertIn("agentcanvas up --workspace", handoff["instruction"])
 
     def test_health_api_returns_map_health_summary(self):
         with tempfile.TemporaryDirectory() as temp_root:

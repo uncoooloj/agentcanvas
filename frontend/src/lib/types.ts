@@ -85,6 +85,7 @@ export interface StepNode {
   detail?: string
   uncertain?: boolean
   tech?: { nodeId?: string; refs: string[] }
+  native?: CanvasV2NativeRef
 }
 
 // A decision: the "then" path runs when the condition holds, "otherwise" when it doesn't.
@@ -96,6 +97,7 @@ export interface BranchNode {
   otherwise: FlowNode[]
   uncertain?: boolean
   tech?: { nodeId?: string; refs: string[] }
+  native?: CanvasV2NativeRef
 }
 
 export type FlowNode = StepNode | BranchNode
@@ -115,6 +117,89 @@ export interface AppModel {
   journeys: Journey[]
   isDemo: boolean
   thin?: boolean
+}
+
+export enum CanvasV2Schema {
+  Canvas = "agentcanvas.canvas.v2",
+}
+
+export enum CanvasV2NodeKind {
+  When = "When",
+  Do = "Do",
+  Decision = "Decision",
+  Loop = "Loop",
+  Parallel = "Parallel",
+  Join = "Join",
+  Wait = "Wait",
+  SubFlow = "SubFlow",
+  End = "End",
+}
+
+export enum CanvasV2EdgeKind {
+  Normal = "normal",
+  Branch = "branch",
+  LoopBody = "loop_body",
+  LoopBack = "loop_back",
+  LoopExit = "loop_exit",
+  Parallel = "parallel",
+  Error = "error",
+  Async = "async",
+}
+
+export interface CanvasV2Node {
+  id: string
+  kind: CanvasV2NodeKind
+  title: string
+  summary?: string
+  evidenceRefs: string[]
+  flowRef?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface CanvasV2Edge {
+  id: string
+  kind: CanvasV2EdgeKind
+  source: string
+  target: string
+  label?: string
+  isDefault?: boolean
+  metadata?: Record<string, unknown>
+}
+
+export interface CanvasV2Flow {
+  id: string
+  title: string
+  summary: string
+  entryNode?: string
+  altitude?: string
+  nodes: CanvasV2Node[]
+  edges: CanvasV2Edge[]
+  evidenceRefs: string[]
+  metadata?: Record<string, unknown>
+}
+
+export interface CanvasV2Document {
+  schema: CanvasV2Schema
+  revision: number
+  authoredBy?: string
+  updatedAt?: string | null
+  evidence?: Record<string, unknown>
+  app: {
+    name: string
+    summary: string
+    isDemo: boolean
+  }
+  flows: CanvasV2Flow[]
+  metadata?: Record<string, unknown>
+}
+
+export interface CanvasV2NativeRef {
+  schema: CanvasV2Schema
+  flowId?: string
+  nodeId: string
+  nodeKind: CanvasV2NodeKind
+  edgeKinds?: CanvasV2EdgeKind[]
+  flowRef?: string
 }
 
 export interface MappingStage {

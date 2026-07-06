@@ -4,7 +4,15 @@ import { cn } from "@/lib/utils"
 import { ROLE } from "@/lib/roles"
 import { ChangeKind, useChanges } from "@/lib/changeset"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { FlowAction, FlowNodeKind, StepRole, type BranchNode, type FlowNode, type StepNode } from "@/lib/types"
+import {
+  CanvasV2NodeKind,
+  FlowAction,
+  FlowNodeKind,
+  StepRole,
+  type BranchNode,
+  type FlowNode,
+  type StepNode,
+} from "@/lib/types"
 
 function useNodeBadge(nodeId: string): ChangeKind | null {
   return useChanges((s) => {
@@ -77,6 +85,8 @@ function StepCard({
   const selected = node.id === selectedId
   const badge = useNodeBadge(node.id)
   const removing = badge === ChangeKind.Removing
+  const canAddAfter = canAddAfterNative(node.native?.nodeKind)
+  const canAddRule = canAddRuleNative(node.native?.nodeKind)
   return (
     <div className="group relative">
       <button
@@ -106,6 +116,7 @@ function StepCard({
             <Icon className="h-3 w-3" />
             {role.label}
           </span>
+          <NativeKindBadge node={node} />
           {badge && <ChangeBadge kind={badge} />}
         </span>
         <span className={cn("flex min-w-0 flex-col gap-1", stacked ? "w-full pr-1" : "pt-0.5 pr-16")}>
@@ -128,12 +139,16 @@ function StepCard({
         <ActionIcon label="Change what happens" onClick={() => onAction(FlowAction.Change, node)}>
           <Pencil className="h-3.5 w-3.5" />
         </ActionIcon>
-        <ActionIcon label="Add a step after" onClick={() => onAction(FlowAction.AddAfter, node)}>
-          <Plus className="h-3.5 w-3.5" />
-        </ActionIcon>
-        <ActionIcon label="Add a rule" onClick={() => onAction(FlowAction.AddRule, node)}>
-          <Split className="h-3.5 w-3.5" />
-        </ActionIcon>
+        {canAddAfter && (
+          <ActionIcon label="Add a step after" onClick={() => onAction(FlowAction.AddAfter, node)}>
+            <Plus className="h-3.5 w-3.5" />
+          </ActionIcon>
+        )}
+        {canAddRule && (
+          <ActionIcon label="Add a rule" onClick={() => onAction(FlowAction.AddRule, node)}>
+            <Split className="h-3.5 w-3.5" />
+          </ActionIcon>
+        )}
         <ActionIcon
           label="Remove this step"
           danger
@@ -180,6 +195,7 @@ function BranchCard({
           >
             {presentation === BranchPresentation.ElseIf ? "Else if" : "If"} {node.condition}
           </span>
+          <NativeKindBadge node={node} />
           {badge && <ChangeBadge kind={badge} />}
         </button>
         <HoverActions>
@@ -359,4 +375,57 @@ function ChangeBadge({ kind }: { kind: ChangeKind }) {
       {label}
     </span>
   )
+}
+
+function NativeKindBadge({ node }: { node: FlowNode }) {
+  const kind = node.native?.nodeKind
+  if (!kind) return null
+  if (node.kind === FlowNodeKind.Step && (kind === CanvasV2NodeKind.When || kind === CanvasV2NodeKind.Do)) {
+    return null
+  }
+  if (node.kind === FlowNodeKind.Branch && kind === CanvasV2NodeKind.Decision) {
+    return null
+  }
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-md bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+      {nativeKindLabel(kind)}
+    </span>
+  )
+}
+
+function nativeKindLabel(kind: CanvasV2NodeKind): string {
+  switch (kind) {
+    case CanvasV2NodeKind.Loop:
+      return "Repeat"
+    case CanvasV2NodeKind.Parallel:
+      return "Parallel"
+    case CanvasV2NodeKind.Join:
+      return "Join"
+    case CanvasV2NodeKind.Wait:
+      return "Wait"
+    case CanvasV2NodeKind.SubFlow:
+      return "Sub-flow"
+    case CanvasV2NodeKind.End:
+      return "End"
+    case CanvasV2NodeKind.Decision:
+      return "Rule"
+    case CanvasV2NodeKind.When:
+      return "When"
+    case CanvasV2NodeKind.Do:
+      return "Do"
+  }
+}
+
+function canAddAfterNative(kind?: CanvasV2NodeKind): boolean {
+  if (!kind) return true
+  return (
+    kind === CanvasV2NodeKind.When ||
+    kind === CanvasV2NodeKind.Do ||
+    kind === CanvasV2NodeKind.Wait ||
+    kind === CanvasV2NodeKind.SubFlow
+  )
+}
+
+function canAddRuleNative(kind?: CanvasV2NodeKind): boolean {
+  return !kind || kind === CanvasV2NodeKind.Do || kind === CanvasV2NodeKind.When
 }

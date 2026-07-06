@@ -7,6 +7,7 @@ import {
   StepRole,
   type AppModel,
   type BranchNode,
+  type CanvasV2NodeKind,
   type FlowNode,
   type PendingItem,
   type StepNode,
@@ -28,6 +29,9 @@ export interface ChangeEntry {
   journeyId: string
   journeyTitle: string
   targetNodeId: string
+  targetNativeNodeId?: string
+  targetNativeKind?: CanvasV2NodeKind
+  targetFlowId?: string
   text1?: string // primary input (new step text / new condition / reason)
   text2?: string // secondary input (the "then" action for add_rule)
   createdAt: number
@@ -305,6 +309,9 @@ function changeRequestFor(change: ChangeEntry): ChangeRequest {
     journeyTitle: change.journeyTitle,
     targetStep: change.targetNodeId,
     targetNodeId: change.targetNodeId,
+    targetNativeNodeId: change.targetNativeNodeId,
+    targetNativeKind: change.targetNativeKind,
+    targetFlowId: change.targetFlowId,
     text1: change.text1,
     text2: change.text2,
   }
@@ -402,6 +409,8 @@ export function buildHandoffPrompt(changes: ChangeEntry[], assistantName = "your
         `   - JSON: ${item?.jsonPath || "not available"}`,
         `   - Journey: ${change.journeyTitle} (${change.journeyId})`,
         `   - Target node: ${change.targetNodeId}`,
+        ...(change.targetNativeNodeId ? [`   - Native node: ${change.targetNativeNodeId}`] : []),
+        ...(change.targetNativeKind ? [`   - Native kind: ${change.targetNativeKind}`] : []),
         `   - Action: ${change.action}`,
         ...(change.text1 ? [`   - Primary text: ${change.text1}`] : []),
         ...(change.text2 ? [`   - Secondary text: ${change.text2}`] : []),

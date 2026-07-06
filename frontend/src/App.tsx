@@ -310,6 +310,9 @@ export default function App() {
       journeyId: activeJourney.id,
       journeyTitle: edit.journeyTitle,
       targetNodeId: edit.node.id,
+      targetNativeNodeId: edit.node.native?.nodeId,
+      targetNativeKind: edit.node.native?.nodeKind,
+      targetFlowId: edit.node.native?.flowId || activeJourney.id,
       text1: edit.text1,
       text2: edit.text2,
     }

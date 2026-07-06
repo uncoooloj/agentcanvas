@@ -1,5 +1,8 @@
 import {
   CanvasStepKind,
+  CanvasV2EdgeKind,
+  CanvasV2NodeKind,
+  CanvasV2Schema,
   FlowNodeKind,
   MappingStageStatus,
   PendingStatus,
@@ -8,6 +11,11 @@ import {
   type BranchNode,
   type CanvasMapping,
   type CanvasSourceMetadata,
+  type CanvasV2Document,
+  type CanvasV2Edge,
+  type CanvasV2Flow,
+  type CanvasV2NativeRef,
+  type CanvasV2Node,
   type CodeGraph,
   type FlowNode,
   type Journey,
@@ -65,15 +73,13 @@ export async function fetchCanvasModel(): Promise<AppModel> {
 export interface CanvasResponse {
   model: AppModel
   mapping?: CanvasMapping
+  revision?: number
+  canvasV2?: CanvasV2Document
 }
 
 export async function fetchCanvas(): Promise<CanvasResponse> {
   const data = await getJson<unknown>("/api/canvas")
-  const root = recordValue(data)
-  return {
-    model: normalizeCanvasPayload(data),
-    mapping: normalizeCanvasMapping(recordValue(root?.mapping)),
-  }
+  return normalizeCanvasResponse(data)
 }
 
 export async function fetchGraph(): Promise<CodeGraph> {
@@ -111,10 +117,18 @@ export async function reindexCanvas(): Promise<CanvasResponse> {
     throw new ApiError("/api/reindex", res.status, data?.error ? String(data.error) : res.statusText)
   }
   const data = await res.json()
+  return normalizeCanvasResponse(data)
+}
+
+export function normalizeCanvasResponse(data: unknown): CanvasResponse {
   const root = recordValue(data)
+  const canvasV2 = normalizeCanvasV2Document(root?.canvas_v2 || root?.canvasV2)
+  const revision = numberValue(root?.revision) ?? canvasV2?.revision
   return {
     model: normalizeCanvasPayload(data),
     mapping: normalizeCanvasMapping(recordValue(root?.mapping)),
+    revision,
+    canvasV2,
   }
 }
 
@@ -141,6 +155,9 @@ export interface ChangeRequest {
   afterStep?: string | null
   targetStep?: string | null
   targetNodeId?: string | null
+  targetNativeNodeId?: string | null
+  targetNativeKind?: string | null
+  targetFlowId?: string | null
   action?: string
   text1?: string
   text2?: string
@@ -247,6 +264,95 @@ function normalizeCanvasMapping(value: Record<string, unknown> | undefined): Can
       ? value.stages.map(normalizeMappingStage).filter((stage): stage is MappingStage => Boolean(stage))
       : undefined,
   }
+}
+
+export function normalizeCanvasV2Document(value: unknown): CanvasV2Document | undefined {
+  const document = recordValue(value)
+  if (!document || document.schema !== CanvasV2Schema.Canvas) return undefined
+  const app = recordValue(document.app)
+  return {
+    schema: CanvasV2Schema.Canvas,
+    revision: numberValue(document.revision) ?? 0,
+    authoredBy: stringValue(document.authored_by) || stringValue(document.authoredBy),
+    updatedAt: stringValue(document.updated_at) || stringValue(document.updatedAt) || null,
+    evidence: recordValue(document.evidence),
+    app: {
+      name: stringValue(app?.name) || "Your app",
+      summary: stringValue(app?.summary) || "",
+      isDemo: booleanValue(app?.is_demo) || booleanValue(app?.isDemo),
+    },
+    flows: Array.isArray(document.flows)
+      ? document.flows.map(normalizeCanvasV2Flow).filter((flow): flow is CanvasV2Flow => Boolean(flow))
+      : [],
+    metadata: recordValue(document.metadata),
+  }
+}
+
+function normalizeCanvasV2Flow(value: unknown): CanvasV2Flow | null {
+  const flow = recordValue(value)
+  const id = stringValue(flow?.id)
+  if (!flow || !id) return null
+  const title = stringValue(flow.title) || id
+  return {
+    id,
+    title,
+    summary: stringValue(flow.summary) || "",
+    entryNode: stringValue(flow.entry_node) || stringValue(flow.entryNode),
+    altitude: stringValue(flow.altitude),
+    nodes: Array.isArray(flow.nodes)
+      ? flow.nodes.map(normalizeCanvasV2Node).filter((node): node is CanvasV2Node => Boolean(node))
+      : [],
+    edges: Array.isArray(flow.edges)
+      ? flow.edges.map(normalizeCanvasV2Edge).filter((edge): edge is CanvasV2Edge => Boolean(edge))
+      : [],
+    evidenceRefs: stringList(flow.evidence_refs || flow.evidenceRefs),
+    metadata: recordValue(flow.metadata),
+  }
+}
+
+function normalizeCanvasV2Node(value: unknown): CanvasV2Node | null {
+  const node = recordValue(value)
+  const id = stringValue(node?.id)
+  if (!node || !id) return null
+  return {
+    id,
+    kind: normalizeCanvasV2NodeKind(node.kind),
+    title: stringValue(node.title) || stringValue(node.label) || id,
+    summary: stringValue(node.summary),
+    evidenceRefs: stringList(node.evidence_refs || node.evidenceRefs),
+    flowRef: stringValue(node.flow_ref) || stringValue(node.flowRef),
+    metadata: recordValue(node.metadata),
+  }
+}
+
+function normalizeCanvasV2Edge(value: unknown): CanvasV2Edge | null {
+  const edge = recordValue(value)
+  const id = stringValue(edge?.id)
+  const source = stringValue(edge?.source)
+  const target = stringValue(edge?.target)
+  if (!edge || !id || !source || !target) return null
+  return {
+    id,
+    kind: normalizeCanvasV2EdgeKind(edge.kind),
+    source,
+    target,
+    label: stringValue(edge.label),
+    isDefault: booleanValue(edge.is_default) || booleanValue(edge.isDefault),
+    metadata: recordValue(edge.metadata),
+  }
+}
+
+const CANVAS_V2_NODE_KINDS = new Set<string>(Object.values(CanvasV2NodeKind))
+const CANVAS_V2_EDGE_KINDS = new Set<string>(Object.values(CanvasV2EdgeKind))
+
+function normalizeCanvasV2NodeKind(value: unknown): CanvasV2NodeKind {
+  const kind = String(value || CanvasV2NodeKind.Do)
+  return CANVAS_V2_NODE_KINDS.has(kind) ? (kind as CanvasV2NodeKind) : CanvasV2NodeKind.Do
+}
+
+function normalizeCanvasV2EdgeKind(value: unknown): CanvasV2EdgeKind {
+  const kind = String(value || CanvasV2EdgeKind.Normal)
+  return CANVAS_V2_EDGE_KINDS.has(kind) ? (kind as CanvasV2EdgeKind) : CanvasV2EdgeKind.Normal
 }
 
 function normalizeCanvasSource(value: unknown): CanvasSourceMetadata | undefined {
@@ -424,6 +530,7 @@ function branchFromCanvasChain(chain: Array<Record<string, unknown> | undefined>
           : [],
     uncertain: isUncertain(head),
     tech: refs.length ? { refs } : undefined,
+    native: normalizeNativeRef(head?.native),
   }
 }
 
@@ -436,6 +543,7 @@ function stepFromCanvas(step: Record<string, unknown> | undefined, role: StepRol
     text: stringValue(step?.text) || stringValue(step?.label) || (role === StepRole.When ? "Someone uses this flow" : "Do the mapped step"),
     uncertain: isUncertain(step),
     tech: refs.length ? { refs } : undefined,
+    native: normalizeNativeRef(step?.native),
   }
 }
 
@@ -457,6 +565,7 @@ function normalizeFlowNode(value: unknown): FlowNode | null {
       otherwise: otherwiseNodes,
       uncertain: Boolean(node.uncertain),
       tech: normalizeTech(node.tech),
+      native: normalizeNativeRef(node.native),
     }
   }
   if (node.kind === FlowNodeKind.Step) {
@@ -469,9 +578,28 @@ function normalizeFlowNode(value: unknown): FlowNode | null {
       detail: stringValue(node.detail),
       uncertain: Boolean(node.uncertain),
       tech: normalizeTech(node.tech),
+      native: normalizeNativeRef(node.native),
     }
   }
   return null
+}
+
+function normalizeNativeRef(value: unknown): CanvasV2NativeRef | undefined {
+  const native = recordValue(value)
+  if (!native || native.schema !== CanvasV2Schema.Canvas) return undefined
+  const nodeId = stringValue(native.nodeId) || stringValue(native.node_id)
+  if (!nodeId) return undefined
+  const edgeKinds = stringList(native.edgeKinds || native.edge_kinds)
+    .map(normalizeCanvasV2EdgeKind)
+    .filter(Boolean)
+  return {
+    schema: CanvasV2Schema.Canvas,
+    flowId: stringValue(native.flowId) || stringValue(native.flow_id),
+    nodeId,
+    nodeKind: normalizeCanvasV2NodeKind(native.nodeKind || native.node_kind),
+    edgeKinds: edgeKinds.length ? edgeKinds : undefined,
+    flowRef: stringValue(native.flowRef) || stringValue(native.flow_ref),
+  }
 }
 
 function normalizeTech(value: unknown): { nodeId?: string; refs: string[] } | undefined {
@@ -588,6 +716,18 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined
+}
+
+function numberValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value)
+  }
+  return undefined
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : []
 }
 
 function booleanValue(value: unknown): boolean {

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 import { ROLE, RuleRole } from "@/lib/roles"
 import { Button } from "@/components/ui/button"
 import { ChangeKind, useChanges, type ChangeEntry } from "@/lib/changeset"
-import { FlowAction, FlowNodeKind, StepRole, type FlowNode } from "@/lib/types"
+import { CanvasV2NodeKind, FlowAction, FlowNodeKind, StepRole, type FlowNode } from "@/lib/types"
 
 interface Props {
   node: FlowNode | null
@@ -30,6 +30,10 @@ export function Inspector({ node, onAction, onModifyChange, onCancelChange }: Pr
   const isBranch = node.kind === FlowNodeKind.Branch
   const headChip = isBranch ? ROLE[RuleRole.If] : ROLE[node.role === StepRole.When ? StepRole.When : StepRole.Do]
   const HeadIcon = headChip.icon
+  const nativeKind = node.native?.nodeKind
+  const canAddAfter = canAddAfterNative(nativeKind)
+  const canAddRule = canAddRuleNative(nativeKind)
+  const hasTech = Boolean(node.tech?.refs?.length || node.native)
 
   return (
     <div className="flex h-full flex-col">
@@ -43,6 +47,11 @@ export function Inspector({ node, onAction, onModifyChange, onCancelChange }: Pr
           <HeadIcon className="h-3 w-3" />
           {isBranch ? "Rule" : headChip.label}
         </span>
+        {nativeKind && (
+          <span className="ml-2 inline-flex items-center rounded-md bg-secondary px-2 py-1 text-[11px] font-medium text-muted-foreground">
+            {nativeKindLabel(nativeKind)}
+          </span>
+        )}
         <p className="mt-2.5 text-[15px] font-medium leading-snug text-foreground">
           {isBranch ? `If ${node.condition}` : node.text}
         </p>
@@ -71,8 +80,12 @@ export function Inspector({ node, onAction, onModifyChange, onCancelChange }: Pr
           ) : (
             <>
               <InspectorAction icon={Pencil} label="Change" fullLabel="Change what happens" onClick={() => onAction(FlowAction.Change)} />
-              <InspectorAction icon={Plus} label="Add step" fullLabel="Add a step after this" onClick={() => onAction(FlowAction.AddAfter)} />
-              <InspectorAction icon={Split} label="Add rule" fullLabel="Add a rule" onClick={() => onAction(FlowAction.AddRule)} />
+              {canAddAfter && (
+                <InspectorAction icon={Plus} label="Add step" fullLabel="Add a step after this" onClick={() => onAction(FlowAction.AddAfter)} />
+              )}
+              {canAddRule && (
+                <InspectorAction icon={Split} label="Add rule" fullLabel="Add a rule" onClick={() => onAction(FlowAction.AddRule)} />
+              )}
               <InspectorAction icon={Trash2} label="Remove" fullLabel="Remove this step" danger onClick={() => onAction(FlowAction.Remove)} />
             </>
           )}
@@ -97,7 +110,7 @@ export function Inspector({ node, onAction, onModifyChange, onCancelChange }: Pr
         </div>
       )}
 
-      {node.tech?.refs?.length ? (
+      {hasTech ? (
         <div className="mt-auto border-t px-5 py-3">
           <button
             type="button"
@@ -108,16 +121,24 @@ export function Inspector({ node, onAction, onModifyChange, onCancelChange }: Pr
             Show the technical bits
           </button>
           {showTech && (
-            <ul className="mt-2 flex flex-col gap-1">
-              {node.tech.refs.map((ref) => (
-                <li
+            <div className="mt-2 flex flex-col gap-1">
+              {node.native && (
+                <div className="rounded-md bg-secondary px-2 py-1 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground/80">Native:</span>{" "}
+                  {node.native.nodeKind} · {node.native.nodeId}
+                  {node.native.flowRef ? ` · ${node.native.flowRef}` : ""}
+                  {node.native.edgeKinds?.length ? ` · ${node.native.edgeKinds.join(", ")}` : ""}
+                </div>
+              )}
+              {node.tech?.refs?.map((ref) => (
+                <div
                   key={ref}
                   className="truncate rounded-md bg-secondary px-2 py-1 font-mono text-xs text-muted-foreground"
                 >
                   {ref}
-                </li>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </div>
       ) : null}
@@ -240,4 +261,41 @@ function changeValueLabel(change: ChangeEntry): string {
     default:
       return ""
   }
+}
+
+function nativeKindLabel(kind: CanvasV2NodeKind): string {
+  switch (kind) {
+    case CanvasV2NodeKind.Loop:
+      return "Repeat"
+    case CanvasV2NodeKind.Parallel:
+      return "Parallel"
+    case CanvasV2NodeKind.Join:
+      return "Join"
+    case CanvasV2NodeKind.Wait:
+      return "Wait"
+    case CanvasV2NodeKind.SubFlow:
+      return "Sub-flow"
+    case CanvasV2NodeKind.End:
+      return "End"
+    case CanvasV2NodeKind.Decision:
+      return "Rule"
+    case CanvasV2NodeKind.When:
+      return "When"
+    case CanvasV2NodeKind.Do:
+      return "Do"
+  }
+}
+
+function canAddAfterNative(kind?: CanvasV2NodeKind): boolean {
+  if (!kind) return true
+  return (
+    kind === CanvasV2NodeKind.When ||
+    kind === CanvasV2NodeKind.Do ||
+    kind === CanvasV2NodeKind.Wait ||
+    kind === CanvasV2NodeKind.SubFlow
+  )
+}
+
+function canAddRuleNative(kind?: CanvasV2NodeKind): boolean {
+  return !kind || kind === CanvasV2NodeKind.Do || kind === CanvasV2NodeKind.When
 }

@@ -82,6 +82,30 @@ def _node_script():
                 ElseIf: "elseIf",
                 Else: "else",
               },
+              CanvasV2Schema: {
+                Canvas: "agentcanvas.canvas.v2",
+              },
+              CanvasV2NodeKind: {
+                When: "When",
+                Do: "Do",
+                Decision: "Decision",
+                Loop: "Loop",
+                Parallel: "Parallel",
+                Join: "Join",
+                Wait: "Wait",
+                SubFlow: "SubFlow",
+                End: "End",
+              },
+              CanvasV2EdgeKind: {
+                Normal: "normal",
+                Branch: "branch",
+                LoopBody: "loop_body",
+                LoopBack: "loop_back",
+                LoopExit: "loop_exit",
+                Parallel: "parallel",
+                Error: "error",
+                Async: "async",
+              },
               FlowNodeKind: {
                 Step: "step",
                 Branch: "branch",
@@ -125,8 +149,12 @@ def _node_script():
         vm.createContext(context);
         vm.runInContext(compiled, context, { filename: apiPath });
         const normalizeCanvasPayload = localModule.exports.normalizeCanvasPayload;
+        const normalizeCanvasResponse = localModule.exports.normalizeCanvasResponse;
         if (typeof normalizeCanvasPayload !== "function") {
           throw new Error("normalizeCanvasPayload was not exported");
+        }
+        if (typeof normalizeCanvasResponse !== "function") {
+          throw new Error("normalizeCanvasResponse was not exported");
         }
 
         const input = JSON.parse(fs.readFileSync(0, "utf8"));
@@ -136,6 +164,37 @@ def _node_script():
           if (!model.appName) throw new Error(`${item.name}: missing appName`);
           if (!Array.isArray(model.journeys) || model.journeys.length === 0) {
             throw new Error(`${item.name}: missing journeys`);
+          }
+          const displayKinds = new Set();
+          let subFlowRef = null;
+          function visit(nodes) {
+            for (const node of nodes || []) {
+              if (node.native?.nodeKind) displayKinds.add(node.native.nodeKind);
+              if (node.native?.flowRef) subFlowRef = node.native.flowRef;
+              if (node.then) visit(node.then);
+              if (node.otherwise) visit(node.otherwise);
+            }
+          }
+          for (const journey of model.journeys) visit(journey.nodes);
+          const response = normalizeCanvasResponse(item.payload);
+          if (response.revision !== item.payload.revision) {
+            throw new Error(`${item.name}: revision was not preserved`);
+          }
+          if (!response.canvasV2 || response.canvasV2.schema !== "agentcanvas.canvas.v2") {
+            throw new Error(`${item.name}: canvas_v2 was not preserved`);
+          }
+          const kinds = new Set();
+          for (const flow of response.canvasV2.flows) {
+            for (const node of flow.nodes) kinds.add(node.kind);
+          }
+          if (item.name === "all_node_kinds.json") {
+            for (const expected of ["When", "Do", "Decision", "Loop", "Parallel", "Join", "Wait", "SubFlow", "End"]) {
+              if (!kinds.has(expected)) throw new Error(`${item.name}: missing v2 kind ${expected}`);
+              if (!displayKinds.has(expected)) throw new Error(`${item.name}: missing display native kind ${expected}`);
+            }
+            if (subFlowRef !== "flow:receipt-follow-up") {
+              throw new Error(`${item.name}: SubFlow flowRef was not preserved`);
+            }
           }
           checked.push(item.name);
         }

@@ -218,6 +218,88 @@ class ServerContextTests(unittest.TestCase):
             self.assertEqual("agent-authored", payload["mapping"]["mode"])
             self.assertEqual(1, payload["mapping"]["flowCount"])
 
+    def test_canvas_api_v2_envelope_preserves_all_native_node_kinds(self):
+        fixture_path = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "canvas_v2"
+            / "all_node_kinds.json"
+        )
+        with fixture_path.open(encoding="utf-8") as handle:
+            canvas_v2 = json.load(handle)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps(canvas_v2),
+            )
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/canvas?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            payload = fake.response["payload"]
+            self.assertEqual("agentcanvas.behavior_canvas_response.v1", payload["schema"])
+            self.assertEqual(canvas_v2["revision"], payload["revision"])
+            self.assertEqual(canvas_v2, payload["canvas_v2"])
+            self.assertFalse(payload["canvas"]["isDemo"])
+            self.assertEqual("agent-authored", payload["mapping"]["mode"])
+            self.assertFalse(payload["mapping"]["demoFallback"])
+            self.assertFalse(payload["mapping"]["source"]["isFallback"])
+            self.assertEqual("agent-authored", payload["mapping"]["source"]["kind"])
+
+            raw_kinds = {
+                node["kind"]
+                for flow in payload["canvas_v2"]["flows"]
+                for node in flow["nodes"]
+            }
+            self.assertEqual(
+                {"When", "Do", "Decision", "Loop", "Parallel", "Join", "Wait", "SubFlow", "End"},
+                raw_kinds,
+            )
+
+            display_native_by_kind = {}
+            display_native_by_node = {}
+
+            def visit(nodes):
+                for node in nodes:
+                    native = node.get("native") or {}
+                    if native.get("nodeKind"):
+                        display_native_by_kind.setdefault(native["nodeKind"], native)
+                    if native.get("nodeId"):
+                        display_native_by_node[native["nodeId"]] = native
+                    visit(node.get("then") or [])
+                    visit(node.get("otherwise") or [])
+
+            for journey in payload["canvas"]["journeys"]:
+                visit(journey["nodes"])
+
+            self.assertEqual(raw_kinds, set(display_native_by_kind))
+            all_flow_nodes = {
+                node["id"]
+                for flow in payload["canvas_v2"]["flows"]
+                if flow["id"] == "flow:all-node-kinds"
+                for node in flow["nodes"]
+            }
+            self.assertTrue(all_flow_nodes.issubset(display_native_by_node))
+            for node_id in all_flow_nodes:
+                native = display_native_by_node[node_id]
+                self.assertEqual("agentcanvas.canvas.v2", native["schema"])
+                self.assertEqual("flow:all-node-kinds", native["flowId"])
+            self.assertEqual(
+                "flow:receipt-follow-up",
+                display_native_by_node["n:all:subflow"]["flowRef"],
+            )
+
     def test_demo_context_uses_workspace_name(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "agentcanvas-demo"

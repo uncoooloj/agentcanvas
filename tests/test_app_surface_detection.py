@@ -182,6 +182,47 @@ class AppSurfaceDetectionTests(unittest.TestCase):
         self.assertEqual("app", profile["kind"])
         self.assertEqual("app", profile["product_language"]["singular"])
 
+    def test_infers_next_app_profile_when_web_workspace_has_api_routes(self):
+        profile = infer_workspace_profile(
+            {
+                "workspace": {"name": "trybreak"},
+                "summary": {"routes": 5},
+                "app_surfaces": [
+                    {
+                        "id": "app:root",
+                        "name": "root",
+                        "type": "web",
+                        "root": ".",
+                        "manifest_paths": ["package.json"],
+                    },
+                    {
+                        "id": "app:editor",
+                        "name": "editor",
+                        "type": "web",
+                        "root": "vendor/pascal-editor/apps/editor",
+                        "manifest_paths": ["vendor/pascal-editor/apps/editor/package.json"],
+                    },
+                    {
+                        "id": "app:bridge",
+                        "name": "bridge",
+                        "type": "package",
+                        "root": "packages/pascal-editor-bridge",
+                        "manifest_paths": ["packages/pascal-editor-bridge/package.json"],
+                    },
+                ],
+            },
+            files=[
+                "package.json",
+                "src/app/api/generate-scene/route.ts",
+                "src/app/create/page.tsx",
+                "src/components/AppShell.tsx",
+            ],
+        )
+
+        self.assertEqual("app", profile["kind"])
+        self.assertEqual("flow", profile["product_language"]["entry_noun"])
+        self.assertIn("backend:embedded-routes", profile["confidence"]["signals"])
+
     def test_infers_backend_workspace_profile_from_routes_and_surface(self):
         profile = infer_workspace_profile(
             {

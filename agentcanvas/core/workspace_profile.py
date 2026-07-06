@@ -271,16 +271,22 @@ def _score_api_backend(
 ) -> None:
     routes = int(summary.get("routes") or 0)
     surface_types = {str(surface.get("type") or "") for surface in surfaces if surface.get("type")}
+    app_only_surfaces = bool(surface_types.intersection({"mobile", "web"})) and not surface_types.intersection({"backend"})
     if routes:
-        scores["api_backend"] += min(5, 2 + routes)
-        signals.append("backend:routes")
+        if app_only_surfaces:
+            scores["api_backend"] += 1
+            signals.append("backend:embedded-routes")
+        else:
+            scores["api_backend"] += min(5, 2 + routes)
+            signals.append("backend:routes")
     if surface_types and surface_types.issubset({"backend", "package"}) and "backend" in surface_types:
         scores["api_backend"] += 5
         signals.append("backend:surface")
     path_text = " ".join(paths).lower()
     if _contains_any(path_text, ["/api/", "/server/", "/backend/", "/services/"]):
-        scores["api_backend"] += 2
-        signals.append("backend:path")
+        if not (app_only_surfaces and not _contains_any(path_text, ["/server/", "/backend/", "/services/"])):
+            scores["api_backend"] += 2
+            signals.append("backend:path")
     if _contains_any(text.lower(), ["fastapi", "django", "flask", "express", "nestjs", "gin-gonic", "laravel", "rails"]):
         scores["api_backend"] += 2
         signals.append("backend:framework")

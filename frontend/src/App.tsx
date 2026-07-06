@@ -69,6 +69,7 @@ import {
 
 const HOME = "__home__"
 const AUTH_EXPIRED_NOTICE = "This AgentCanvas link cannot sync anymore. Reopen AgentCanvas from your agent to keep this map live."
+const ONBOARDING_MAJOR_VERSION = "1"
 const MAPPING_STAGES = [
   "Reading project",
   "Finding where work starts",
@@ -141,6 +142,7 @@ export default function App() {
   const [mapHealth, setMapHealth] = useState<MapHealth | null>(null)
   const [canvasV2, setCanvasV2] = useState<CanvasV2Document | null>(null)
   const [authNotice, setAuthNotice] = useState<string | null>(null)
+  const [onboardingVisible, setOnboardingVisible] = useState(false)
   const canvasSignatureRef = useRef<string | null>(null)
   const canvasRevisionRef = useRef<number | null>(null)
   const pollBlockedRef = useRef(false)
@@ -532,6 +534,31 @@ export default function App() {
     !model.isDemo &&
     !context.isDemo &&
     !loading
+  const onboardingKey = useMemo(
+    () => onboardingStorageKey(context.workspacePath || context.workspace || "unknown"),
+    [context.workspace, context.workspacePath]
+  )
+
+  useEffect(() => {
+    if (contextLoading || context.mode !== AppContextMode.Workspace || !context.workspacePath) {
+      setOnboardingVisible(false)
+      return
+    }
+    try {
+      setOnboardingVisible(window.localStorage.getItem(onboardingKey) !== "dismissed")
+    } catch {
+      setOnboardingVisible(false)
+    }
+  }, [context.mode, context.workspacePath, contextLoading, onboardingKey])
+
+  function dismissOnboarding() {
+    try {
+      window.localStorage.setItem(onboardingKey, "dismissed")
+    } catch {
+      // localStorage may be blocked; the in-memory dismissal still keeps this session quiet.
+    }
+    setOnboardingVisible(false)
+  }
 
   if (landing) {
     return <LandingPage onEnterApp={appAvailable ? () => go("/") : undefined} />
@@ -648,6 +675,9 @@ export default function App() {
           ) : !model.isDemo && canvasState.kind === CanvasStateKind.Ready && canvasState.notice ? (
             <WorkspaceNotice message={canvasState.notice} />
           ) : null}
+          {onboardingVisible && !model.isDemo && !context.isDemo && (
+            <FirstRunTour workspaceName={context.workspace || model.appName} onDismiss={dismissOnboarding} />
+          )}
           {workspaceState ? (
             <WorkspaceMappingState
               kind={workspaceState.kind}
@@ -727,6 +757,40 @@ export default function App() {
         </div>
       </div>
     </div>
+  )
+}
+
+function onboardingStorageKey(workspaceKey: string): string {
+  return `agentcanvas:onboarding:v${ONBOARDING_MAJOR_VERSION}:${hashWorkspaceKey(workspaceKey)}`
+}
+
+function hashWorkspaceKey(value: string): string {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+function FirstRunTour({ workspaceName, onDismiss }: { workspaceName: string; onDismiss: () => void }) {
+  return (
+    <section className="border-b bg-clay/5 px-4 py-3">
+      <div className="mx-auto flex max-w-5xl items-start gap-3">
+        <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-clay text-white">
+          <Sparkles className="size-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-foreground">AgentCanvas is ready for {workspaceName}.</p>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            Review the flows, change the map in plain English, and keep this page open while your agent works through requests.
+          </p>
+        </div>
+        <Button variant="ghost" size="icon" onClick={onDismiss} aria-label="Dismiss first-run tour" className="shrink-0">
+          <X className="size-4" />
+        </Button>
+      </div>
+    </section>
   )
 }
 

@@ -167,6 +167,19 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("resumePrompt(fallbackPrompt, liveProgress)", state)
         self.assertIn("`.agentcanvas/progress.json`", state)
 
+    def test_first_run_tour_is_scoped_to_workspace_and_major_version(self):
+        app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+
+        self.assertIn('const ONBOARDING_MAJOR_VERSION = "1"', app)
+        self.assertIn("function onboardingStorageKey", app)
+        self.assertIn("hashWorkspaceKey(workspaceKey)", app)
+        self.assertIn("context.mode !== AppContextMode.Workspace", app)
+        self.assertIn("context.workspacePath", app)
+        self.assertIn("window.localStorage.getItem(onboardingKey)", app)
+        self.assertIn("window.localStorage.setItem(onboardingKey, \"dismissed\")", app)
+        self.assertIn("FirstRunTour", app)
+        self.assertIn("Dismiss first-run tour", app)
+
 
 if __name__ == "__main__":
     unittest.main()

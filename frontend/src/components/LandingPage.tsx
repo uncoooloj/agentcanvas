@@ -403,18 +403,18 @@ function DemoFrame({ step }: { step: number }) {
               <p className="text-sm font-medium">Placing an order</p>
               <p className="mb-4 text-xs text-muted-foreground">What happens when someone checks out</p>
               <div className="space-y-2.5">
-                <HeroRow tone="when" label="When" text="Someone places an order" />
-                <HeroRow tone="act" label="Do" text="Check the items are in stock" />
+                <HeroRow tone={HeroRowTone.When} label="When" text="Someone places an order" />
+                <HeroRow tone={HeroRowTone.Act} label="Do" text="Check the items are in stock" />
                 <div className="flex justify-center py-0.5">
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-rule-bg px-3 py-1 text-xs font-medium text-rule-fg">
                     <GitBranch className="size-3" /> If everything is in stock
                   </span>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Lane tone="yes" label="If yes">
-                    <HeroRow tone="act" label="Do" text="Work out the total" compact />
+                  <Lane tone={LandingLaneTone.Yes} label="If yes">
+                    <HeroRow tone={HeroRowTone.Act} label="Do" text="Work out the total" compact />
                     <HeroRow
-                      tone="act"
+                      tone={HeroRowTone.Act}
                       label="Do"
                       text="Charge their card"
                       compact
@@ -429,14 +429,14 @@ function DemoFrame({ step }: { step: number }) {
                     >
                       <div className="overflow-hidden">
                         <div className="pt-2">
-                          <HeroRow tone="act" label="Do" text="Text them the delivery date" compact fresh />
+                          <HeroRow tone={HeroRowTone.Act} label="Do" text="Text them the delivery date" compact fresh />
                         </div>
                       </div>
                     </div>
                   </Lane>
-                  <Lane tone="no" label="Otherwise">
-                    <HeroRow tone="act" label="Do" text="Tell them what's sold out" compact />
-                    <HeroRow tone="act" label="Do" text="Save their cart for later" compact />
+                  <Lane tone={LandingLaneTone.No} label="Otherwise">
+                    <HeroRow tone={HeroRowTone.Act} label="Do" text="Tell them what's sold out" compact />
+                    <HeroRow tone={HeroRowTone.Act} label="Do" text="Save their cart for later" compact />
                   </Lane>
                 </div>
               </div>
@@ -495,22 +495,32 @@ function DemoFrame({ step }: { step: number }) {
   )
 }
 
-function Lane({ tone, label, children }: { tone: "yes" | "no"; label: string; children: ReactNode }) {
+enum LandingLaneTone {
+  Yes = "yes",
+  No = "no",
+}
+
+enum HeroRowTone {
+  When = "when",
+  Act = "act",
+}
+
+function Lane({ tone, label, children }: { tone: LandingLaneTone; label: string; children: ReactNode }) {
   return (
     <div
       className={cn(
         "rounded-xl border border-dashed p-2.5",
-        tone === "yes" ? "border-act-accent/40 bg-act-bg/20" : "border-border bg-secondary/30"
+        tone === LandingLaneTone.Yes ? "border-act-accent/40 bg-act-bg/20" : "border-border bg-secondary/30"
       )}
     >
       <div className="mb-2 flex items-center gap-1.5 px-0.5">
         <span
           className={cn(
             "flex size-3.5 items-center justify-center rounded-full text-white",
-            tone === "yes" ? "bg-act-accent" : "bg-muted-foreground"
+            tone === LandingLaneTone.Yes ? "bg-act-accent" : "bg-muted-foreground"
           )}
         >
-          {tone === "yes" ? <Check className="size-2.5" /> : <X className="size-2.5" />}
+          {tone === LandingLaneTone.Yes ? <Check className="size-2.5" /> : <X className="size-2.5" />}
         </span>
         <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
       </div>
@@ -536,7 +546,7 @@ function HeroRow({
   cursor,
   fresh,
 }: {
-  tone: "when" | "act"
+  tone: HeroRowTone
   label: string
   text: string
   compact?: boolean
@@ -556,10 +566,10 @@ function HeroRow({
       <span
         className={cn(
           "flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-          tone === "when" ? "bg-when-bg text-when-fg" : "bg-act-bg text-act-fg"
+          tone === HeroRowTone.When ? "bg-when-bg text-when-fg" : "bg-act-bg text-act-fg"
         )}
       >
-        {tone === "when" ? <Zap className="size-3" /> : <Play className="size-3" />}
+        {tone === HeroRowTone.When ? <Zap className="size-3" /> : <Play className="size-3" />}
         {label}
       </span>
       <span className="min-w-0 truncate text-[13px]">{text}</span>

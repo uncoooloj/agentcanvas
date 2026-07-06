@@ -1,5 +1,11 @@
 import { useState, useEffect } from "react"
 
+export enum AppContextMode {
+  Landing = "landing",
+  Workspace = "workspace",
+  Demo = "demo",
+}
+
 export type AppContext = {
   workspace: string
   workspacePath: string
@@ -8,7 +14,7 @@ export type AppContext = {
   productLanguage?: ProductLanguage
   assistant: string
   assistantId: string
-  mode?: "landing" | "workspace" | "demo"
+  mode?: AppContextMode
   isDemo?: boolean
   isDemoContent?: boolean
   demoFallback?: boolean
@@ -45,7 +51,7 @@ const DEMO_CONTEXT: AppContext = {
   productLanguage: { singular: "project", workspace_noun: "project", entry_noun: "flow" },
   assistant: "Your assistant",
   assistantId: "generic",
-  mode: "landing",
+  mode: AppContextMode.Landing,
   isDemo: false,
   isDemoContent: false,
   demoFallback: false,
@@ -58,7 +64,7 @@ const DEMO_FALLBACK: AppContext = {
   productLanguage: { singular: "app", workspace_noun: "app", entry_noun: "flow" },
   assistant: "Claude Code",
   assistantId: "claude-code",
-  mode: "demo",
+  mode: AppContextMode.Demo,
   isDemo: true,
   isDemoContent: true,
   demoFallback: false,
@@ -79,8 +85,8 @@ export async function fetchAppContext(): Promise<AppContext> {
     if (!res.ok) throw new Error(`${res.status}`)
     const data = (await res.json()) as { ok: boolean; context: AppContext }
     // ?demo=1 always enters demo mode, even if the server didn't say so.
-    if (demo && data.context.mode !== "demo") {
-      return { ...data.context, mode: "demo", isDemo: true, isDemoContent: true, demoFallback: false }
+    if (demo && data.context.mode !== AppContextMode.Demo) {
+      return { ...data.context, mode: AppContextMode.Demo, isDemo: true, isDemoContent: true, demoFallback: false }
     }
     return data.context
   } catch {

@@ -1,6 +1,9 @@
 import {
+  CanvasStepKind,
+  FlowNodeKind,
   MappingStageStatus,
   PendingStatus,
+  StepRole,
   type AppModel,
   type BranchNode,
   type CanvasMapping,
@@ -325,7 +328,7 @@ function normalizeExistingJourney(value: unknown): Journey | null {
   if (!nodes.length) return null
 
   const title = stringValue(journey.title) || "Workspace flow"
-  const firstWhen = nodes.find((node): node is StepNode => node.kind === "step" && node.role === "when")
+  const firstWhen = nodes.find((node): node is StepNode => node.kind === FlowNodeKind.Step && node.role === StepRole.When)
   return {
     id: stringValue(journey.id) || slug(title, "journey"),
     title,
@@ -356,7 +359,7 @@ function normalizeCanvasJourney(value: unknown): Journey | null {
 
   const metadata = recordValue(journey.metadata)
   const title = stringValue(journey.title) || stringValue(metadata?.title) || "Workspace flow"
-  const firstWhen = nodes.find((node): node is StepNode => node.kind === "step" && node.role === "when")
+  const firstWhen = nodes.find((node): node is StepNode => node.kind === FlowNodeKind.Step && node.role === StepRole.When)
   return {
     id: stringValue(journey.id) || slug(title, "journey"),
     title,
@@ -378,25 +381,25 @@ function canvasStepsToFlow(value: unknown): FlowNode[] {
     const step = steps[index]
     const kind = canvasStepKind(step?.kind)
 
-    if (kind === "if") {
+    if (kind === CanvasStepKind.If) {
       const chain = [step]
       while (index + 1 < steps.length) {
         const next = steps[index + 1]
         const nextKind = canvasStepKind(next?.kind)
-        if (nextKind !== "elseIf" && nextKind !== "else") break
+        if (nextKind !== CanvasStepKind.ElseIf && nextKind !== CanvasStepKind.Else) break
         chain.push(next)
         index += 1
-        if (nextKind === "else") break
+        if (nextKind === CanvasStepKind.Else) break
       }
       nodes.push(branchFromCanvasChain(chain))
       continue
     }
 
-    if (kind === "elseIf" || kind === "else") {
+    if (kind === CanvasStepKind.ElseIf || kind === CanvasStepKind.Else) {
       continue
     }
 
-    nodes.push(stepFromCanvas(step, kind === "when" ? "when" : "do"))
+    nodes.push(stepFromCanvas(step, kind === CanvasStepKind.When ? StepRole.When : StepRole.Do))
   }
 
   return nodes
@@ -409,14 +412,14 @@ function branchFromCanvasChain(chain: Array<Record<string, unknown> | undefined>
   const refs = refsFromCanvasStep(head)
 
   return {
-    kind: "branch",
-    id: stepId(head, "branch"),
+    kind: FlowNodeKind.Branch,
+    id: stepId(head, FlowNodeKind.Branch),
     condition: conditionText(head),
     then: canvasStepsToFlow(head?.steps),
     otherwise:
-      nextKind === "elseIf"
+      nextKind === CanvasStepKind.ElseIf
         ? [branchFromCanvasChain(rest)]
-        : nextKind === "else"
+        : nextKind === CanvasStepKind.Else
           ? canvasStepsToFlow(next?.steps)
           : [],
     uncertain: isUncertain(head),
@@ -424,13 +427,13 @@ function branchFromCanvasChain(chain: Array<Record<string, unknown> | undefined>
   }
 }
 
-function stepFromCanvas(step: Record<string, unknown> | undefined, role: "when" | "do"): StepNode {
+function stepFromCanvas(step: Record<string, unknown> | undefined, role: StepRole): StepNode {
   const refs = refsFromCanvasStep(step)
   return {
-    kind: "step",
+    kind: FlowNodeKind.Step,
     id: stepId(step, role),
     role,
-    text: stringValue(step?.text) || stringValue(step?.label) || (role === "when" ? "Someone uses this flow" : "Do the mapped step"),
+    text: stringValue(step?.text) || stringValue(step?.label) || (role === StepRole.When ? "Someone uses this flow" : "Do the mapped step"),
     uncertain: isUncertain(step),
     tech: refs.length ? { refs } : undefined,
   }
@@ -439,7 +442,7 @@ function stepFromCanvas(step: Record<string, unknown> | undefined, role: "when" 
 function normalizeFlowNode(value: unknown): FlowNode | null {
   const node = recordValue(value)
   if (!node) return null
-  if (node.kind === "branch") {
+  if (node.kind === FlowNodeKind.Branch) {
     const thenNodes = (Array.isArray(node.then) ? node.then : [])
       .map(normalizeFlowNode)
       .filter((child): child is FlowNode => Boolean(child))
@@ -447,8 +450,8 @@ function normalizeFlowNode(value: unknown): FlowNode | null {
       .map(normalizeFlowNode)
       .filter((child): child is FlowNode => Boolean(child))
     return {
-      kind: "branch",
-      id: stringValue(node.id) || slug(stringValue(node.condition) || "branch", "branch"),
+      kind: FlowNodeKind.Branch,
+      id: stringValue(node.id) || slug(stringValue(node.condition) || FlowNodeKind.Branch, FlowNodeKind.Branch),
       condition: stringValue(node.condition) || "mapped condition",
       then: thenNodes,
       otherwise: otherwiseNodes,
@@ -456,10 +459,10 @@ function normalizeFlowNode(value: unknown): FlowNode | null {
       tech: normalizeTech(node.tech),
     }
   }
-  if (node.kind === "step") {
-    const role = node.role === "when" ? "when" : "do"
+  if (node.kind === FlowNodeKind.Step) {
+    const role = node.role === StepRole.When ? StepRole.When : StepRole.Do
     return {
-      kind: "step",
+      kind: FlowNodeKind.Step,
       id: stringValue(node.id) || slug(stringValue(node.text) || role, role),
       role,
       text: stringValue(node.text) || "Mapped step",
@@ -479,13 +482,13 @@ function normalizeTech(value: unknown): { nodeId?: string; refs: string[] } | un
   return { nodeId: stringValue(tech.nodeId), refs }
 }
 
-function canvasStepKind(value: unknown): "when" | "do" | "if" | "elseIf" | "else" {
+function canvasStepKind(value: unknown): CanvasStepKind {
   const normalized = String(value || "Do").replace(/[_-]+/g, "").toLowerCase()
-  if (normalized === "when") return "when"
-  if (normalized === "if") return "if"
-  if (normalized === "elseif" || normalized === "elif") return "elseIf"
-  if (normalized === "else") return "else"
-  return "do"
+  if (normalized === "when") return CanvasStepKind.When
+  if (normalized === "if") return CanvasStepKind.If
+  if (normalized === "elseif" || normalized === "elif") return CanvasStepKind.ElseIf
+  if (normalized === "else") return CanvasStepKind.Else
+  return CanvasStepKind.Do
 }
 
 function stepId(step: Record<string, unknown> | undefined, fallback: string): string {

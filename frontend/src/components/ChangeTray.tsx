@@ -1,6 +1,6 @@
 import { Pencil, Plus, Send, Trash2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { HandoffPhase, useChanges, type ChangeEntry, type ChangeKind } from "@/lib/changeset"
+import { ChangeKind, HandoffPhase, useChanges, type ChangeEntry } from "@/lib/changeset"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
@@ -13,17 +13,17 @@ interface KindConfig {
 }
 
 const KIND_CONFIG: Record<ChangeKind, KindConfig> = {
-  new: {
+  [ChangeKind.New]: {
     label: "New",
     className: "bg-act-bg text-act-fg",
     Icon: Plus,
   },
-  edited: {
+  [ChangeKind.Edited]: {
     label: "Edited",
     className: "bg-when-bg text-when-fg",
     Icon: Pencil,
   },
-  removing: {
+  [ChangeKind.Removing]: {
     label: "Removing",
     className: "bg-destructive/10 text-destructive",
     Icon: Trash2,
@@ -79,7 +79,7 @@ export function ChangeTray({ onSelectChange, onModifyChange }: Props) {
         <ul className="flex flex-col gap-0.5 px-3 py-2">
           {changes.map((entry) => {
             const cfg = KIND_CONFIG[entry.kind]
-            const isRemoving = entry.kind === "removing"
+            const isRemoving = entry.kind === ChangeKind.Removing
 
             return (
               <li

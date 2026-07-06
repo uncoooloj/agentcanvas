@@ -319,6 +319,7 @@ class AgentCanvasBehaviorRegressionTests(unittest.TestCase):
                 [
                     str(tsc),
                     str(FRONTEND_ROOT / "src" / "lib" / "behavioral.ts"),
+                    str(FRONTEND_ROOT / "src" / "lib" / "types.ts"),
                     "--outDir",
                     str(compiled),
                     "--module",
@@ -342,6 +343,9 @@ class AgentCanvasBehaviorRegressionTests(unittest.TestCase):
                 0,
                 completed.stdout + completed.stderr,
             )
+            types_js = compiled / "types.js"
+            if types_js.is_file():
+                shutil.copyfile(types_js, compiled / "types")
 
             graph_path = temp / "graph.json"
             graph_path.write_text(json.dumps(graph), encoding="utf-8")

@@ -75,12 +75,27 @@ def _node_script():
         const localRequire = (id) => {
           if (id === "./types") {
             return {
+              CanvasStepKind: {
+                When: "when",
+                Do: "do",
+                If: "if",
+                ElseIf: "elseIf",
+                Else: "else",
+              },
+              FlowNodeKind: {
+                Step: "step",
+                Branch: "branch",
+              },
               MappingStageStatus: {
                 Pending: "pending",
                 Active: "active",
                 Done: "done",
                 Ready: "ready",
                 Error: "error",
+              },
+              StepRole: {
+                When: "when",
+                Do: "do",
               },
               PendingStatus: {
                 Pending: "pending",

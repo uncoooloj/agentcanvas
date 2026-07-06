@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { BrandMark } from "@/components/BrandMark"
-import { FlowColumn, type FlowAction } from "@/components/FlowCanvas"
+import { FlowColumn } from "@/components/FlowCanvas"
 import { Overview } from "@/components/Overview"
 import { Inspector } from "@/components/Inspector"
 import { Provenance } from "@/components/Provenance"
@@ -35,11 +35,15 @@ import {
   type HandoffItem,
 } from "@/lib/changeset"
 import { ApiError, fetchCanvas, reindexCanvas } from "@/lib/api"
-import { useAppContext, type AppContext } from "@/lib/appcontext"
+import { AppContextMode, useAppContext, type AppContext } from "@/lib/appcontext"
 import type { EditRequest, StagedEdit } from "@/lib/edits"
 import {
   CanvasStateKind,
+  CanvasMappingMode,
   CanvasSourceKind,
+  CanvasSourceTone,
+  CopyState,
+  FlowAction,
   JourneyActivity,
   findNode,
   type AppModel,
@@ -80,6 +84,12 @@ type MapRefreshAction = {
   title: string
   detail: string
   prompt: string
+}
+
+enum MapInstructionKind {
+  Refresh = "refresh",
+  Starter = "starter",
+  Author = "author",
 }
 
 export default function App() {
@@ -164,7 +174,7 @@ export default function App() {
     // Demo mode shows the curated, hand-authored flows (great first impression);
     // the heuristic projection over real code isn't good enough to lead with yet.
     // Edits still write real pending requests via /api/changes.
-    if (context.mode === "demo") {
+    if (context.mode === AppContextMode.Demo) {
       setModel((current) => preserveLocalJourneyRecency(DEMO_MODEL, current))
       setSelectedId(null)
       setCanvasState({ kind: CanvasStateKind.Ready })
@@ -213,13 +223,13 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (contextLoading || context.mode === "landing") return
+    if (contextLoading || context.mode === AppContextMode.Landing) return
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contextLoading, context.mode])
 
   useEffect(() => {
-    if (contextLoading || context.mode !== "workspace" || onWelcome) return
+    if (contextLoading || context.mode !== AppContextMode.Workspace || onWelcome) return
 
     let cancelled = false
     let inFlight = false
@@ -369,9 +379,9 @@ export default function App() {
   }
 
   const inJourney = view !== HOME && !!activeJourney
-  const appAvailable = !contextLoading && context.mode !== "landing"
+  const appAvailable = !contextLoading && context.mode !== AppContextMode.Landing
   const landing =
-    onWelcome || (!hasRuntimeLaunchContext && contextLoading) || (!contextLoading && context.mode === "landing")
+    onWelcome || (!hasRuntimeLaunchContext && contextLoading) || (!contextLoading && context.mode === AppContextMode.Landing)
   const loading = mappingActive
   const workspaceState =
     canvasState.kind === CanvasStateKind.Loading ||
@@ -572,11 +582,11 @@ function mappingNotice(mapping?: CanvasMapping): string | undefined {
 }
 
 function isStarterMap(mapping?: CanvasMapping): boolean {
-  return isHeuristicMap(mapping) && mapping?.primaryMode === "llm-assisted"
+  return isHeuristicMap(mapping) && mapping?.primaryMode === CanvasMappingMode.LlmAssisted
 }
 
 function isUnreadyMap(mapping?: CanvasMapping): boolean {
-  return Boolean(mapping?.empty || mapping?.source?.isEmpty || mapping?.mode === "empty" || isStarterMap(mapping))
+  return Boolean(mapping?.empty || mapping?.source?.isEmpty || mapping?.mode === CanvasMappingMode.Empty || isStarterMap(mapping))
 }
 
 function unreadyMapTitle(result: WorkspaceModelResult): string {
@@ -642,7 +652,7 @@ function describeMapRefreshAction(
     return {
       title: "This saved map may be out of date",
       detail: "Refresh to check the project now, or ask your assistant to update the saved map.",
-      prompt: mapInstructionPrompt("refresh", workspace),
+      prompt: mapInstructionPrompt(MapInstructionKind.Refresh, workspace),
     }
   }
 
@@ -650,7 +660,7 @@ function describeMapRefreshAction(
     return {
       title: "Starter map needs review",
       detail: "Refresh to check for a newer map, or ask your assistant to rewrite this in plain English.",
-      prompt: mapInstructionPrompt("starter", workspace),
+      prompt: mapInstructionPrompt(MapInstructionKind.Starter, workspace),
     }
   }
 
@@ -658,18 +668,18 @@ function describeMapRefreshAction(
     return {
       title: "No plain-English map yet",
       detail: "Refresh to check again, or ask your assistant to make the first map.",
-      prompt: mapInstructionPrompt("author", workspace),
+      prompt: mapInstructionPrompt(MapInstructionKind.Author, workspace),
     }
   }
 
   return null
 }
 
-function mapInstructionPrompt(kind: "refresh" | "starter" | "author", workspace: string): string {
+function mapInstructionPrompt(kind: MapInstructionKind, workspace: string): string {
   const opening =
-    kind === "refresh"
+    kind === MapInstructionKind.Refresh
       ? `Please refresh the AgentCanvas map for ${workspace}.`
-      : kind === "starter"
+      : kind === MapInstructionKind.Starter
         ? `Please turn the AgentCanvas starter view for ${workspace} into a clear plain-English map.`
         : `Please make an AgentCanvas map for ${workspace}.`
 
@@ -699,24 +709,30 @@ function describeCanvasSource(
   const sourceKind = source?.kind || mapping?.mode
   const flowCount = source?.flowCount ?? mapping?.flowCount ?? model.journeys.length
 
-  if (sourceKind === "demo-fallback" || mapping?.demoFallback || context.demoFallback) {
+  if (sourceKind === CanvasSourceKind.DemoFallback || mapping?.demoFallback || context.demoFallback) {
     return {
       kind: CanvasSourceKind.DemoFallback,
       label: "Example map",
       shortLabel: "Example",
       detail: "This is sample content because no project was connected yet.",
-      tone: "info",
+      tone: CanvasSourceTone.Info,
       flowCount,
     }
   }
 
-  if (model.isDemo || context.isDemo || context.isDemoContent || context.mode === "demo" || sourceKind === "demo") {
+  if (
+    model.isDemo ||
+    context.isDemo ||
+    context.isDemoContent ||
+    context.mode === AppContextMode.Demo ||
+    sourceKind === CanvasSourceKind.Demo
+  ) {
     return {
       kind: CanvasSourceKind.Demo,
       label: "Example project",
       shortLabel: "Example",
       detail: "You are looking at sample flows, not your own project.",
-      tone: "info",
+      tone: CanvasSourceTone.Info,
       flowCount,
     }
   }
@@ -727,7 +743,7 @@ function describeCanvasSource(
       label: state.kind === CanvasStateKind.Reindexing ? "Refreshing this project" : "Reading this project",
       shortLabel: state.kind === CanvasStateKind.Reindexing ? "Refreshing" : "Reading",
       detail: "AgentCanvas is looking through the project and preparing the map.",
-      tone: "info",
+      tone: CanvasSourceTone.Info,
       flowCount,
     }
   }
@@ -738,7 +754,7 @@ function describeCanvasSource(
       label: "Map not available",
       shortLabel: "Needs attention",
       detail: "AgentCanvas could not open this project's map.",
-      tone: "error",
+      tone: CanvasSourceTone.Error,
       flowCount,
     }
   }
@@ -749,7 +765,7 @@ function describeCanvasSource(
       label: "No map yet",
       shortLabel: "No map yet",
       detail: "AgentCanvas checked this project, but it does not have a clear plain-English map yet.",
-      tone: "warning",
+      tone: CanvasSourceTone.Warning,
       flowCount,
     }
   }
@@ -760,7 +776,7 @@ function describeCanvasSource(
       label: "Saved map may be out of date",
       shortLabel: "Saved copy",
       detail: "The project changed after this map was saved. Ask your assistant to refresh it if the behavior changed.",
-      tone: "warning",
+      tone: CanvasSourceTone.Warning,
       flowCount,
     }
   }
@@ -771,7 +787,7 @@ function describeCanvasSource(
       label: "Made by your assistant",
       shortLabel: "Assistant map",
       detail: "These flows come from a saved map your assistant wrote from the project.",
-      tone: "info",
+      tone: CanvasSourceTone.Info,
       flowCount,
     }
   }
@@ -782,7 +798,7 @@ function describeCanvasSource(
       label: "Rough first pass",
       shortLabel: "Starter map",
       detail: "AgentCanvas made a rough first pass from what it found. Treat it as a starting point until your assistant reviews it.",
-      tone: "warning",
+      tone: CanvasSourceTone.Warning,
       flowCount,
     }
   }
@@ -792,24 +808,24 @@ function describeCanvasSource(
     label: source?.label || "Saved project map",
     shortLabel: "Saved map",
     detail: "These flows come from the current map saved for this project.",
-    tone: "default",
+    tone: CanvasSourceTone.Default,
     flowCount,
   }
 }
 
 function isAgentAuthoredMap(mapping?: CanvasMapping): boolean {
   return (
-    mapping?.mode === CanvasSourceKind.AgentAuthored ||
-    mapping?.primaryMode === CanvasSourceKind.AgentAuthored ||
+    mapping?.mode === CanvasMappingMode.AgentAuthored ||
+    mapping?.primaryMode === CanvasMappingMode.AgentAuthored ||
     mapping?.source?.kind === CanvasSourceKind.AgentAuthored
   )
 }
 
 function isHeuristicMap(mapping?: CanvasMapping): boolean {
   return (
-    mapping?.mode === "heuristic" ||
-    mapping?.mode === CanvasSourceKind.HeuristicProjection ||
-    mapping?.mode === "deterministic" ||
+    mapping?.mode === CanvasMappingMode.Heuristic ||
+    mapping?.mode === CanvasMappingMode.HeuristicProjection ||
+    mapping?.mode === CanvasMappingMode.Deterministic ||
     mapping?.source?.kind === CanvasSourceKind.HeuristicProjection
   )
 }
@@ -863,15 +879,15 @@ function MapRefreshNotice({
   loading: boolean
   onRefresh: () => void
 }) {
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "manual">("idle")
+  const [copyState, setCopyState] = useState<CopyState>(CopyState.Idle)
 
   async function copyPrompt() {
     try {
       await navigator.clipboard.writeText(action.prompt)
-      setCopyState("copied")
-      window.setTimeout(() => setCopyState("idle"), 1600)
+      setCopyState(CopyState.Copied)
+      window.setTimeout(() => setCopyState(CopyState.Idle), 1600)
     } catch {
-      setCopyState("manual")
+      setCopyState(CopyState.Manual)
     }
   }
 
@@ -888,12 +904,12 @@ function MapRefreshNotice({
             Refresh map
           </Button>
           <Button type="button" variant="outline" size="sm" onClick={copyPrompt}>
-            {copyState === "copied" ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
-            {copyState === "copied" ? "Copied" : "Copy note for assistant"}
+            {copyState === CopyState.Copied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
+            {copyState === CopyState.Copied ? "Copied" : "Copy note for assistant"}
           </Button>
         </div>
       </div>
-      {copyState === "manual" && (
+      {copyState === CopyState.Manual && (
         <div className="mx-auto mt-2 max-w-6xl">
           <Input
             readOnly

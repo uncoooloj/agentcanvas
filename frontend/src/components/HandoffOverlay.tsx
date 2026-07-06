@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils"
 import { HandoffItemStatus, HandoffPhase, useChanges, type HandoffItem } from "@/lib/changeset"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { CanvasSourceTone, CopyState } from "@/lib/types"
 
 interface Props {
   onAcknowledge: () => void
@@ -43,8 +44,8 @@ export function HandoffOverlay({ onAcknowledge, onDismiss }: Props) {
         </div>
 
         <HandoffItemList items={items} />
-        {question && <StatusCallout tone="warning" message={question} />}
-        {error && <StatusCallout tone="error" message={error} />}
+        {question && <StatusCallout tone={CanvasSourceTone.Warning} message={question} />}
+        {error && <StatusCallout tone={CanvasSourceTone.Error} message={error} />}
 
         {prompt && <CopyPrompt prompt={prompt} />}
 
@@ -221,12 +222,12 @@ function HandoffItemList({ items }: { items: HandoffItem[] }) {
   )
 }
 
-function StatusCallout({ tone, message }: { tone: "warning" | "error"; message: string }) {
+function StatusCallout({ tone, message }: { tone: CanvasSourceTone.Warning | CanvasSourceTone.Error; message: string }) {
   return (
     <div
       className={cn(
         "mx-5 mb-4 rounded-md border px-3 py-2 text-xs",
-        tone === "error"
+        tone === CanvasSourceTone.Error
           ? "border-destructive/20 bg-destructive/10 text-destructive"
           : "border-when-accent/30 bg-when-bg text-when-fg"
       )}
@@ -237,14 +238,14 @@ function StatusCallout({ tone, message }: { tone: "warning" | "error"; message: 
 }
 
 function CopyPrompt({ prompt }: { prompt: string }) {
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "manual">("idle")
+  const [copyState, setCopyState] = useState<CopyState>(CopyState.Idle)
   async function copy() {
     try {
       await navigator.clipboard.writeText(prompt)
-      setCopyState("copied")
-      window.setTimeout(() => setCopyState("idle"), 1600)
+      setCopyState(CopyState.Copied)
+      window.setTimeout(() => setCopyState(CopyState.Idle), 1600)
     } catch {
-      setCopyState("manual")
+      setCopyState(CopyState.Manual)
     }
   }
 
@@ -253,11 +254,11 @@ function CopyPrompt({ prompt }: { prompt: string }) {
       <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
         <p className="text-xs font-medium text-muted-foreground">Copy fallback prompt</p>
         <Button variant="outline" size="sm" onClick={copy}>
-          {copyState === "copied" ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}
-          {copyState === "copied" ? "Copied" : "Copy"}
+          {copyState === CopyState.Copied ? <Check className="h-3.5 w-3.5" /> : <Clipboard className="h-3.5 w-3.5" />}
+          {copyState === CopyState.Copied ? "Copied" : "Copy"}
         </Button>
       </div>
-      {copyState === "manual" && (
+      {copyState === CopyState.Manual && (
         <p className="border-b px-3 py-2 text-xs text-muted-foreground">
           Clipboard blocked. The prompt below is selectable.
         </p>

@@ -3,7 +3,7 @@ import { AlertCircle, Check, Circle, Clipboard, Loader2, RefreshCw, Search, Spar
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
-import { CanvasStateKind, type CanvasSourceSummary } from "@/lib/types"
+import { CanvasSourceTone, CanvasStateKind, CopyState, type CanvasSourceSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const MAPPING_STAGES = [
@@ -78,9 +78,9 @@ export function WorkspaceMappingState({
               <p
                 className={cn(
                   "mt-3 inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
-                  source.tone === "warning"
+                  source.tone === CanvasSourceTone.Warning
                     ? "border-gold/30 bg-gold/10 text-foreground"
-                    : source.tone === "error"
+                    : source.tone === CanvasSourceTone.Error
                       ? "border-destructive/25 bg-destructive/10 text-destructive"
                       : "border-border bg-secondary/70 text-muted-foreground"
                 )}
@@ -150,15 +150,15 @@ export function WorkspaceMappingState({
 }
 
 function CopyMapPrompt({ prompt }: { prompt: string }) {
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "manual">("idle")
+  const [copyState, setCopyState] = useState<CopyState>(CopyState.Idle)
 
   async function copyPrompt() {
     try {
       await navigator.clipboard.writeText(prompt)
-      setCopyState("copied")
-      window.setTimeout(() => setCopyState("idle"), 1600)
+      setCopyState(CopyState.Copied)
+      window.setTimeout(() => setCopyState(CopyState.Idle), 1600)
     } catch {
-      setCopyState("manual")
+      setCopyState(CopyState.Manual)
     }
   }
 
@@ -170,10 +170,10 @@ function CopyMapPrompt({ prompt }: { prompt: string }) {
         className="w-full shrink-0 sm:w-auto"
         onClick={copyPrompt}
       >
-        {copyState === "copied" ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
-        {copyState === "copied" ? "Copied" : "Copy note for assistant"}
+        {copyState === CopyState.Copied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
+        {copyState === CopyState.Copied ? "Copied" : "Copy note for assistant"}
       </Button>
-      {copyState === "manual" && (
+      {copyState === CopyState.Manual && (
         <div className="mt-3 rounded-md border bg-secondary/30 p-3">
           <p className="text-xs font-medium text-muted-foreground">Clipboard blocked. Select this note.</p>
           <div className="mt-2 flex items-center gap-2">

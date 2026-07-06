@@ -1,8 +1,10 @@
 import { create } from "zustand"
 import { fetchPending, postChange, type ChangeRequest } from "./api"
-import type { FlowAction } from "@/components/FlowCanvas"
 import {
+  FlowAction,
+  FlowNodeKind,
   PendingStatus,
+  StepRole,
   type AppModel,
   type BranchNode,
   type FlowNode,
@@ -12,7 +14,11 @@ import {
 
 // ---- Change-set model ----
 
-export type ChangeKind = "new" | "edited" | "removing"
+export enum ChangeKind {
+  New = "new",
+  Edited = "edited",
+  Removing = "removing",
+}
 
 export interface ChangeEntry {
   id: string
@@ -71,21 +77,21 @@ export interface HandoffState {
 }
 
 export function kindForAction(action: FlowAction): ChangeKind {
-  if (action === "remove") return "removing"
-  if (action === "change" || action === "change_condition") return "edited"
-  return "new"
+  if (action === FlowAction.Remove) return ChangeKind.Removing
+  if (action === FlowAction.Change || action === FlowAction.ChangeCondition) return ChangeKind.Edited
+  return ChangeKind.New
 }
 
 const VERB: Record<ChangeKind, string> = {
-  new: "Adding",
-  edited: "Updating",
-  removing: "Removing",
+  [ChangeKind.New]: "Adding",
+  [ChangeKind.Edited]: "Updating",
+  [ChangeKind.Removing]: "Removing",
 }
 
 function summarize(changes: ChangeEntry[]): string {
-  const n = changes.filter((c) => c.kind === "new").length
-  const e = changes.filter((c) => c.kind === "edited").length
-  const r = changes.filter((c) => c.kind === "removing").length
+  const n = changes.filter((c) => c.kind === ChangeKind.New).length
+  const e = changes.filter((c) => c.kind === ChangeKind.Edited).length
+  const r = changes.filter((c) => c.kind === ChangeKind.Removing).length
   const parts: string[] = []
   if (n) parts.push(`added ${n} step${n === 1 ? "" : "s"}`)
   if (e) parts.push(`updated ${e}`)
@@ -441,11 +447,11 @@ export function applyChanges(model: AppModel, changes: ChangeEntry[]): AppModel 
 }
 
 function mkStep(text: string): StepNode {
-  return { kind: "step", id: newId(), role: "do", text }
+  return { kind: FlowNodeKind.Step, id: newId(), role: StepRole.Do, text }
 }
 function mkBranch(condition: string, thenText?: string): BranchNode {
   return {
-    kind: "branch",
+    kind: FlowNodeKind.Branch,
     id: newId(),
     condition,
     then: thenText ? [mkStep(thenText)] : [],
@@ -457,38 +463,38 @@ function applyToNodes(nodes: FlowNode[], c: ChangeEntry): FlowNode[] {
   const out: FlowNode[] = []
   for (const node of nodes) {
     if (node.id === c.targetNodeId) {
-      if (c.action === "remove") {
+      if (c.action === FlowAction.Remove) {
         continue // drop it
       }
-      if (c.action === "change" && node.kind === "step") {
+      if (c.action === FlowAction.Change && node.kind === FlowNodeKind.Step) {
         out.push({ ...node, text: c.text1 || node.text })
         continue
       }
-      if (c.action === "change_condition" && node.kind === "branch") {
+      if (c.action === FlowAction.ChangeCondition && node.kind === FlowNodeKind.Branch) {
         out.push({ ...node, condition: c.text1 || node.condition })
         continue
       }
-      if (c.action === "add_after") {
+      if (c.action === FlowAction.AddAfter) {
         out.push(node)
         out.push(mkStep(c.text1 || "New step"))
         continue
       }
-      if (c.action === "add_rule") {
+      if (c.action === FlowAction.AddRule) {
         out.push(node)
         out.push(mkBranch(c.text1 || "this applies", c.text2))
         continue
       }
-      if (c.action === "add_then" && node.kind === "branch") {
+      if (c.action === FlowAction.AddThen && node.kind === FlowNodeKind.Branch) {
         out.push({ ...node, then: [...node.then, mkStep(c.text1 || "New step")] })
         continue
       }
-      if (c.action === "add_else" && node.kind === "branch") {
+      if (c.action === FlowAction.AddElse && node.kind === FlowNodeKind.Branch) {
         out.push({ ...node, otherwise: [...node.otherwise, mkStep(c.text1 || "New step")] })
         continue
       }
     }
     // recurse into branches
-    if (node.kind === "branch") {
+    if (node.kind === FlowNodeKind.Branch) {
       out.push({
         ...node,
         then: applyToNodes(node.then, c),

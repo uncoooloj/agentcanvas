@@ -2,7 +2,7 @@ import { useEffect } from "react"
 import { AlertCircle, Folder, Info, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { AppContext } from "@/lib/appcontext"
-import type { CanvasSourceSummary } from "@/lib/types"
+import { CanvasSourceTone, type CanvasSourceSummary } from "@/lib/types"
 import { useChanges } from "@/lib/changeset"
 
 export function Provenance({
@@ -17,9 +17,9 @@ export function Provenance({
   const isDemo = Boolean(demoMode || context.isDemo)
   const noun = context.productLanguage?.workspace_noun || context.productLanguage?.singular || "project"
   const sourceToneClass =
-    source?.tone === "warning"
+    source?.tone === CanvasSourceTone.Warning
       ? "border-gold/30 bg-gold/10 text-foreground"
-      : source?.tone === "error"
+      : source?.tone === CanvasSourceTone.Error
         ? "border-destructive/25 bg-destructive/10 text-destructive"
         : isDemo
           ? "border-primary/20 bg-primary/10 text-primary"
@@ -60,7 +60,7 @@ export function Provenance({
             <span
               className={cn(
                 "text-xs font-medium",
-                source.tone === "error" ? "text-destructive" : "text-foreground"
+                source.tone === CanvasSourceTone.Error ? "text-destructive" : "text-foreground"
               )}
             >
               {source.shortLabel}
@@ -88,7 +88,7 @@ export function Provenance({
 }
 
 function SourceIcon({ source, isDemo }: { source?: CanvasSourceSummary; isDemo: boolean }) {
-  if (source?.tone === "warning" || source?.tone === "error") {
+  if (source?.tone === CanvasSourceTone.Warning || source?.tone === CanvasSourceTone.Error) {
     return <AlertCircle className="h-3.5 w-3.5 shrink-0" />
   }
   if (source) {

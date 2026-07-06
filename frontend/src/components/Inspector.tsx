@@ -1,11 +1,10 @@
 import { useMemo, useState, type ComponentType } from "react"
 import { ChevronDown, CornerDownRight, Pencil, Plus, Split, Trash2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { ROLE } from "@/lib/roles"
+import { ROLE, RuleRole } from "@/lib/roles"
 import { Button } from "@/components/ui/button"
-import { useChanges, type ChangeEntry, type ChangeKind } from "@/lib/changeset"
-import type { FlowNode } from "@/lib/types"
-import type { FlowAction } from "./FlowCanvas"
+import { ChangeKind, useChanges, type ChangeEntry } from "@/lib/changeset"
+import { FlowAction, FlowNodeKind, StepRole, type FlowNode } from "@/lib/types"
 
 interface Props {
   node: FlowNode | null
@@ -28,8 +27,8 @@ export function Inspector({ node, onAction, onModifyChange, onCancelChange }: Pr
 
   if (!node) return null
 
-  const isBranch = node.kind === "branch"
-  const headChip = isBranch ? ROLE.if : ROLE[node.role === "when" ? "when" : "do"]
+  const isBranch = node.kind === FlowNodeKind.Branch
+  const headChip = isBranch ? ROLE[RuleRole.If] : ROLE[node.role === StepRole.When ? StepRole.When : StepRole.Do]
   const HeadIcon = headChip.icon
 
   return (
@@ -64,17 +63,17 @@ export function Inspector({ node, onAction, onModifyChange, onCancelChange }: Pr
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {isBranch ? (
             <>
-              <InspectorAction icon={Pencil} label="Change" fullLabel="Change the condition" onClick={() => onAction("change_condition")} />
-              <InspectorAction icon={CornerDownRight} label="Yes path" fullLabel="Add a step to the “yes” path" onClick={() => onAction("add_then")} />
-              <InspectorAction icon={CornerDownRight} label="Else path" fullLabel="Add a step to the “otherwise” path" onClick={() => onAction("add_else")} />
-              <InspectorAction icon={Trash2} label="Remove" fullLabel="Remove this rule" danger onClick={() => onAction("remove")} />
+              <InspectorAction icon={Pencil} label="Change" fullLabel="Change the condition" onClick={() => onAction(FlowAction.ChangeCondition)} />
+              <InspectorAction icon={CornerDownRight} label="Yes path" fullLabel="Add a step to the “yes” path" onClick={() => onAction(FlowAction.AddThen)} />
+              <InspectorAction icon={CornerDownRight} label="Else path" fullLabel="Add a step to the “otherwise” path" onClick={() => onAction(FlowAction.AddElse)} />
+              <InspectorAction icon={Trash2} label="Remove" fullLabel="Remove this rule" danger onClick={() => onAction(FlowAction.Remove)} />
             </>
           ) : (
             <>
-              <InspectorAction icon={Pencil} label="Change" fullLabel="Change what happens" onClick={() => onAction("change")} />
-              <InspectorAction icon={Plus} label="Add step" fullLabel="Add a step after this" onClick={() => onAction("add_after")} />
-              <InspectorAction icon={Split} label="Add rule" fullLabel="Add a rule" onClick={() => onAction("add_rule")} />
-              <InspectorAction icon={Trash2} label="Remove" fullLabel="Remove this step" danger onClick={() => onAction("remove")} />
+              <InspectorAction icon={Pencil} label="Change" fullLabel="Change what happens" onClick={() => onAction(FlowAction.Change)} />
+              <InspectorAction icon={Plus} label="Add step" fullLabel="Add a step after this" onClick={() => onAction(FlowAction.AddAfter)} />
+              <InspectorAction icon={Split} label="Add rule" fullLabel="Add a rule" onClick={() => onAction(FlowAction.AddRule)} />
+              <InspectorAction icon={Trash2} label="Remove" fullLabel="Remove this step" danger onClick={() => onAction(FlowAction.Remove)} />
             </>
           )}
         </div>
@@ -197,14 +196,14 @@ function PendingChange({
 }
 
 function ChangePill({ kind }: { kind: ChangeKind }) {
-  const label = kind === "edited" ? "Edited" : kind === "new" ? "New" : "Removing"
+  const label = kind === ChangeKind.Edited ? "Edited" : kind === ChangeKind.New ? "New" : "Removing"
   return (
     <span
       className={cn(
         "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-        kind === "edited" && "bg-when-bg text-when-fg",
-        kind === "new" && "bg-act-bg text-act-fg",
-        kind === "removing" && "bg-destructive/10 text-destructive"
+        kind === ChangeKind.Edited && "bg-when-bg text-when-fg",
+        kind === ChangeKind.New && "bg-act-bg text-act-fg",
+        kind === ChangeKind.Removing && "bg-destructive/10 text-destructive"
       )}
     >
       {label}
@@ -214,29 +213,29 @@ function ChangePill({ kind }: { kind: ChangeKind }) {
 
 function changeSummary(change: ChangeEntry): string {
   switch (change.action) {
-    case "change":
+    case FlowAction.Change:
       return "This step will change to:"
-    case "change_condition":
+    case FlowAction.ChangeCondition:
       return "This rule will use a new condition:"
-    case "add_after":
+    case FlowAction.AddAfter:
       return "A new step will be added after this:"
-    case "add_rule":
+    case FlowAction.AddRule:
       return "A new rule will be added after this step:"
-    case "add_then":
+    case FlowAction.AddThen:
       return "A new step will be added to the yes path:"
-    case "add_else":
+    case FlowAction.AddElse:
       return "A new step will be added to the otherwise path:"
-    case "remove":
+    case FlowAction.Remove:
       return change.text1 ? "This will be removed for this reason:" : "This will be removed."
   }
 }
 
 function changeValueLabel(change: ChangeEntry): string {
   switch (change.action) {
-    case "change_condition":
-    case "add_rule":
+    case FlowAction.ChangeCondition:
+    case FlowAction.AddRule:
       return "If: "
-    case "remove":
+    case FlowAction.Remove:
       return "Reason: "
     default:
       return ""

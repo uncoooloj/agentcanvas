@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import {
   buildSummary,
   EDIT_META,
+  FieldKind,
   nodeLabel,
   type EditRequest,
   type StagedEdit,
@@ -33,7 +34,7 @@ export function StepComposer({ request, onSubmit, onCancel }: Props) {
   }, [request])
 
   const canSubmit =
-    meta.field === "reason" ? true : meta.field === "double" ? first.trim() && second.trim() : first.trim()
+    meta.field === FieldKind.Reason ? true : meta.field === FieldKind.Double ? first.trim() && second.trim() : first.trim()
 
   function submit() {
     if (!canSubmit) return
@@ -51,7 +52,7 @@ export function StepComposer({ request, onSubmit, onCancel }: Props) {
   }
 
   function onKey(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey && meta.field !== "double") {
+    if (e.key === "Enter" && !e.shiftKey && meta.field !== FieldKind.Double) {
       e.preventDefault()
       submit()
     }
@@ -80,7 +81,7 @@ export function StepComposer({ request, onSubmit, onCancel }: Props) {
         </button>
       </div>
 
-      {meta.field === "double" ? (
+      {meta.field === FieldKind.Double ? (
         <div className="flex flex-col gap-2">
           <Input
             ref={firstRef}
@@ -101,7 +102,7 @@ export function StepComposer({ request, onSubmit, onCancel }: Props) {
             </Button>
           </div>
         </div>
-      ) : meta.field === "reason" ? (
+      ) : meta.field === FieldKind.Reason ? (
         <div className="flex items-center gap-2">
           <Input
             ref={firstRef}

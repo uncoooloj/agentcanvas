@@ -41,11 +41,44 @@ export interface CodeGraph {
 
 // ---- The behavioral projection that the canvas renders ----
 
-// A trigger or an action. ("when" only appears as the first node of a journey.)
-export type StepRole = "when" | "do"
+// A trigger or an action. (When only appears as the first node of a journey.)
+export enum StepRole {
+  When = "when",
+  Do = "do",
+}
+
+export enum FlowNodeKind {
+  Step = "step",
+  Branch = "branch",
+}
+
+export enum CodeGraphNodeType {
+  AppSurface = "app_surface",
+  Component = "component",
+  Export = "export",
+  File = "file",
+}
+
+export enum CanvasStepKind {
+  When = "when",
+  Do = "do",
+  If = "if",
+  ElseIf = "elseIf",
+  Else = "else",
+}
+
+export enum FlowAction {
+  Change = "change",
+  AddAfter = "add_after",
+  AddRule = "add_rule",
+  Remove = "remove",
+  ChangeCondition = "change_condition",
+  AddThen = "add_then",
+  AddElse = "add_else",
+}
 
 export interface StepNode {
-  kind: "step"
+  kind: FlowNodeKind.Step
   id: string
   role: StepRole
   text: string
@@ -56,7 +89,7 @@ export interface StepNode {
 
 // A decision: the "then" path runs when the condition holds, "otherwise" when it doesn't.
 export interface BranchNode {
-  kind: "branch"
+  kind: FlowNodeKind.Branch
   id: string
   condition: string
   then: FlowNode[]
@@ -148,6 +181,7 @@ export enum CanvasSourceKind {
   HeuristicProjection = "heuristic-projection",
   Demo = "demo",
   DemoFallback = "demo-fallback",
+  Empty = "empty",
   StaleCache = "stale-cache",
   NoFlow = "no-flow",
   Loading = "loading",
@@ -155,12 +189,35 @@ export enum CanvasSourceKind {
   Unknown = "unknown",
 }
 
+export enum CanvasMappingMode {
+  AgentAuthored = "agent-authored",
+  Deterministic = "deterministic",
+  Empty = "empty",
+  Heuristic = "heuristic",
+  HeuristicProjection = "heuristic-projection",
+  LlmAssisted = "llm-assisted",
+  V2Compat = "v2-compat",
+}
+
+export enum CanvasSourceTone {
+  Default = "default",
+  Info = "info",
+  Warning = "warning",
+  Error = "error",
+}
+
+export enum CopyState {
+  Idle = "idle",
+  Copied = "copied",
+  Manual = "manual",
+}
+
 export interface CanvasSourceSummary {
   kind: CanvasSourceKind
   label: string
   shortLabel: string
   detail: string
-  tone: "default" | "info" | "warning" | "error"
+  tone: CanvasSourceTone
   flowCount?: number
 }
 
@@ -207,7 +264,7 @@ export interface PendingItem {
 export function findNode(nodes: FlowNode[], id: string): FlowNode | null {
   for (const n of nodes) {
     if (n.id === id) return n
-    if (n.kind === "branch") {
+    if (n.kind === FlowNodeKind.Branch) {
       const found = findNode(n.then, id) ?? findNode(n.otherwise, id)
       if (found) return found
     }
@@ -219,7 +276,7 @@ export function countSteps(nodes: FlowNode[]): number {
   let c = 0
   for (const n of nodes) {
     c += 1
-    if (n.kind === "branch") c += countSteps(n.then) + countSteps(n.otherwise)
+    if (n.kind === FlowNodeKind.Branch) c += countSteps(n.then) + countSteps(n.otherwise)
   }
   return c
 }

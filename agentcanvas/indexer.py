@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 from collections import Counter, defaultdict
+from enum import Enum
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -40,6 +41,24 @@ LANGUAGE_MODULES = [
     ("swift", swift_lang.SOURCE_EXTENSIONS, swift_lang.parse_workspace),
     ("kotlin", kotlin_lang.SOURCE_EXTENSIONS, kotlin_lang.parse_workspace),
 ]
+
+
+class LanguageFactType(str, Enum):
+    BRANCH = "branch"
+    CALL = "call"
+    EXPORT = "export"
+    FILE = "file"
+    IMPORT = "import"
+    ROUTE = "route"
+    SYMBOL = "symbol"
+
+
+class RouteSourceKind(str, Enum):
+    FILE = "file"
+    HANDLER = "handler"
+    ROUTE_CALL = "route-call"
+
+
 SOURCE_EXTENSIONS = (
     set(js_ts.SOURCE_EXTENSIONS)
     | PYTHON_SOURCE_EXTENSIONS
@@ -523,7 +542,7 @@ def is_non_behavior_path(path: str) -> bool:
 
 
 def language_fact_subject(raw: Dict[str, Any]) -> str:
-    if raw.get("type") == "route" and raw.get("path"):
+    if raw.get("type") == LanguageFactType.ROUTE.value and raw.get("path"):
         method = raw.get("method")
         return f"{method} {raw['path']}" if method else str(raw["path"])
     if raw.get("qualified_name"):
@@ -556,17 +575,17 @@ def language_fact_summary(
         if line:
             location += f":{line}"
 
-    if raw_type == "route":
+    if raw_type == LanguageFactType.ROUTE.value:
         method = raw.get("method")
         return f"{language} route {method + ' ' if method else ''}{subject}{location}"
-    if raw_type == "branch":
+    if raw_type == LanguageFactType.BRANCH.value:
         condition = raw.get("condition") or subject
         return f"{language} {raw_kind} branch {condition}{location}"
-    if raw_type == "call":
+    if raw_type == LanguageFactType.CALL.value:
         return f"{language} call {subject}{location}"
-    if raw_type == "symbol":
+    if raw_type == LanguageFactType.SYMBOL.value:
         return f"{language} {raw_kind} {subject}{location}"
-    if raw_type == "import":
+    if raw_type == LanguageFactType.IMPORT.value:
         return f"{language} import {subject}{location}"
     return f"{language} {raw_type} {subject}{location}"
 
@@ -597,9 +616,15 @@ def language_fact_evidence(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def language_fact_confidence(raw_type: str) -> float:
-    if raw_type in {"file", "import", "symbol", "export", "route"}:
+    if raw_type in {
+        LanguageFactType.FILE.value,
+        LanguageFactType.IMPORT.value,
+        LanguageFactType.SYMBOL.value,
+        LanguageFactType.EXPORT.value,
+        LanguageFactType.ROUTE.value,
+    }:
         return 0.9
-    if raw_type in {"branch", "call"}:
+    if raw_type in {LanguageFactType.BRANCH.value, LanguageFactType.CALL.value}:
         return 0.75
     if raw_type.endswith("error"):
         return 1.0
@@ -834,7 +859,7 @@ def classify_source_file(rel: str) -> str:
     if "/api/" in f"/{lowered}" or lowered.startswith("api/"):
         return "api"
     if any(part in lowered.split("/") for part in ["routes", "pages", "app"]):
-        return "route"
+        return LanguageFactType.ROUTE.value
     return "source"
 
 
@@ -917,10 +942,10 @@ def extract_routes(text: str, rel: str) -> List[Dict[str, Any]]:
     routes: Dict[Tuple[str, str], Dict[str, Any]] = {}
     file_route = route_from_path(rel)
     if file_route:
-        routes[(file_route, "file")] = {
+        routes[(file_route, RouteSourceKind.FILE.value)] = {
             "path": file_route,
             "method": None,
-            "source": "file",
+            "source": RouteSourceKind.FILE.value,
             "file": rel,
             "line": None,
         }
@@ -933,17 +958,17 @@ def extract_routes(text: str, rel: str) -> List[Dict[str, Any]]:
         routes[(route, method)] = {
             "path": route,
             "method": method,
-            "source": "handler",
+            "source": RouteSourceKind.HANDLER.value,
             "file": rel,
             "line": line_number(text, match.start()),
         }
 
     for match in GENERIC_ROUTE_RE.finditer(text):
         route = match.group(1)
-        routes[(route, "route")] = {
+        routes[(route, LanguageFactType.ROUTE.value)] = {
             "path": route,
             "method": None,
-            "source": "route-call",
+            "source": RouteSourceKind.ROUTE_CALL.value,
             "file": rel,
             "line": line_number(text, match.start()),
         }
@@ -1215,7 +1240,7 @@ def build_graph(
         add_node(
             {
                 "id": file_id,
-                "type": "file",
+                "type": LanguageFactType.FILE.value,
                 "label": PurePosixPath(info["path"]).name,
                 "path": info["path"],
                 "data": {
@@ -1247,7 +1272,7 @@ def build_graph(
             add_node(
                 {
                     "id": export_id,
-                    "type": "export",
+                    "type": LanguageFactType.EXPORT.value,
                     "label": exported["name"],
                     "path": exported["path"],
                     "data": exported,
@@ -1260,7 +1285,7 @@ def build_graph(
             add_node(
                 {
                     "id": route_id,
-                    "type": "route",
+                    "type": LanguageFactType.ROUTE.value,
                     "label": route["path"],
                     "path": route["file"],
                     "data": route,

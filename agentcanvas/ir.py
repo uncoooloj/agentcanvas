@@ -6,10 +6,18 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from agentcanvas.lifecycle import PENDING_STATUSES, transition_record
+from agentcanvas.lifecycle import (
+    DONE,
+    IN_PROGRESS,
+    NEEDS_INPUT,
+    PENDING,
+    PENDING_STATUSES,
+    transition_record,
+)
 from agentcanvas.workspace_lock import WorkspaceLockBusy, workspace_write_lock
 
 SCHEMA = "agentcanvas.workflow.v1"
@@ -17,8 +25,53 @@ IR_FILENAME = "workflow.ir.json"
 CANVAS_IR_FILENAME = "canvas.ir.json"
 STATE_DIR_NAME = ".agentcanvas"
 PENDING_DIR_NAME = "pending"
+CONVERSATION_SUFFIX = ".conversation.jsonl"
 CANVAS_MAP_HANDOFF_SCHEMA = "agentcanvas.canvas_map_handoff.v1"
 MAP_HEALTH_SCHEMA = "agentcanvas.map_health.v1"
+
+
+class PendingFileStatus(str, Enum):
+    UNREADABLE = "unreadable"
+
+
+class PendingRecordSource(str, Enum):
+    AGENTCANVAS = "agentcanvas"
+
+
+class PendingRecordKind(str, Enum):
+    GRAPH_EDIT = "graph_edit"
+
+
+class ConversationRole(str, Enum):
+    AGENT = "agent"
+    USER = "user"
+
+
+class ConversationTurnKind(str, Enum):
+    QUESTION = "question"
+    ANSWER = "answer"
+    NOTE = "note"
+
+
+class MapFreshnessStatus(str, Enum):
+    UNKNOWN = "unknown"
+    STALE = "stale"
+    FRESH = "fresh"
+
+
+class MapHealthStatus(str, Enum):
+    READY = "ready"
+    MISSING_WORKFLOW_IR = "missing_workflow_ir"
+    MISSING_CANVAS_IR = "missing_canvas_ir"
+    UNREADABLE_CANVAS_IR = "unreadable_canvas_ir"
+    STALE_CANVAS_IR = "stale_canvas_ir"
+
+
+class MapHealthReason(str, Enum):
+    MISSING = "missing"
+    INVALID_JSON = "invalid_json"
+    INVALID_SHAPE = "invalid_shape"
+    UNREADABLE = "unreadable"
 
 
 def now_utc() -> str:
@@ -127,15 +180,15 @@ def canvas_map_handoff(workspace: str | Path) -> Dict[str, Any]:
     try:
         payload = load_canvas_ir(root)
     except FileNotFoundError:
-        reason = "missing"
+        reason = MapHealthReason.MISSING.value
     except json.JSONDecodeError:
-        reason = "invalid_json"
+        reason = MapHealthReason.INVALID_JSON.value
     except OSError:
-        reason = "unreadable"
+        reason = MapHealthReason.UNREADABLE.value
     else:
         readable = isinstance(payload, dict)
         if not readable:
-            reason = "invalid_shape"
+            reason = MapHealthReason.INVALID_SHAPE.value
 
     return {
         "schema": CANVAS_MAP_HANDOFF_SCHEMA,
@@ -159,25 +212,25 @@ def map_health(workspace: str | Path) -> Dict[str, Any]:
     workflow_exists = workflow_path.is_file()
     canvas_exists = canvas_path.is_file()
     canvas_readable = False
-    canvas_reason = "missing" if not canvas_exists else None
+    canvas_reason = MapHealthReason.MISSING.value if not canvas_exists else None
     canvas_error = None
     if canvas_exists:
         try:
             with canvas_path.open("r", encoding="utf-8") as handle:
                 canvas_payload = json.load(handle)
         except json.JSONDecodeError as exc:
-            canvas_reason = "invalid_json"
+            canvas_reason = MapHealthReason.INVALID_JSON.value
             canvas_error = str(exc)
         except OSError as exc:
-            canvas_reason = "unreadable"
+            canvas_reason = MapHealthReason.UNREADABLE.value
             canvas_error = str(exc)
         else:
             canvas_readable = isinstance(canvas_payload, dict)
             if not canvas_readable:
-                canvas_reason = "invalid_shape"
+                canvas_reason = MapHealthReason.INVALID_SHAPE.value
 
     stale = None
-    freshness_status = "unknown"
+    freshness_status = MapFreshnessStatus.UNKNOWN.value
     freshness_reason = None
     if workflow_exists and canvas_exists:
         try:
@@ -187,7 +240,7 @@ def map_health(workspace: str | Path) -> Dict[str, Any]:
             freshness_reason = f"Could not compare file times: {exc}"
         else:
             stale = canvas_mtime < workflow_mtime
-            freshness_status = "stale" if stale else "fresh"
+            freshness_status = MapFreshnessStatus.STALE.value if stale else MapFreshnessStatus.FRESH.value
     elif not workflow_exists:
         freshness_reason = "Workflow evidence is missing."
     else:
@@ -206,15 +259,15 @@ def map_health(workspace: str | Path) -> Dict[str, Any]:
             pending_readable = False
             pending_error = str(exc)
 
-    status = "ready"
+    status = MapHealthStatus.READY.value
     if not workflow_exists:
-        status = "missing_workflow_ir"
+        status = MapHealthStatus.MISSING_WORKFLOW_IR.value
     elif not canvas_exists:
-        status = "missing_canvas_ir"
+        status = MapHealthStatus.MISSING_CANVAS_IR.value
     elif not canvas_readable:
-        status = "unreadable_canvas_ir"
+        status = MapHealthStatus.UNREADABLE_CANVAS_IR.value
     elif stale:
-        status = "stale_canvas_ir"
+        status = MapHealthStatus.STALE_CANVAS_IR.value
 
     health: Dict[str, Any] = {
         "schema": MAP_HEALTH_SCHEMA,
@@ -252,7 +305,7 @@ def map_health(workspace: str | Path) -> Dict[str, Any]:
             "error": pending_error,
         },
         "status": status,
-        "ready": status == "ready",
+        "ready": status == MapHealthStatus.READY.value,
     }
     health["summary"] = map_health_summary_lines(health)
     return health
@@ -271,13 +324,13 @@ def map_health_summary_lines(health: Dict[str, Any]) -> List[str]:
             "Map is ready: the workflow evidence and canvas map are present, "
             "the canvas is readable, and it matches the latest workflow evidence."
         )
-    elif health["status"] == "missing_workflow_ir":
+    elif health["status"] == MapHealthStatus.MISSING_WORKFLOW_IR.value:
         lead = "Map is not ready yet: workflow evidence has not been created."
-    elif health["status"] == "missing_canvas_ir":
+    elif health["status"] == MapHealthStatus.MISSING_CANVAS_IR.value:
         lead = "Map is not ready yet: the canvas map has not been created."
-    elif health["status"] == "unreadable_canvas_ir":
+    elif health["status"] == MapHealthStatus.UNREADABLE_CANVAS_IR.value:
         lead = "Map needs attention: the canvas map file exists, but AgentCanvas cannot read it."
-    elif health["status"] == "stale_canvas_ir":
+    elif health["status"] == MapHealthStatus.STALE_CANVAS_IR.value:
         lead = "Map needs attention: the canvas map is older than the workflow evidence."
     else:
         lead = "Map health could not be fully checked."
@@ -335,10 +388,10 @@ def format_map_health(health: Dict[str, Any]) -> str:
 
 def _plain_health_reason(reason: Any) -> str:
     return {
-        "invalid_json": "not valid JSON",
-        "invalid_shape": "not a JSON object",
-        "unreadable": "not readable",
-        "missing": "missing",
+        MapHealthReason.INVALID_JSON.value: "not valid JSON",
+        MapHealthReason.INVALID_SHAPE.value: "not a JSON object",
+        MapHealthReason.UNREADABLE.value: "not readable",
+        MapHealthReason.MISSING.value: "missing",
     }.get(reason, "not readable")
 
 
@@ -355,37 +408,191 @@ def slugify(value: str, fallback: str = "canvas-change") -> str:
     return slug[:64] or fallback
 
 
-def list_pending(workspace: str | Path) -> List[Dict[str, Any]]:
+def list_pending(workspace: str | Path, *, summary: bool = False) -> List[Dict[str, Any]]:
     _, _, pending_dir = state_paths(workspace)
     if not pending_dir.exists():
         return []
 
     items: List[Dict[str, Any]] = []
     for json_path in sorted(pending_dir.glob("*.json")):
-        try:
-            with json_path.open("r", encoding="utf-8") as handle:
-                item = json.load(handle)
-        except (OSError, json.JSONDecodeError) as exc:
-            item = {
-                "id": json_path.stem,
-                "title": json_path.stem,
-                "status": "unreadable",
-                "error": str(exc),
-            }
-
-        md_path = json_path.with_suffix(".md")
-        if isinstance(item, dict):
-            from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
-
-            item = normalize_pending_record(item)
-        item.setdefault("id", json_path.stem)
-        item.setdefault("title", item["id"])
-        item.setdefault("status", "pending")
-        item["json_path"] = str(json_path)
-        item["markdown_path"] = str(md_path) if md_path.exists() else None
+        item = _read_pending_file(json_path)
+        if summary:
+            item = pending_summary(item)
         items.append(item)
 
     return sorted(items, key=lambda item: item.get("created_at", ""), reverse=True)
+
+
+def get_pending_request(
+    workspace: str | Path,
+    pending_id: str,
+    *,
+    since: Optional[str] = None,
+) -> Dict[str, Any]:
+    _, _, pending_dir = state_paths(workspace)
+    json_path = _resolve_pending_json_path(pending_dir, pending_id)
+    item = _read_pending_file(json_path)
+    item["conversation"] = read_pending_conversation(json_path, since=since)
+    return item
+
+
+def pending_summary(item: Dict[str, Any]) -> Dict[str, Any]:
+    summary_keys = [
+        "id",
+        "title",
+        "summary",
+        "status",
+        "note",
+        "error",
+        "workspace",
+        "sessionId",
+        "session_id",
+        "changeId",
+        "change_id",
+        "clientChangeId",
+        "created_at",
+        "updated_at",
+        "json_path",
+        "markdown_path",
+        "refs",
+        "orphaned_refs",
+        "conversation_summary",
+    ]
+    summary = {key: item[key] for key in summary_keys if key in item}
+    if "changeId" not in summary and isinstance(item.get("change"), dict):
+        change = item["change"]
+        for key in ("changeId", "clientChangeId", "change_id"):
+            if isinstance(change.get(key), str):
+                summary["changeId"] = change[key]
+                break
+    summary.setdefault("id", item.get("id"))
+    summary.setdefault("title", item.get("title") or item.get("id"))
+    summary.setdefault("status", item.get("status", PENDING))
+    return summary
+
+
+def _pending_record_for_write(record: Dict[str, Any]) -> Dict[str, Any]:
+    clean = dict(record)
+    clean.pop("json_path", None)
+    clean.pop("markdown_path", None)
+    clean.pop("conversation", None)
+    return clean
+
+
+def _resolve_pending_json_path(pending_dir: Path, pending_id: str) -> Path:
+    json_path = pending_dir / f"{pending_id}.json"
+    if json_path.exists():
+        return json_path
+    matches = sorted(pending_dir.glob(f"*{pending_id}*.json"))
+    if len(matches) == 1:
+        return matches[0]
+    raise FileNotFoundError(f"pending request not found: {pending_id}")
+
+
+def _read_pending_file(json_path: Path) -> Dict[str, Any]:
+    try:
+        with json_path.open("r", encoding="utf-8") as handle:
+            item = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        item = {
+            "id": json_path.stem,
+            "title": json_path.stem,
+            "status": PendingFileStatus.UNREADABLE.value,
+            "error": str(exc),
+        }
+
+    md_path = json_path.with_suffix(".md")
+    if isinstance(item, dict):
+        from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
+
+        item = normalize_pending_record(item)
+    else:
+        item = {
+            "id": json_path.stem,
+            "title": json_path.stem,
+            "status": PendingFileStatus.UNREADABLE.value,
+        }
+    item.setdefault("id", json_path.stem)
+    item.setdefault("title", item["id"])
+    item.setdefault("status", PENDING)
+    item["json_path"] = str(json_path)
+    item["markdown_path"] = str(md_path) if md_path.exists() else None
+    item["conversation_summary"] = _conversation_summary(conversation_path_for_json(json_path))
+    return item
+
+
+def conversation_path_for_json(json_path: Path) -> Path:
+    return json_path.with_suffix(CONVERSATION_SUFFIX)
+
+
+def read_pending_conversation(
+    json_path: Path,
+    *,
+    since: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    return _read_conversation_file(conversation_path_for_json(json_path), since=since, limit=limit)
+
+
+def _read_conversation_file(
+    path: Path,
+    *,
+    since: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    turns: List[Dict[str, Any]] = []
+    seen_since = since is None
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    turn = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(turn, dict):
+                    continue
+                if not seen_since:
+                    if since in {str(turn.get("id")), str(turn.get("at"))}:
+                        seen_since = True
+                    continue
+                turns.append(turn)
+    except OSError:
+        return []
+    return turns[-max(1, int(limit)) :]
+
+
+def _conversation_summary(path: Path) -> Dict[str, Any]:
+    turns = _read_conversation_file(path, limit=1000000)
+    unanswered = None
+    for turn in reversed(turns):
+        if (
+            turn.get("role") == ConversationRole.USER.value
+            and turn.get("kind") == ConversationTurnKind.ANSWER.value
+        ):
+            break
+        if (
+            turn.get("role") == ConversationRole.AGENT.value
+            and turn.get("kind") == ConversationTurnKind.QUESTION.value
+        ):
+            unanswered = {
+                "id": turn.get("id"),
+                "text": turn.get("text"),
+                "at": turn.get("at"),
+            }
+            break
+    last = turns[-1] if turns else {}
+    return {
+        "turns": len(turns),
+        "last_role": last.get("role"),
+        "last_kind": last.get("kind"),
+        "last_at": last.get("at"),
+        "unanswered_question": unanswered,
+    }
 
 
 def _first_text(values: Iterable[Any], fallback: str) -> str:
@@ -395,7 +602,10 @@ def _first_text(values: Iterable[Any], fallback: str) -> str:
     return fallback
 
 
-def _markdown_for_pending(record: Dict[str, Any]) -> str:
+def _markdown_for_pending(
+    record: Dict[str, Any],
+    conversation: Optional[List[Dict[str, Any]]] = None,
+) -> str:
     summary = _first_text(
         [
             record.get("summary"),
@@ -456,13 +666,13 @@ def _markdown_for_pending(record: Dict[str, Any]) -> str:
         "When you start this request, update its status:",
         "",
         "```bash",
-        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status in_progress",
+        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status {IN_PROGRESS}",
         "```",
         "",
         "If you need the user, mark it clearly:",
         "",
         "```bash",
-        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status needs_input --note \"What I need from you...\"",
+        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status {NEEDS_INPUT} --note \"What I need from you...\"",
         "```",
         "",
         "When finished, mark it done. Only run `agentcanvas index` first if you "
@@ -470,11 +680,101 @@ def _markdown_for_pending(record: Dict[str, Any]) -> str:
         "",
         "```bash",
         f"# Source-code changes only: agentcanvas index --workspace {json.dumps(record.get('workspace') or '.')}",
-        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status done --note \"Implemented and verified.\"",
+        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status {DONE} --note \"Implemented and verified.\"",
         "```",
         "",
     ]
+    conversation = conversation or []
+    if conversation:
+        lines.extend(["## Conversation", ""])
+        for turn in conversation[-10:]:
+            role = turn.get("role", ConversationRole.AGENT.value)
+            kind = turn.get("kind", ConversationTurnKind.NOTE.value)
+            text = str(turn.get("text") or "").strip()
+            at = turn.get("at") or "unknown time"
+            lines.extend([f"- **{role} {kind}** ({at}): {text}", ""])
     return "\n".join(lines)
+
+
+def append_pending_conversation(
+    workspace: str | Path,
+    pending_id: str,
+    *,
+    role: str,
+    kind: str,
+    text: str,
+    actor: str = "agentcanvas",
+) -> Dict[str, Any]:
+    try:
+        role = ConversationRole(str(role).strip().lower()).value
+    except ValueError:
+        raise ValueError("conversation role must be agent or user")
+    try:
+        kind = ConversationTurnKind(str(kind).strip().lower()).value
+    except ValueError:
+        raise ValueError("conversation kind must be question, answer, or note")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("conversation text is required")
+
+    root = resolve_workspace(workspace)
+    with workspace_write_lock(root, writer="pending-conversation"):
+        _, _, pending_dir = state_paths(root)
+        json_path = _resolve_pending_json_path(pending_dir, pending_id)
+        record = _read_pending_file(json_path)
+        turn = {
+            "id": uuid.uuid4().hex,
+            "at": now_utc(),
+            "role": role,
+            "kind": kind,
+            "text": text.strip(),
+        }
+        conversation_path = conversation_path_for_json(json_path)
+        conversation_path.parent.mkdir(parents=True, exist_ok=True)
+        with conversation_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(turn, sort_keys=True) + "\n")
+
+        conversation = read_pending_conversation(json_path, limit=1000000)
+        record["conversation_summary"] = _conversation_summary(conversation_path)
+        if (
+            role == ConversationRole.AGENT.value
+            and kind == ConversationTurnKind.QUESTION.value
+        ):
+            record = transition_record(
+                record,
+                NEEDS_INPUT,
+                at=turn["at"],
+                actor=actor,
+                note=text.strip(),
+                enforce_transitions=False,
+            )
+        elif (
+            role == ConversationRole.USER.value
+            and kind == ConversationTurnKind.ANSWER.value
+            and record.get("status") == NEEDS_INPUT
+        ):
+            record = transition_record(
+                record,
+                IN_PROGRESS,
+                at=turn["at"],
+                actor=actor,
+                note="User answered in AgentCanvas.",
+                enforce_transitions=True,
+            )
+        from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
+
+        record = normalize_pending_record(record)
+        record["conversation_summary"] = _conversation_summary(conversation_path)
+        atomic_write_json(json_path, _pending_record_for_write(record))
+        markdown_path = json_path.with_suffix(".md")
+        if markdown_path.exists():
+            atomic_write_text(markdown_path, _markdown_for_pending(record, conversation))
+
+    return {
+        **record,
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path) if markdown_path.exists() else None,
+        "conversation": conversation,
+    }
 
 
 def write_pending_change(
@@ -511,21 +811,25 @@ def write_pending_change(
             "id": pending_id,
             "title": title,
             "summary": _first_text([change.get("summary")], ""),
-            "status": "pending",
+            "status": PENDING,
             "created_at": created_at,
             "workspace": str(root),
-            "source": "agentcanvas",
-            "kind": "graph_edit",
+            "source": PendingRecordSource.AGENTCANVAS.value,
+            "kind": PendingRecordKind.GRAPH_EDIT.value,
             "change": change,
             "graph": graph_snapshot,
         }
+        for key in ("changeId", "clientChangeId", "change_id"):
+            if isinstance(change.get(key), str):
+                record[key] = change[key]
         if session_id:
             record["sessionId"] = session_id
         from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
 
         record = normalize_pending_record(record)
+        record["conversation_summary"] = _conversation_summary(conversation_path_for_json(json_path))
 
-        atomic_write_json(json_path, record)
+        atomic_write_json(json_path, _pending_record_for_write(record))
         atomic_write_text(markdown_path, _markdown_for_pending(record))
 
     return {
@@ -576,10 +880,10 @@ def update_pending_status(
 
         record = normalize_pending_record(record)
 
-        atomic_write_json(json_path, record)
+        atomic_write_json(json_path, _pending_record_for_write(record))
         markdown_path = json_path.with_suffix(".md")
         if markdown_path.exists():
-            atomic_write_text(markdown_path, _markdown_for_pending(record))
+            atomic_write_text(markdown_path, _markdown_for_pending(record, read_pending_conversation(json_path)))
 
     return {
         **record,

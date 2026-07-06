@@ -20,7 +20,7 @@ import {
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { JourneyActivity, countSteps, type CanvasSourceSummary, type Journey } from "@/lib/types"
+import { CanvasSourceTone, JourneyActivity, countSteps, type CanvasSourceSummary, type Journey } from "@/lib/types"
 import type { ProductLanguage } from "@/lib/appcontext"
 import type { ChangeEntry } from "@/lib/changeset"
 
@@ -120,14 +120,14 @@ export function Overview({ appName, productLanguage, source, journeys, changes, 
 }
 
 function SourceTruth({ source }: { source: CanvasSourceSummary }) {
-  const Icon = source.tone === "warning" || source.tone === "error" ? AlertCircle : Info
+  const Icon = source.tone === CanvasSourceTone.Warning || source.tone === CanvasSourceTone.Error ? AlertCircle : Info
   return (
     <div
       className={cn(
         "mx-auto mt-4 inline-flex max-w-2xl items-center gap-2 rounded-full border px-3 py-1.5 text-xs",
-        source.tone === "warning"
+        source.tone === CanvasSourceTone.Warning
           ? "border-gold/30 bg-gold/10 text-foreground"
-          : source.tone === "error"
+          : source.tone === CanvasSourceTone.Error
             ? "border-destructive/25 bg-destructive/10 text-destructive"
             : "border-border bg-secondary/70 text-muted-foreground"
       )}

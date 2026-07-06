@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from enum import Enum
 import hashlib
 import json
 import mimetypes
@@ -23,9 +24,13 @@ from .canvas_v2 import (
 )
 from .indexer import index_workspace
 from .ir import (
+    append_pending_conversation,
     atomic_write_json,
     canvas_map_handoff,
     canvas_ir_path,
+    ConversationRole,
+    ConversationTurnKind,
+    get_pending_request,
     list_pending,
     load_canvas_ir,
     load_ir,
@@ -41,6 +46,11 @@ from .core.behavior_canvas import (
     BEHAVIOR_CANVAS_SCHEMA,
     BEHAVIOR_CANVAS_WRAPPER_SCHEMA,
     CANVAS_MAPPING_SCHEMA,
+    CanvasMappingMode,
+    CanvasProjectionEngine,
+    CanvasSourceKind,
+    CanvasSourceReason,
+    CanvasSourceStatus,
     build_behavior_canvas,
     canvas_source_metadata,
 )
@@ -59,6 +69,16 @@ DEMO_MARKER_FILENAME = ".agentcanvas-demo"
 CANVAS_V2_SCHEMA = "agentcanvas.canvas.v2"
 SERVER_HEARTBEAT_FILENAME = "server.heartbeat.json"
 HEARTBEAT_INTERVAL_SECONDS = 15
+
+
+class AppContextMode(str, Enum):
+    LANDING = "landing"
+    WORKSPACE = "workspace"
+    DEMO = "demo"
+
+
+class CanvasHandoffReason(str, Enum):
+    WORKSPACE_NOT_SELECTED = "workspace_not_selected"
 
 
 def resolve_assistant(agent: Optional[str]) -> Tuple[str, str]:
@@ -344,8 +364,8 @@ def canvas_v2_compat_envelope(workspace: Path, canvas_v2: Dict[str, Any]) -> Dic
     flow_count = len(canvas_v2.get("flows") or [])
     display_flow_count = len(display_canvas.get("journeys") or [])
     source = canvas_source_metadata(
-        "agent-authored",
-        "ready",
+        CanvasSourceKind.AGENT_AUTHORED,
+        CanvasSourceStatus.READY,
         is_empty=flow_count == 0,
         flow_count=flow_count,
     )
@@ -354,8 +374,8 @@ def canvas_v2_compat_envelope(workspace: Path, canvas_v2: Dict[str, Any]) -> Dic
         metadata["source"] = source
         projection = metadata.setdefault("projection", {})
         if isinstance(projection, dict):
-            projection.setdefault("mode", "v2-compat")
-            projection.setdefault("engine", "canvas-v2-flatten")
+            projection.setdefault("mode", CanvasMappingMode.V2_COMPAT.value)
+            projection.setdefault("engine", CanvasProjectionEngine.CANVAS_V2_FLATTEN.value)
             projection.setdefault("displayFlowCount", display_flow_count)
             projection.setdefault("warnings", [])
 
@@ -367,9 +387,9 @@ def canvas_v2_compat_envelope(workspace: Path, canvas_v2: Dict[str, Any]) -> Dic
         "canvas_v2": deepcopy(canvas_v2),
         "mapping": {
             "schema": CANVAS_MAPPING_SCHEMA,
-            "status": "ready",
-            "mode": "agent-authored",
-            "primaryMode": "agent-authored",
+            "status": CanvasSourceStatus.READY.value,
+            "mode": CanvasMappingMode.AGENT_AUTHORED.value,
+            "primaryMode": CanvasMappingMode.AGENT_AUTHORED.value,
             "flowCount": flow_count,
             "displayFlowCount": display_flow_count,
             "source": source,
@@ -433,8 +453,8 @@ def fallback_flatten_canvas_v2(canvas_v2: Dict[str, Any]) -> Dict[str, Any]:
         "metadata": {
             "source_schema": canvas_v2.get("schema"),
             "projection": {
-                "mode": "v2-compat",
-                "engine": "local-fallback",
+                "mode": CanvasMappingMode.V2_COMPAT.value,
+                "engine": CanvasProjectionEngine.LOCAL_FALLBACK.value,
                 "displayFlowCount": len(journeys),
                 "warnings": [],
             },
@@ -527,18 +547,18 @@ def is_agent_authored_canvas(canvas: Dict[str, Any]) -> bool:
     if is_canvas_v2_document(canvas):
         return True
     mapping = canvas.get("mapping") if isinstance(canvas.get("mapping"), dict) else {}
-    if mapping.get("mode") == "agent-authored":
+    if mapping.get("mode") == CanvasMappingMode.AGENT_AUTHORED.value:
         return True
     source = mapping.get("source") if isinstance(mapping.get("source"), dict) else {}
-    if source.get("kind") == "agent-authored":
+    if source.get("kind") == CanvasSourceKind.AGENT_AUTHORED.value:
         return True
     body = canvas.get("canvas") if isinstance(canvas.get("canvas"), dict) else canvas
     metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
     source = metadata.get("source") if isinstance(metadata.get("source"), dict) else {}
-    if source.get("kind") == "agent-authored":
+    if source.get("kind") == CanvasSourceKind.AGENT_AUTHORED.value:
         return True
     projection = metadata.get("projection") if isinstance(metadata.get("projection"), dict) else {}
-    if projection.get("mode") == "agent-authored":
+    if projection.get("mode") == CanvasMappingMode.AGENT_AUTHORED.value:
         return True
     return False
 
@@ -599,16 +619,20 @@ def canvas_runtime_source(
     demo_fallback = landing_mode and not request_demo_mode and is_demo_workspace(workspace)
     demo_content = demo_mode or request_demo_mode or demo_fallback or is_demo_workspace(workspace)
     if demo_fallback:
-        kind = "demo-fallback"
-        status = "demo_fallback"
-        reason = "launch_page_without_workspace"
+        kind = CanvasSourceKind.DEMO_FALLBACK.value
+        status = CanvasSourceStatus.DEMO_FALLBACK.value
+        reason = CanvasSourceReason.LAUNCH_PAGE_WITHOUT_WORKSPACE.value
     elif demo_content:
-        kind = "demo"
-        status = "demo"
-        reason = "requested_demo_workspace" if (demo_mode or request_demo_mode) else "demo_workspace"
+        kind = CanvasSourceKind.DEMO.value
+        status = CanvasSourceStatus.DEMO.value
+        reason = (
+            CanvasSourceReason.REQUESTED_DEMO_WORKSPACE.value
+            if (demo_mode or request_demo_mode)
+            else CanvasSourceReason.DEMO_WORKSPACE.value
+        )
     else:
-        kind = "workspace"
-        status = "workspace"
+        kind = CanvasSourceKind.WORKSPACE.value
+        status = CanvasSourceStatus.WORKSPACE.value
         reason = None
     return {
         "kind": kind,
@@ -640,10 +664,16 @@ def with_runtime_source_status(
         body["metadata"] = metadata
 
     existing_source = metadata.get("source") if isinstance(metadata.get("source"), dict) else {}
-    existing_kind = str(existing_source.get("kind") or mapping.get("mode") or "heuristic-projection")
-    if existing_kind == "deterministic":
-        existing_kind = "heuristic-projection"
-    existing_status = str(mapping.get("status") or existing_source.get("status") or "ready")
+    existing_kind = str(
+        existing_source.get("kind")
+        or mapping.get("mode")
+        or CanvasSourceKind.HEURISTIC_PROJECTION.value
+    )
+    if existing_kind == CanvasMappingMode.DETERMINISTIC.value:
+        existing_kind = CanvasSourceKind.HEURISTIC_PROJECTION.value
+    existing_status = str(
+        mapping.get("status") or existing_source.get("status") or CanvasSourceStatus.READY.value
+    )
     existing_empty = bool(existing_source.get("isEmpty") or mapping.get("empty"))
     existing_stale = bool(existing_source.get("isStale") or mapping.get("stale"))
     effective_stale = stale or existing_stale
@@ -653,16 +683,19 @@ def with_runtime_source_status(
     reason = str(existing_source.get("reason")) if existing_source.get("reason") else None
     is_fallback = bool(existing_source.get("isFallback"))
     if demo_fallback:
-        kind = "demo-fallback"
-        status = "demo_fallback"
-        reason = "launch_page_without_workspace"
+        kind = CanvasSourceKind.DEMO_FALLBACK.value
+        status = CanvasSourceStatus.DEMO_FALLBACK.value
+        reason = CanvasSourceReason.LAUNCH_PAGE_WITHOUT_WORKSPACE.value
         is_fallback = True
-    elif demo_content and kind not in {"agent-authored", "empty"}:
-        kind = "demo"
-        status = "demo"
-        reason = reason or "demo_workspace"
+    elif demo_content and kind not in {
+        CanvasSourceKind.AGENT_AUTHORED.value,
+        CanvasSourceKind.EMPTY.value,
+    }:
+        kind = CanvasSourceKind.DEMO.value
+        status = CanvasSourceStatus.DEMO.value
+        reason = reason or CanvasSourceReason.DEMO_WORKSPACE.value
     if effective_stale:
-        status = "stale_cache"
+        status = CanvasSourceStatus.STALE_CACHE.value
         reason = stale_reason or reason
 
     source = canvas_source_metadata(
@@ -803,7 +836,24 @@ def make_handler(
                 return
 
             if parsed.path == "/api/pending":
-                self.write_json({"ok": True, "pending": list_pending(workspace)})
+                self.write_json({"ok": True, "pending": list_pending(workspace, summary=True)})
+                return
+
+            pending_id = AgentCanvasHandler.pending_request_id(self, parsed.path)
+            if pending_id:
+                try:
+                    pending = get_pending_request(
+                        workspace,
+                        pending_id,
+                        since=parse_qs(parsed.query).get("since", [None])[0],
+                    )
+                except FileNotFoundError as exc:
+                    self.write_json(
+                        {"ok": False, "error": str(exc)},
+                        status=HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                self.write_json({"ok": True, "pending": pending})
                 return
 
             if parsed.path == "/api/health":
@@ -822,19 +872,19 @@ def make_handler(
                 )
                 workspace_profile = load_workspace_profile(workspace)
                 mode = (
-                    "landing"
+                    AppContextMode.LANDING.value
                     if landing_mode and not request_demo_mode
-                    else "demo"
+                    else AppContextMode.DEMO.value
                     if effective_demo_mode
-                    else "workspace"
+                    else AppContextMode.WORKSPACE.value
                 )
                 canvas_handoff = canvas_map_handoff(workspace)
-                if mode == "landing":
+                if mode == AppContextMode.LANDING.value:
                     canvas_handoff = {
                         **canvas_handoff,
                         "readable": False,
                         "needsAuthoring": False,
-                        "reason": "workspace_not_selected",
+                        "reason": CanvasHandoffReason.WORKSPACE_NOT_SELECTED.value,
                         "workspacePath": "",
                         "outputPath": "",
                         "instruction": None,
@@ -844,7 +894,7 @@ def make_handler(
                         "ok": True,
                         "context": {
                             "workspace": workspace.name,
-                            "workspacePath": "" if mode == "landing" else str(workspace),
+                            "workspacePath": "" if mode == AppContextMode.LANDING.value else str(workspace),
                             "workspaceKind": workspace_profile["kind"],
                             "workspaceProfile": workspace_profile,
                             "productLanguage": workspace_profile["product_language"],
@@ -1014,6 +1064,36 @@ def make_handler(
                 self.write_json({"ok": True, "pending": pending})
                 return
 
+            answer_pending_id = self.pending_answer_id(parsed.path)
+            if answer_pending_id:
+                payload = self.read_json_body()
+                if payload is None:
+                    return
+                text = payload.get("answer") or payload.get("text")
+                if not isinstance(text, str) or not text.strip():
+                    self.write_json(
+                        {"ok": False, "error": "answer text is required"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                try:
+                    pending = append_pending_conversation(
+                        workspace,
+                        answer_pending_id,
+                        role=ConversationRole.USER.value,
+                        kind=ConversationTurnKind.ANSWER.value,
+                        text=text,
+                        actor=self.request_session_id(parsed, payload) or "agentcanvas-web",
+                    )
+                except (FileNotFoundError, ValueError) as exc:
+                    self.write_json(
+                        {"ok": False, "error": str(exc)},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                self.write_json({"ok": True, "pending": pending})
+                return
+
             self.write_json(
                 {"ok": False, "error": "not found"},
                 status=HTTPStatus.NOT_FOUND,
@@ -1048,6 +1128,21 @@ def make_handler(
                 if isinstance(value, str) and value.strip():
                     return value.strip()
             return None
+
+        def pending_request_id(self, path: str) -> Optional[str]:
+            prefix = "/api/pending/"
+            if not path.startswith(prefix) or path.endswith("/answer"):
+                return None
+            pending_id = path[len(prefix) :].strip("/")
+            return unquote(pending_id) if pending_id else None
+
+        def pending_answer_id(self, path: str) -> Optional[str]:
+            prefix = "/api/pending/"
+            suffix = "/answer"
+            if not path.startswith(prefix) or not path.endswith(suffix):
+                return None
+            pending_id = path[len(prefix) : -len(suffix)].strip("/")
+            return unquote(pending_id) if pending_id else None
 
         def request_demo_mode(self, parsed) -> bool:
             value = parse_qs(parsed.query).get("demo", [""])[0]

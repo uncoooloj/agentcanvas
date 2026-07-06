@@ -29,6 +29,7 @@ from agentcanvas.mcp_server import (
     get_request,
     get_workspace_status,
     list_requests,
+    record_progress,
     record_sync,
     update_request,
     validate_canvas,
@@ -55,6 +56,25 @@ class McpServerContractTests(unittest.TestCase):
     def test_mcp_evidence_defaults_match_phase_1_contract(self):
         self.assertEqual(DEFAULT_EVIDENCE_MAX_ITEMS, 100)
         self.assertEqual(DEFAULT_EVIDENCE_MAX_BYTES, 48 * 1024)
+
+    def test_mcp_record_progress_writes_durable_progress(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+
+            result = record_progress(
+                str(workspace),
+                stage="surveying",
+                message="Reading routes and jobs",
+                current=1,
+                total=4,
+            )
+
+            self.assertTrue(result["ok"])
+            progress = result["progress"]
+            self.assertEqual("surveying", progress["stage"])
+            self.assertEqual("Reading routes and jobs", progress["message"])
+            self.assertEqual(1, progress["current"])
+            self.assertTrue((workspace / ".agentcanvas" / "progress.json").is_file())
 
     def _workspace(self, temp_root):
         workspace = Path(temp_root) / "workspace"

@@ -34,6 +34,7 @@ from .ir import (
     update_pending_status,
 )
 from .lifecycle import LifecycleError, PENDING, PENDING_STATUSES, validate_status
+from .progress import write_progress, progress_status
 
 
 MCP_EXTRA_INSTALL_HINT = (
@@ -190,6 +191,20 @@ def get_evidence(
         "total_candidates": len(evidence_items),
         "byte_count": used_bytes,
     }
+
+
+def record_progress(
+    workspace: str = ".",
+    *,
+    stage: str,
+    message: str,
+    current: Optional[int] = None,
+    total: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Write durable mapping progress for the local UI to display."""
+
+    write_progress(workspace, stage=stage, message=message, current=current, total=total)
+    return {"ok": True, "progress": progress_status(workspace)}
 
 
 def apply_canvas(
@@ -439,6 +454,22 @@ def run_mcp_server(default_workspace: str = ".") -> int:
             cursor=cursor,
             max_items=max_items,
             max_bytes=max_bytes,
+        )
+
+    @server.tool()
+    def agentcanvas_record_progress(
+        stage: str,
+        message: str,
+        workspace: str = default_workspace,
+        current: Optional[int] = None,
+        total: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        return record_progress(
+            workspace,
+            stage=stage,
+            message=message,
+            current=current,
+            total=total,
         )
 
     @server.tool()

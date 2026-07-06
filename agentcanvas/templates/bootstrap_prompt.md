@@ -49,6 +49,16 @@ stored at:
 
 $canvas_path
 
+While you are indexing or mapping flows, keep the UI honest by recording durable
+progress:
+
+```bash
+agentcanvas progress --workspace $workspace_shell --stage surveying --message "Reviewing entry points"
+```
+
+If you are using MCP, call `agentcanvas_record_progress` with the same stage,
+message, and optional current/total counts.
+
 If workflow evidence is missing and the user asked you to initialize or refresh
 AgentCanvas, run:
 

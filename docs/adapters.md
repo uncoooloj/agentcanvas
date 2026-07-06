@@ -100,6 +100,7 @@ MCP exposes the same local state and lifecycle as the CLI:
 - `agentcanvas_workspace_status`
 - `agentcanvas_get_canvas`
 - `agentcanvas_get_evidence`
+- `agentcanvas_record_progress`
 - `agentcanvas_apply_canvas`
 - `agentcanvas_validate_canvas`
 - `agentcanvas_list_requests`

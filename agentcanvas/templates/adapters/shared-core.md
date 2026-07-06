@@ -18,6 +18,7 @@ Preferred MCP order:
 2. `agentcanvas_get_answers`
 3. `agentcanvas_get_canvas`
 4. `agentcanvas_get_evidence`
+5. `agentcanvas_record_progress`
 
 CLI fallback:
 

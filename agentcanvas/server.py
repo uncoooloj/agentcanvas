@@ -56,7 +56,7 @@ from .core.behavior_canvas import (
 )
 from .core.workspace_profile import infer_workspace_profile
 from .failure_ids import FailureId, failure_payload
-from .progress import ProgressError, progress_status, safe_progress_status
+from .progress import ProgressError, progress_status, safe_progress_status, write_progress
 
 
 # Known coding-agent platforms that may launch AgentCanvas, with human labels.
@@ -987,6 +987,23 @@ def make_handler(
                         "summary": graph["summary"],
                     }
                 )
+                return
+
+            if parsed.path == "/api/progress":
+                payload = self.read_json_body()
+                if payload is None:
+                    return
+                try:
+                    write_progress(
+                        workspace,
+                        stage=payload.get("stage"),
+                        message=payload.get("message"),
+                        current=payload.get("current"),
+                        total=payload.get("total"),
+                    )
+                    self.write_json({"ok": True, "progress": progress_status(workspace)})
+                except ProgressError as exc:
+                    self.write_json(exc.to_dict(), status=HTTPStatus.BAD_REQUEST)
                 return
 
             if parsed.path == "/api/canvas/apply":

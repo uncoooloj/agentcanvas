@@ -28,12 +28,16 @@ class _FakeHandler:
     def __init__(self, handler_cls):
         self.handler_cls = handler_cls
         self.response = None
+        self.body = {}
 
     def authorized(self, _parsed):
         return True
 
     def write_json(self, payload, status=200):
         self.response = {"status": status, "payload": payload}
+
+    def read_json_body(self):
+        return self.body
 
     def request_session_id(self, *args, **kwargs):
         return self.handler_cls.request_session_id(self, *args, **kwargs)
@@ -187,6 +191,55 @@ class ProgressTests(unittest.TestCase):
             self.assertIsNone(progress["progress"])
             self.assertEqual(".agentcanvas/progress.json", progress["relativePath"])
             self.assertIn("No progress", progress["notice"])
+
+    def test_progress_api_writes_durable_progress(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+            fake.body = {
+                "stage": "mapping_flows",
+                "message": "Drafting checkout and returns",
+                "current": 2,
+                "total": 3,
+            }
+
+            handler_cls.handle_api_post(fake, urlparse("/api/progress?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            progress = fake.response["payload"]["progress"]
+            self.assertTrue(progress["exists"])
+            self.assertEqual("mapping_flows", progress["stage"])
+            self.assertEqual("Drafting checkout and returns", progress["message"])
+            self.assertEqual(2, progress["current"])
+            durable_path = workspace / ".agentcanvas" / "progress.json"
+            self.assertTrue(durable_path.is_file())
+
+    def test_progress_api_rejects_invalid_progress(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+            fake.body = {"stage": "thinking", "message": "Thinking"}
+
+            handler_cls.handle_api_post(fake, urlparse("/api/progress?token=token"))
+
+            self.assertEqual(fake.response["status"], 400)
+            self.assertFalse(fake.response["payload"]["ok"])
+            self.assertEqual("INVALID_PROGRESS_STAGE", fake.response["payload"]["error"]["code"])
+            self.assertFalse((workspace / ".agentcanvas" / "progress.json").exists())
 
     def test_progress_api_and_context_include_progress(self):
         with tempfile.TemporaryDirectory() as temp_root:

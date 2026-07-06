@@ -18,6 +18,7 @@ PACKAGED_WEB_DIR = PROJECT_ROOT / "agentcanvas" / "web"
 WRANGLER_CONFIG = PROJECT_ROOT / "wrangler.jsonc"
 WRANGLER_AGENTCANVAS_CONFIG = PROJECT_ROOT / "wrangler.agentcanvas.jsonc"
 DOGFOOD_PROOF_MANIFEST = PROJECT_ROOT / "tests" / "fixtures" / "dogfood-proof" / "manifest.valid.json"
+DOGFOOD_MATRIX_MANIFEST = PROJECT_ROOT / "tests" / "fixtures" / "dogfood-matrix" / "matrix.partial.json"
 MIN_PYTHON = (3, 9)
 
 
@@ -317,6 +318,13 @@ def run_python_checks(skip_runtime_smoke=False):
     run_step(
         "Dogfood proof manifest",
         [sys.executable, "scripts/verify_dogfood_proof.py", str(DOGFOOD_PROOF_MANIFEST)],
+        PROJECT_ROOT,
+        env=env,
+        timeout=60,
+    )
+    run_step(
+        "Dogfood matrix manifest shape",
+        [sys.executable, "scripts/verify_dogfood_matrix.py", str(DOGFOOD_MATRIX_MANIFEST)],
         PROJECT_ROOT,
         env=env,
         timeout=60,

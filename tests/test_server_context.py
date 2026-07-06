@@ -10,6 +10,10 @@ from agentcanvas.ir import canvas_map_handoff
 from agentcanvas.server import make_handler
 
 
+def _prompt_path(path: Path) -> str:
+    return str(path).replace("\\", "/")
+
+
 def _write(root: Path, relative_path: str, content: str) -> None:
     path = root / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,7 +56,7 @@ class ServerContextTests(unittest.TestCase):
                 handoff["outputPath"],
             )
             instruction = handoff["instruction"]
-            self.assertIn(str(resolved), instruction)
+            self.assertIn(_prompt_path(resolved), instruction)
             self.assertIn(".agentcanvas/canvas.ir.json", instruction)
             self.assertIn("pip install use-agentcanvas", instruction)
             self.assertNotRegex(instruction, r"pip install\s+agentcanvas\b")
@@ -101,7 +105,7 @@ class ServerContextTests(unittest.TestCase):
             self.assertTrue(handoff["needsAuthoring"])
             self.assertEqual("missing", handoff["reason"])
             self.assertEqual(str(resolved), handoff["workspacePath"])
-            self.assertIn(str(resolved), handoff["instruction"])
+            self.assertIn(_prompt_path(resolved), handoff["instruction"])
             self.assertIn(".agentcanvas/canvas.ir.json", handoff["instruction"])
             self.assertNotIn("agentcanvas start", handoff["instruction"])
             self.assertIn("agentcanvas up --workspace", handoff["instruction"])

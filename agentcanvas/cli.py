@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -87,6 +88,11 @@ def build_parser() -> argparse.ArgumentParser:
     health_parser.add_argument("path", nargs="?", help="workspace path to inspect")
     health_parser.add_argument("--workspace", help="workspace path to inspect")
     health_parser.set_defaults(func=cmd_health)
+
+    mcp_parser = subparsers.add_parser("mcp", help="run the AgentCanvas MCP server over stdio")
+    mcp_parser.add_argument("path", nargs="?", help="default workspace path for MCP tools")
+    mcp_parser.add_argument("--workspace", help="default workspace path for MCP tools")
+    mcp_parser.set_defaults(func=cmd_mcp)
 
     prompt_parser = subparsers.add_parser(
         "prompt",
@@ -233,6 +239,21 @@ def cmd_health(args: argparse.Namespace) -> int:
     workspace = resolve_workspace(selected_workspace(args))
     print(format_map_health(map_health(workspace)))
     return 0
+
+
+def cmd_mcp(args: argparse.Namespace) -> int:
+    workspace = str(resolve_workspace(selected_workspace(args)))
+    try:
+        from .mcp_server import MCP_EXTRA_INSTALL_HINT, run_mcp_server
+
+        return run_mcp_server(default_workspace=workspace)
+    except ModuleNotFoundError as exc:
+        if exc.name == "mcp":
+            from .mcp_server import MCP_EXTRA_INSTALL_HINT
+
+            print(MCP_EXTRA_INSTALL_HINT, file=sys.stderr)
+            return 3
+        raise
 
 
 def cmd_prompt(args: argparse.Namespace) -> int:

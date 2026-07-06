@@ -24,6 +24,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+mcp = ["mcp>=1.2"]
+
 [project.urls]
 Homepage = "https://github.com/uncoooloj/agentcanvas"
 Repository = "https://github.com/uncoooloj/agentcanvas"

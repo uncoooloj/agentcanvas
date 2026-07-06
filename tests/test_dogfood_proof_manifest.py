@@ -43,6 +43,7 @@ class DogfoodProofManifestTests(unittest.TestCase):
                 ".git/HEAD",
                 ".pytest_cache/README.md",
                 "__pycache__/main.cpython-39.pyc",
+                "docs/private/release-matrix.local.json",
                 "node_modules/example/package.json",
                 "dist/build.txt",
             ]:

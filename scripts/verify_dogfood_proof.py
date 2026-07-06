@@ -34,6 +34,9 @@ HASH_SKIP_DIRS = {
     "target",
 }
 HASH_SKIP_SUFFIXES = {".pyc", ".pyo"}
+HASH_SKIP_PATH_PREFIXES = {
+    ("docs", "private"),
+}
 
 
 class DogfoodProofError(ValueError):
@@ -45,7 +48,10 @@ def stable_directory_sha256(root: Path) -> str:
         raise DogfoodProofError(f"workspace fixture path does not exist or is not a directory: {root}")
     digest = hashlib.sha256()
     for path in sorted(item for item in root.rglob("*") if item.is_file()):
-        if HASH_SKIP_DIRS.intersection(path.relative_to(root).parts):
+        relative_parts = path.relative_to(root).parts
+        if HASH_SKIP_DIRS.intersection(relative_parts):
+            continue
+        if any(relative_parts[: len(prefix)] == prefix for prefix in HASH_SKIP_PATH_PREFIXES):
             continue
         if path.suffix in HASH_SKIP_SUFFIXES:
             continue

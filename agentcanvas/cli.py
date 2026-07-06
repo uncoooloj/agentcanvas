@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Sequence
 
 from . import __version__
+from .adapters import (
+    AGENT_UNDETECTED_EXIT,
+    AdapterSetupError,
+    SUPPORTED_AGENTS,
+    setup_adapter,
+)
 from .demo import demo_workspace
 from .indexer import format_index_summary, index_workspace
 from .ir import (
@@ -97,6 +103,10 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_parser.add_argument("path", nargs="?", help="default workspace path for MCP tools")
     mcp_parser.add_argument("--workspace", help="default workspace path for MCP tools")
     mcp_parser.set_defaults(func=cmd_mcp)
+
+    setup_parser = subparsers.add_parser("setup", help="install AgentCanvas instructions for an AI agent")
+    add_setup_arguments(setup_parser)
+    setup_parser.set_defaults(func=cmd_setup)
 
     prompt_parser = subparsers.add_parser(
         "prompt",
@@ -208,6 +218,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def add_setup_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("path", nargs="?", help="workspace path to configure")
+    parser.add_argument("--workspace", help="workspace path to configure")
+    parser.add_argument(
+        "--agent",
+        required=True,
+        choices=sorted(SUPPORTED_AGENTS),
+        help="agent adapter to configure",
+    )
+    parser.add_argument(
+        "--write-codex-config",
+        action="store_true",
+        help="also write the optional ~/.codex/config.toml MCP snippet for Codex",
+    )
+    parser.add_argument(
+        "--codex-config",
+        help="override Codex config path for --write-codex-config",
+    )
+
+
 def cmd_index(args: argparse.Namespace) -> int:
     workspace = resolve_workspace(selected_workspace(args))
     workflow_ir = index_workspace(workspace)
@@ -274,6 +304,23 @@ def cmd_mcp(args: argparse.Namespace) -> int:
             print(MCP_EXTRA_INSTALL_HINT, file=sys.stderr)
             return 3
         raise
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    workspace = resolve_workspace(selected_workspace(args))
+    try:
+        result = setup_adapter(
+            workspace,
+            agent=args.agent,
+            write_codex_config=bool(getattr(args, "write_codex_config", False)),
+            codex_config_path=getattr(args, "codex_config", None),
+        )
+    except AdapterSetupError as exc:
+        print(json.dumps(exc.to_dict(), indent=2, sort_keys=True), file=sys.stderr)
+        return AGENT_UNDETECTED_EXIT if exc.code == "AGENT_UNDETECTED" else 1
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
 
 
 def cmd_prompt(args: argparse.Namespace) -> int:
@@ -674,7 +721,10 @@ def selected_workspace(args: argparse.Namespace, *, demo_default: bool = False) 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    actual_argv: Sequence[str] = sys.argv[1:] if argv is None else argv
+    if len(actual_argv) > 0 and actual_argv[0] == "init":
+        actual_argv = ("setup", *actual_argv[1:])
+    args = parser.parse_args(actual_argv)
     return args.func(args)
 
 

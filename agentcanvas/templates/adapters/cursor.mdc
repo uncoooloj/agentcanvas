@@ -1,0 +1,13 @@
+---
+description: Use AgentCanvas for workflow maps and pending implementation requests.
+alwaysApply: false
+---
+
+{header}
+
+{shared_core}
+
+## Cursor Notes
+
+Prefer the AgentCanvas MCP server when configured. If MCP is unavailable, use
+the CLI commands in this rule and the files under `.agentcanvas/`.

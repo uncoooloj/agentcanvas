@@ -45,18 +45,18 @@ The skill tells the agent to:
 3. treat `.agentcanvas/workflow.ir.json` as evidence
 4. treat `.agentcanvas/canvas.ir.json` as the stored browser canvas
 5. update the canvas with `agentcanvas canvas apply --base-revision <revision> --input <ops.json>` for canvas-only edits
-6. read `.agentcanvas/pending/*.md` and matching `.json` only for implementation
+6. read `.agentcanvas/pending/*.md` and matching `.json` only for implementation requests
+7. inspect the current workspace context before source-code editing
+8. ask concise clarifying questions if the request is ambiguous, risky, or
+   incomplete
+9. ask those questions with `agentcanvas reply`
+10. update status with `agentcanvas status`
+11. run the relevant tests
+12. re-index with `agentcanvas index` after code changes
 
 Legacy display canvases from older AgentCanvas builds auto-migrate on
 `agentcanvas canvas apply`. Use `agentcanvas canvas migrate --dry-run` for
 diagnostics, not as a normal user step.
-   requests
-7. inspect the current workspace context before source-code editing
-8. ask concise clarifying questions if the request is ambiguous, risky, or
-   incomplete
-9. update status with `agentcanvas status`
-10. run the relevant tests
-11. re-index with `agentcanvas index` after code changes
 
 This is the best first integration because it stays portable and does not need a
 server-to-agent bridge.
@@ -83,17 +83,67 @@ refreshes `workflow.ir.json`; it should not be required for canvas-only edits.
 
 Use this when an agent prefers tools instead of shell commands or raw HTTP.
 
-MCP is a planned path. It should expose the same simple actions:
+Install MCP support with the optional extra:
 
-- get context
-- read or update the display canvas
-- list pending requests
-- create a request
-- update request status
-- re-index the workspace
+```bash
+pip install 'use-agentcanvas[mcp]'
+```
+
+Then run:
+
+```bash
+agentcanvas mcp --workspace <workspace>
+```
+
+MCP exposes the same local state and lifecycle as the CLI:
+
+- `agentcanvas_workspace_status`
+- `agentcanvas_get_canvas`
+- `agentcanvas_get_evidence`
+- `agentcanvas_apply_canvas`
+- `agentcanvas_validate_canvas`
+- `agentcanvas_list_requests`
+- `agentcanvas_get_request`
+- `agentcanvas_update_request`
+- `agentcanvas_ask_user`
+- `agentcanvas_get_answers`
+- `agentcanvas_record_sync`
 
 Do not make MCP smarter than the product contract. It is a nicer handle for the
 same local state.
+
+If the optional MCP dependency is missing, `agentcanvas mcp` exits with code `3`,
+prints nothing to stdout, and prints the install hint to stderr.
+
+### 3.1 Setup
+
+Use setup when you want AgentCanvas to place the right local instructions for a
+specific agent:
+
+```bash
+agentcanvas setup --agent claude-code --workspace <workspace>
+agentcanvas setup --agent codex --workspace <workspace>
+agentcanvas setup --agent cursor --workspace <workspace>
+agentcanvas setup --agent generic --workspace <workspace>
+agentcanvas setup --agent auto --workspace <workspace>
+```
+
+`init` is accepted as an alias for agents that naturally try that word. `auto`
+only succeeds when AgentCanvas can prove the invoking agent from environment or
+workspace markers. If detection is empty or ambiguous it exits with code `4` and
+prints `AGENT_UNDETECTED` so the agent can rerun with an explicit `--agent`.
+
+Setup writes only adapter files:
+
+- Claude Code: `.claude/skills/agentcanvas/SKILL.md` and `.mcp.json`
+- Codex: an `AGENTS.md` section between AgentCanvas markers
+- Cursor: `.cursor/rules/agentcanvas.mdc` and `.cursor/mcp.json`
+- Generic: `AGENT_CANVAS.md` with no MCP dependency
+- Antigravity: prints manual instructions only for now
+
+Re-running setup is idempotent. Codex global config is not written unless
+`--write-codex-config` is passed; by default AgentCanvas prints the snippet
+instead.
 
 ### 4. Webhooks
 

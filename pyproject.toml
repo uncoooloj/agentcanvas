@@ -43,6 +43,8 @@ include = ["agentcanvas*"]
 agentcanvas = [
   "web/*",
   "web/assets/*",
+  "templates/*",
+  "templates/adapters/*",
   "demo_project/*",
   "demo_project/src/*",
   "demo_project/src/actions/*",

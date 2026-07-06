@@ -385,7 +385,7 @@ export default function App() {
     }
 
     void pollProgress()
-    const timer = window.setInterval(pollProgress, HEALTH_POLL_INTERVAL_MS)
+    const timer = window.setInterval(pollProgress, PENDING_ACTIVITY_POLL_INTERVAL_MS)
     return () => {
       cancelled = true
       window.clearInterval(timer)

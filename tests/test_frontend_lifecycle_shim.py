@@ -86,6 +86,15 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertNotIn("setInterval", overlay)
         self.assertNotIn("PENDING_ACTIVITY_POLL_INTERVAL_MS", overlay)
 
+    def test_progress_polling_uses_activity_cadence_not_health_cadence(self):
+        app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("async function pollProgress()", app)
+        progress_section = app.split("async function pollProgress()", 1)[1].split("async function pollHealth()", 1)[0]
+        self.assertIn("fetchProgress()", progress_section)
+        self.assertIn("PENDING_ACTIVITY_POLL_INTERVAL_MS", progress_section)
+        self.assertNotIn("HEALTH_POLL_INTERVAL_MS", progress_section)
+
     def test_direct_canvas_map_edits_include_add_and_remove(self):
         edits = (PROJECT_ROOT / "frontend" / "src" / "lib" / "edits.ts").read_text(encoding="utf-8")
         composer = (PROJECT_ROOT / "frontend" / "src" / "components" / "StepComposer.tsx").read_text(encoding="utf-8")

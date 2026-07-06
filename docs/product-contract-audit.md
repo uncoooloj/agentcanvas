@@ -134,7 +134,9 @@ Today the loop is:
 agentcanvas pending --workspace <workspace>
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
 agentcanvas index --workspace <workspace>
-agentcanvas status --workspace <workspace> <pending-id> --status done --note "Implemented and verified."
+agentcanvas status --workspace <workspace> <pending-id> --status implemented --note "Implemented."
+agentcanvas status --workspace <workspace> <pending-id> --status verified --note "Verified." --evidence-check "<test or smoke check>" --evidence-result "passed" --evidence-actor "<agent name>"
+agentcanvas status --workspace <workspace> <pending-id> --status done --note "Done."
 ```
 
 Needed next contract:

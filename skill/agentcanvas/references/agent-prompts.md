@@ -65,7 +65,9 @@ I need one decision before editing: <short plain-language question about the req
 agentcanvas status --workspace <workspace> <pending-id> --status needs_input --note "I need one decision before editing: <question>"
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
 agentcanvas index --workspace <workspace>
-agentcanvas status --workspace <workspace> <pending-id> --status done --note "Implemented and verified: <test or smoke check>."
+agentcanvas status --workspace <workspace> <pending-id> --status implemented --note "Implemented."
+agentcanvas status --workspace <workspace> <pending-id> --status verified --note "Verified." --evidence-check "<test or smoke check>" --evidence-result "passed" --evidence-actor "<agent name>"
+agentcanvas status --workspace <workspace> <pending-id> --status done --note "Done."
 ```
 
 ## Copy Fallback Template
@@ -91,11 +93,13 @@ If anything is unclear, risky, incomplete, or contradicted by the workspace, ask
 
 agentcanvas status --workspace <workspace> <pending-id> --status needs_input --note "I need one decision before editing: <question>"
 
-Once clear, mark the request in_progress, make the smallest change that satisfies the acceptance criteria, run the relevant test or smoke check, re-index with agentcanvas index --workspace <workspace> to refresh evidence, then mark the request done:
+Once clear, mark the request in_progress, make the smallest change that satisfies the acceptance criteria, run the relevant test or smoke check, re-index with agentcanvas index --workspace <workspace> to refresh evidence, then mark the request implemented, verified, and done:
 
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
 agentcanvas index --workspace <workspace>
-agentcanvas status --workspace <workspace> <pending-id> --status done --note "Implemented and verified: <test or smoke check>."
+agentcanvas status --workspace <workspace> <pending-id> --status implemented --note "Implemented."
+agentcanvas status --workspace <workspace> <pending-id> --status verified --note "Verified." --evidence-check "<test or smoke check>" --evidence-result "passed" --evidence-actor "<agent name>"
+agentcanvas status --workspace <workspace> <pending-id> --status done --note "Done."
 ```
 
 ## Copy Projection Template

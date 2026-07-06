@@ -91,12 +91,13 @@ After implementation, verify the change, refresh evidence, and update status:
 
 ```bash
 agentcanvas index --workspace <workspace>
-agentcanvas status --workspace <workspace> <pending-id> --status implemented --note "Implemented and verified with <check>."
-agentcanvas status --workspace <workspace> <pending-id> --status verified --note "Verified."
+agentcanvas status --workspace <workspace> <pending-id> --status implemented --note "Implemented."
+agentcanvas status --workspace <workspace> <pending-id> --status verified --note "Verified." --evidence-check "<command or smoke test>" --evidence-result "passed" --evidence-actor "<agent name>"
+agentcanvas status --workspace <workspace> <pending-id> --status done --note "Done."
 ```
 
-`verified` requires evidence when using MCP lifecycle tools. Never mark a
-request `done` unless the implementation has actually been verified.
+`verified` always requires evidence. Never mark a request `done` unless the
+implementation has actually been verified.
 
 ## Safety
 

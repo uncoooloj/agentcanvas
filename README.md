@@ -298,7 +298,9 @@ When it has implemented and verified the change:
 
 ```bash
 agentcanvas index --workspace /path/to/your/project
-agentcanvas status --workspace /path/to/your/project <pending-id> --status done --note "Implemented and verified."
+agentcanvas status --workspace /path/to/your/project <pending-id> --status implemented --note "Implemented."
+agentcanvas status --workspace /path/to/your/project <pending-id> --status verified --note "Verified." --evidence-check "<test or smoke check>" --evidence-result "passed" --evidence-actor "<agent name>"
+agentcanvas status --workspace /path/to/your/project <pending-id> --status done --note "Done."
 ```
 
 `agentcanvas index` refreshes `.agentcanvas/workflow.ir.json` after code changes.

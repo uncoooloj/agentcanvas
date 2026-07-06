@@ -173,6 +173,10 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--status", required=True, choices=sorted(PENDING_STATUSES))
     status_parser.add_argument("--note", help="short status note for the user")
     status_parser.add_argument("--session-id", help="only update a request from this agent session")
+    status_parser.add_argument("--evidence-check", help="verification check that was run before marking verified")
+    status_parser.add_argument("--evidence-result", help="verification result, for example 'passed'")
+    status_parser.add_argument("--evidence-actor", default="agentcanvas-cli", help="who performed verification")
+    status_parser.add_argument("--evidence-at", help="ISO timestamp for verification; defaults to now")
     status_parser.set_defaults(func=cmd_status)
 
     reply_parser = subparsers.add_parser(
@@ -464,6 +468,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             args.status,
             note=getattr(args, "note", None),
             session_id=getattr(args, "session_id", None),
+            evidence=status_evidence_from_args(args),
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not update pending request: {exc}")
@@ -473,6 +478,19 @@ def cmd_status(args: argparse.Namespace) -> int:
     if item.get("note"):
         print(item["note"])
     return 0
+
+
+def status_evidence_from_args(args: argparse.Namespace) -> Dict[str, Any] | None:
+    check = getattr(args, "evidence_check", None)
+    result = getattr(args, "evidence_result", None)
+    if not check and not result:
+        return None
+    return {
+        "actor": getattr(args, "evidence_actor", None) or "agentcanvas-cli",
+        "at": getattr(args, "evidence_at", None) or now_utc(),
+        "check": check or "verification",
+        "result": result or "passed",
+    }
 
 
 def cmd_reply(args: argparse.Namespace) -> int:

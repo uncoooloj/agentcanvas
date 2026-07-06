@@ -13,10 +13,12 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from agentcanvas.bootstrap import render_bootstrap_prompt
 from agentcanvas.lifecycle import (
     DONE,
+    IMPLEMENTED,
     IN_PROGRESS,
     NEEDS_INPUT,
     PENDING,
     PENDING_STATUSES,
+    VERIFIED,
     transition_record,
 )
 from agentcanvas.workspace_lock import WorkspaceLockBusy, workspace_write_lock
@@ -703,12 +705,14 @@ def _markdown_for_pending(
         f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status {NEEDS_INPUT} --note \"What I need from you...\"",
         "```",
         "",
-        "When finished, mark it done. Only run `agentcanvas index` first if you "
-        "changed source code:",
+        "When finished, mark it implemented, then verified with evidence, then "
+        "done. Only run `agentcanvas index` first if you changed source code:",
         "",
         "```bash",
         f"# Source-code changes only: agentcanvas index --workspace {json.dumps(record.get('workspace') or '.')}",
-        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status {DONE} --note \"Implemented and verified.\"",
+        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status {IMPLEMENTED} --note \"Implemented.\"",
+        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status {VERIFIED} --note \"Verified.\" --evidence-check \"<command or smoke test>\" --evidence-result \"passed\" --evidence-actor \"<agent name>\"",
+        f"agentcanvas status --workspace {json.dumps(record.get('workspace') or '.')} {json.dumps(record['id'])} --status {DONE} --note \"Done.\"",
         "```",
         "",
     ]

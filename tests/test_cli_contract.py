@@ -386,6 +386,61 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             )
             self.assertEqual(updated["orphaned_refs"], [])
 
+            implemented_result = self._run_agentcanvas(
+                "status",
+                "raise-checkout-empty-state",
+                str(workspace),
+                "--status",
+                "implemented",
+                "--note",
+                "Implemented.",
+                "--session-id",
+                "session-1",
+                cwd=temp_root,
+            )
+            self.assertEqual(
+                implemented_result.returncode,
+                0,
+                implemented_result.stdout + implemented_result.stderr,
+            )
+            verified_result = self._run_agentcanvas(
+                "status",
+                "raise-checkout-empty-state",
+                str(workspace),
+                "--status",
+                "verified",
+                "--note",
+                "Verified.",
+                "--session-id",
+                "session-1",
+                "--evidence-check",
+                "npm test",
+                "--evidence-result",
+                "passed",
+                "--evidence-actor",
+                "codex",
+                "--evidence-at",
+                "2026-07-06T00:00:00Z",
+                cwd=temp_root,
+            )
+            self.assertEqual(
+                verified_result.returncode,
+                0,
+                verified_result.stdout + verified_result.stderr,
+            )
+            with (pending_dir / "raise-checkout-empty-state.json").open(encoding="utf-8") as handle:
+                verified = json.load(handle)
+            self.assertEqual(verified["status"], "verified")
+            self.assertEqual(
+                verified["verification"],
+                {
+                    "actor": "codex",
+                    "at": "2026-07-06T00:00:00Z",
+                    "check": "npm test",
+                    "result": "passed",
+                },
+            )
+
     def test_reply_command_appends_pending_conversation(self):
         from agentcanvas.ir import write_pending_change
 

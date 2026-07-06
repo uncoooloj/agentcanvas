@@ -9,6 +9,7 @@
     "build": "npm run generate:bootstrap-prompt && tsc -b && vite build",
     "build:agentcanvas": "AGENTCANVAS_VITE_BASE=/agentcanvas/ AGENTCANVAS_VITE_OUT_DIR=../dist/cloudflare-agentcanvas npm run build",
     "lint": "eslint .",
+    "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -49,6 +50,7 @@
     "tailwindcss": "^3.4.19",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
-    "vite": "^7.3.5"
+    "vite": "^7.3.5",
+    "vitest": "^4.1.9"
   }
 }

@@ -13,10 +13,21 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
+MIN_PYTHON = (3, 9)
 
 
 class VerificationError(RuntimeError):
     """A release verification step could not pass."""
+
+
+def require_supported_python(version_info=None):
+    version = version_info or sys.version_info
+    if tuple(version[:2]) < MIN_PYTHON:
+        raise VerificationError(
+            "AgentCanvas release verification requires Python 3.9 or newer. "
+            "Run `python3.9 scripts/verify_release.py` or use the Python version "
+            "configured in CI."
+        )
 
 
 def command_text(command):
@@ -135,6 +146,12 @@ def run_frontend_builds():
             env=frontend_env(temp_root_path / "cloudflare-agentcanvas", "/agentcanvas/"),
             timeout=300,
         )
+        run_step(
+            "Frontend unit tests",
+            [npm, "test"],
+            FRONTEND_DIR,
+            timeout=300,
+        )
 
 
 def run_runtime_smoke(env):
@@ -209,6 +226,7 @@ def main(argv=None):
     print(f"Project root: {PROJECT_ROOT}", flush=True)
 
     try:
+        require_supported_python()
         run_python_checks(skip_runtime_smoke=args.skip_runtime_smoke)
         if args.skip_frontend:
             print("\n== Frontend build ==", flush=True)

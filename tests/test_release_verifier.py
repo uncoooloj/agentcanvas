@@ -75,6 +75,21 @@ class ReleaseVerifierTests(unittest.TestCase):
         self.assertIn("could not start", str(raised.exception))
         self.assertIn("missing-tool", str(raised.exception))
 
+    def test_verifier_rejects_unsupported_python_with_clear_message(self):
+        verifier = load_verifier()
+
+        with self.assertRaises(verifier.VerificationError) as raised:
+            verifier.require_supported_python((3, 7, 17))
+
+        message = str(raised.exception)
+        self.assertIn("Python 3.9 or newer", message)
+        self.assertIn("python3.9 scripts/verify_release.py", message)
+
+    def test_verifier_accepts_declared_python_floor(self):
+        verifier = load_verifier()
+
+        verifier.require_supported_python((3, 9, 0))
+
     def test_run_step_can_map_exit_code_to_clear_message(self):
         verifier = load_verifier()
 

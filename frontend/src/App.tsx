@@ -49,13 +49,10 @@ import {
   CanvasSourceKind,
   CanvasSourceTone,
   CopyState,
-  CanvasV2Schema,
   FlowAction,
-  FlowNodeKind,
   JourneyActivity,
   MapFreshnessStatus,
   MapHealthStatus,
-  StepRole,
   findNode,
   type AppModel,
   type CanvasMapping,
@@ -75,6 +72,7 @@ import {
   CanvasV2NodeKind,
   CanvasV2Status,
 } from "@/lib/types"
+import { findNativeDisplayNodeByDisplayId, findNodeByNativeId, nativeNodeToDisplayNode } from "@/lib/nativeDisplay"
 
 const HOME = "__home__"
 const AUTH_EXPIRED_NOTICE = "This AgentCanvas link cannot sync anymore. Reopen AgentCanvas from your agent to keep this map live."
@@ -1670,54 +1668,6 @@ function JourneyView({
       </div>
     </div>
   )
-}
-
-function findNodeByNativeId(nodes: FlowNode[], nativeId: string): FlowNode | null {
-  for (const node of nodes) {
-    if (node.native?.nodeId === nativeId) return node
-    if (node.kind === FlowNodeKind.Branch) {
-      const found = findNodeByNativeId(node.then, nativeId) ?? findNodeByNativeId(node.otherwise, nativeId)
-      if (found) return found
-    }
-  }
-  return null
-}
-
-function findNativeDisplayNodeByDisplayId(flow: CanvasV2Flow | null | undefined, displayId: string): FlowNode | null {
-  if (!flow) return null
-  const nativeNode = flow.nodes.find((node) => nativeDisplayNodeId(flow.id, node.id) === displayId)
-  return nativeNode ? nativeNodeToDisplayNode(flow.id, nativeNode) : null
-}
-
-function nativeNodeToDisplayNode(flowId: string, node: CanvasV2Node): FlowNode {
-  const native = {
-    schema: CanvasV2Schema.Canvas,
-    flowId,
-    nodeId: node.id,
-    nodeKind: node.kind,
-  }
-  if (node.kind === CanvasV2NodeKind.Decision) {
-    return {
-      kind: FlowNodeKind.Branch,
-      id: nativeDisplayNodeId(flowId, node.id),
-      condition: node.title,
-      then: [],
-      otherwise: [],
-      native,
-    }
-  }
-  return {
-    kind: FlowNodeKind.Step,
-    id: nativeDisplayNodeId(flowId, node.id),
-    role: node.kind === CanvasV2NodeKind.When ? StepRole.When : StepRole.Do,
-    text: node.title,
-    detail: node.summary,
-    native,
-  }
-}
-
-function nativeDisplayNodeId(flowId: string, nodeId: string): string {
-  return `native:${flowId}:${nodeId}`
 }
 
 function DemoBanner({ thin }: { thin?: boolean }) {

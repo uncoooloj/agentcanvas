@@ -82,7 +82,7 @@ def validate_matrix(path: Path, *, gate: bool = False) -> Dict[str, Any]:
         if proof_path is not None:
             if not isinstance(proof_path, str) or not proof_path.strip():
                 raise DogfoodMatrixError(f"runs[{index}].proof_manifest_path must be a non-empty string")
-            proof_result = validate_proof_manifest(PROJECT_ROOT / proof_path)
+            proof_result = validate_proof_manifest(_resolve_project_path(proof_path))
             proof_count += 1
             if proof_result["agent"] != agent_id:
                 raise DogfoodMatrixError(
@@ -171,6 +171,13 @@ def _validate_recording(recording: Any, index: int) -> None:
         has_path = True
     if not has_path and not recording.get("notes"):
         raise DogfoodMatrixError(f"runs[{index}].recording must include a path or notes")
+
+
+def _resolve_project_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    return PROJECT_ROOT / path
 
 
 def _has_two_consecutive_attempts(attempts: Iterable[int]) -> bool:

@@ -96,7 +96,7 @@ def extract_source_facts(
     *,
     spec: LightweightLanguageSpec,
 ) -> Dict[str, Any]:
-    display_path = PurePosixPath(str(path)).as_posix()
+    display_path = PurePosixPath(str(path).replace("\\", "/")).as_posix()
     code = _mask_comments(source, spec)
     structural_code = _mask_strings(code)
     facts: List[Dict[str, Any]] = [
@@ -176,7 +176,7 @@ def _display_path(path: Path, workspace_root: str | Path | None) -> str:
             return PurePosixPath(path.resolve().relative_to(Path(workspace_root).resolve())).as_posix()
     except (OSError, ValueError):
         pass
-    return PurePosixPath(str(path)).as_posix()
+    return PurePosixPath(str(path).replace("\\", "/")).as_posix()
 
 
 def _read_error_bundle(spec: LightweightLanguageSpec, path: str, message: str) -> Dict[str, Any]:

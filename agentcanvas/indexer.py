@@ -357,7 +357,7 @@ def is_source_file(path: Path) -> bool:
 
 
 def to_posix(path: Path | PurePosixPath | str) -> str:
-    return PurePosixPath(str(path)).as_posix()
+    return PurePosixPath(str(path).replace("\\", "/")).as_posix()
 
 
 def safe_read_text(path: Path) -> Optional[str]:

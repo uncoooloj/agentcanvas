@@ -53,12 +53,12 @@ def validate_manifest(path: Path) -> Dict[str, Any]:
     workspace = _object(manifest, "workspace")
     if workspace.get("type") not in {"fixture", "local-project", "external-project"}:
         raise DogfoodProofError("workspace.type must be fixture, local-project, or external-project")
-    fixture_path = PROJECT_ROOT / _non_empty(workspace, "fixture_path")
+    fixture_path = _resolve_manifest_path(workspace, "fixture_path")
     expected_hash = _non_empty(workspace, "fixture_sha256")
     actual_hash = stable_directory_sha256(fixture_path)
     if actual_hash != expected_hash:
         raise DogfoodProofError(
-            f"workspace.fixture_sha256 mismatch for {fixture_path.relative_to(PROJECT_ROOT)}: "
+            f"workspace.fixture_sha256 mismatch for {_display_path(fixture_path)}: "
             f"expected {expected_hash}, got {actual_hash}"
         )
 
@@ -149,10 +149,24 @@ def _int_at_least(parent: Mapping[str, Any], key: str, minimum: int) -> int:
 
 
 def _existing_file(parent: Mapping[str, Any], key: str) -> Path:
-    path = PROJECT_ROOT / _non_empty(parent, key)
+    path = _resolve_manifest_path(parent, key)
     if not path.is_file():
         raise DogfoodProofError(f"{key} does not point to a file: {path}")
     return path
+
+
+def _resolve_manifest_path(parent: Mapping[str, Any], key: str) -> Path:
+    value = Path(_non_empty(parent, key)).expanduser()
+    if value.is_absolute():
+        return value
+    return PROJECT_ROOT / value
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return path.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def _validate_jsonl(path: Path) -> None:

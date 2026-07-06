@@ -294,12 +294,12 @@ export function projectToBehavior(graph: CodeGraph | null | undefined): AppModel
 }
 
 function isFixtureRef(ref: string): boolean {
-  const normalized = ref.toLowerCase()
+  const normalized = ref.replace(/\\/g, "/").toLowerCase()
   return /(^|\/)(__tests__|demo_project|demo_projects|examples|fixtures?|tests?)(\/|$)/.test(normalized)
 }
 
 function isEntrypointRef(ref: string): boolean {
-  const normalized = ref.toLowerCase()
+  const normalized = ref.replace(/\\/g, "/").toLowerCase()
   return /(^|\/)(cli|__main__|main|server|app|index)\.(py|tsx?|jsx?|mjs|cjs)$/.test(normalized)
 }
 

@@ -1227,7 +1227,7 @@ def _source_paths(
     for node in workflow_ir.get("nodes") or []:
         if not isinstance(node, Mapping) or node.get("type") != BehaviorNodeKind.FILE.value:
             continue
-        path = str(node.get("path") or "")
+        path = _normalize_repo_path(str(node.get("path") or ""))
         if not path:
             continue
         if suffixes and PurePosixPath(path).suffix.lower() not in suffixes:
@@ -1423,18 +1423,19 @@ def _workspace_root(workflow_ir: Mapping[str, Any]) -> Optional[Path]:
 
 
 def _parent_path(path: str) -> str:
-    parent = PurePosixPath(path).parent.as_posix()
+    parent = PurePosixPath(_normalize_repo_path(path)).parent.as_posix()
     return "." if parent in {"", "."} else parent
 
 
 def _line_ref(path: str, line: Any) -> str:
     if not path:
         return ""
+    normalized_path = _normalize_repo_path(path)
     try:
         line_int = int(line)
     except (TypeError, ValueError):
         line_int = 0
-    return f"{path}:{line_int}" if line_int > 0 else path
+    return f"{normalized_path}:{line_int}" if line_int > 0 else normalized_path
 
 
 def _safe_read(path: Path) -> str:
@@ -1449,8 +1450,12 @@ def _safe_read(path: Path) -> str:
 def _is_fixture_path(path: str) -> bool:
     if not path:
         return False
-    parts = {part.lower() for part in PurePosixPath(path).parts}
+    parts = {part.lower() for part in PurePosixPath(_normalize_repo_path(path)).parts}
     return bool(parts.intersection(FIXTURE_PARTS))
+
+
+def _normalize_repo_path(path: str) -> str:
+    return PurePosixPath(str(path).replace("\\", "/")).as_posix()
 
 
 def _dedupe(values: Iterable[str]) -> List[str]:

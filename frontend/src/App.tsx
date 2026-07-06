@@ -57,11 +57,14 @@ import {
   findNode,
   type AppModel,
   type CanvasMapping,
+  type CanvasApplyOperation,
   type CanvasSourceSummary,
   type CanvasV2Document,
   type CanvasV2Edge,
+  type CanvasV2EdgeOperationPayload,
   type CanvasV2Flow,
   type CanvasV2Node,
+  type CanvasV2NodeOperationPayload,
   type FlowNode,
   type Journey,
   type MapHealth,
@@ -834,10 +837,10 @@ async function applyCanvasMapEdit(
         {
           op: "upsert_node",
           flow: flowId,
-          node: {
+          node: canvasNodePayload({
             ...node,
             title,
-          },
+          }),
         },
       ],
     })
@@ -867,13 +870,13 @@ async function applyCanvasMapEdit(
   throw new Error("That action cannot be saved directly to the canvas map yet.")
 }
 
-function buildAddAfterOperations(flow: CanvasV2Flow, node: CanvasV2Node, title: string): Array<Record<string, unknown>> {
+function buildAddAfterOperations(flow: CanvasV2Flow, node: CanvasV2Node, title: string): CanvasApplyOperation[] {
   const outgoing = flow.edges.filter((edge) => edge.source === node.id)
   const newNodeId = uniqueCanvasId(
     `node:${node.id}:after:${slugId(title) || "step"}`,
     flow.nodes.map((item) => item.id)
   )
-  const operations: Array<Record<string, unknown>> = outgoing.map((edge) => ({
+  const operations: CanvasApplyOperation[] = outgoing.map((edge) => ({
     op: "delete_edge",
     flow: flow.id,
     target: edge.id,
@@ -885,7 +888,7 @@ function buildAddAfterOperations(flow: CanvasV2Flow, node: CanvasV2Node, title: 
       id: newNodeId,
       kind: CanvasV2NodeKind.Do,
       title,
-      evidenceRefs: [],
+      evidence_refs: [],
       status: CanvasV2Status.Proposed,
     },
   })
@@ -908,13 +911,13 @@ function buildAddAfterOperations(flow: CanvasV2Flow, node: CanvasV2Node, title: 
     operations.push({
       op: "upsert_edge",
       flow: flow.id,
-      edge: cleanCanvasEdge({
+      edge: canvasEdgePayload({
         id: edgeId,
         kind: edge.kind,
         source: newNodeId,
         target: edge.target,
         label: edge.label,
-        isDefault: edge.isDefault,
+        is_default: edge.isDefault,
         metadata: edge.metadata,
       }),
     })
@@ -922,7 +925,7 @@ function buildAddAfterOperations(flow: CanvasV2Flow, node: CanvasV2Node, title: 
   return operations
 }
 
-function buildRemoveNodeOperations(flow: CanvasV2Flow, node: CanvasV2Node): Array<Record<string, unknown>> {
+function buildRemoveNodeOperations(flow: CanvasV2Flow, node: CanvasV2Node): CanvasApplyOperation[] {
   if (flow.entryNode === node.id) {
     throw new Error("The first step in a flow cannot be removed directly from the map yet.")
   }
@@ -934,7 +937,7 @@ function buildRemoveNodeOperations(flow: CanvasV2Flow, node: CanvasV2Node): Arra
       .filter((edge) => !removedEdgeIds.has(edge.id))
       .map((edge) => edgeKey(edge.source, edge.target, edge.kind, edge.label))
   )
-  const operations: Array<Record<string, unknown>> = [...incoming, ...outgoing].map((edge) => ({
+  const operations: CanvasApplyOperation[] = [...incoming, ...outgoing].map((edge) => ({
     op: "delete_edge",
     flow: flow.id,
     target: edge.id,
@@ -952,13 +955,13 @@ function buildRemoveNodeOperations(flow: CanvasV2Flow, node: CanvasV2Node): Arra
       operations.push({
         op: "upsert_edge",
         flow: flow.id,
-        edge: cleanCanvasEdge({
+        edge: canvasEdgePayload({
           id: edgeId,
           kind: template.kind,
           source: sourceEdge.source,
           target: targetEdge.target,
           label: template.label,
-          isDefault: template.isDefault,
+          is_default: template.isDefault,
           metadata: template.metadata,
         }),
       })
@@ -978,8 +981,26 @@ function reconnectEdgeTemplate(sourceEdge: CanvasV2Edge, targetEdge: CanvasV2Edg
   return sourceCarriesPathMeaning ? sourceEdge : targetEdge
 }
 
-function cleanCanvasEdge(edge: CanvasV2Edge): CanvasV2Edge {
-  return Object.fromEntries(Object.entries(edge).filter(([, value]) => value !== undefined)) as CanvasV2Edge
+function canvasNodePayload(node: CanvasV2Node): CanvasV2NodeOperationPayload {
+  return stripUndefined({
+    id: node.id,
+    kind: node.kind,
+    title: node.title,
+    summary: node.summary,
+    evidence_refs: node.evidenceRefs,
+    confidence: node.confidence,
+    status: node.status,
+    flow_ref: node.flowRef,
+    metadata: node.metadata,
+  })
+}
+
+function canvasEdgePayload(edge: CanvasV2EdgeOperationPayload): CanvasV2EdgeOperationPayload {
+  return stripUndefined(edge)
+}
+
+function stripUndefined<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T
 }
 
 function edgeKey(source: string, target: string, kind: CanvasV2EdgeKind, label?: string): string {

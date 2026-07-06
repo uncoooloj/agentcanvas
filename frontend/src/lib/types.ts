@@ -186,6 +186,28 @@ export interface CanvasV2Edge {
   metadata?: Record<string, unknown>
 }
 
+export interface CanvasV2NodeOperationPayload {
+  id: string
+  kind: CanvasV2NodeKind
+  title: string
+  summary?: string
+  evidence_refs?: string[]
+  confidence?: CanvasV2Confidence
+  status?: CanvasV2Status
+  flow_ref?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface CanvasV2EdgeOperationPayload {
+  id: string
+  kind: CanvasV2EdgeKind
+  source: string
+  target: string
+  label?: string
+  is_default?: boolean
+  metadata?: Record<string, unknown>
+}
+
 export interface CanvasV2Flow {
   id: string
   title: string
@@ -431,9 +453,18 @@ export interface CanvasHistoryResponse {
 export interface CanvasApplyBatch {
   base_revision?: number
   authored_by?: string
-  operations: Array<Record<string, unknown>>
+  operations: CanvasApplyOperation[]
   allow_rewrite?: Record<string, unknown> | null
 }
+
+export type CanvasApplyOperation =
+  | { op: "set_app"; app: Record<string, unknown> }
+  | { op: "upsert_flow"; flow: Record<string, unknown> }
+  | { op: "upsert_node"; flow: string; node: CanvasV2NodeOperationPayload }
+  | { op: "upsert_edge"; flow: string; edge: CanvasV2EdgeOperationPayload }
+  | { op: "delete_node"; flow: string; target: string }
+  | { op: "delete_edge"; flow: string; target: string }
+  | { op: "delete_flow"; target: string }
 
 export interface CanvasApplyResult {
   ok: boolean

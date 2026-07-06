@@ -475,7 +475,7 @@ export default function App() {
             return
           }
         }
-        setAuthNotice("AgentCanvas could not save that map change. Ask your agent to make the change instead.")
+        setAuthNotice(canvasMapEditErrorNotice(error))
       }
       return
     }
@@ -881,6 +881,26 @@ async function applyCanvasMapEdit(
     authored_by: "agentcanvas-web",
     operations: buildMapEditOperations(flow, node, edit.action, edit.text1, edit.text2),
   })
+}
+
+function canvasMapEditErrorNotice(error: unknown): string {
+  if (error instanceof ApiError && error.code === "REFERENCED_ID_REMOVED") {
+    const ids = referencedIdsFromError(error)
+    return ids.length
+      ? `This map change would remove something an open request still needs (${ids.join(", ")}). Finish or cancel that request first.`
+      : "This map change would remove something an open request still needs. Finish or cancel that request first."
+  }
+  if (error instanceof ApiError && error.code === "WORKSPACE_BUSY") {
+    return "AgentCanvas is already saving another map change. Try again in a moment."
+  }
+  return "AgentCanvas could not save that map change. Ask your agent to make the change instead."
+}
+
+function referencedIdsFromError(error: ApiError): string[] {
+  const details = error.details
+  if (!details || typeof details !== "object" || !("ids" in details)) return []
+  const ids = (details as { ids?: unknown }).ids
+  return Array.isArray(ids) ? ids.map((id) => String(id)).filter(Boolean) : []
 }
 
 function findCanvasV2Node(document: CanvasV2Document, flowId: string, nodeId: string): CanvasV2Node | null {

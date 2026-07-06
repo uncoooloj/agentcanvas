@@ -150,6 +150,10 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn('op: "delete_edge"', map_ops)
         self.assertIn('op: "delete_node"', map_ops)
         self.assertIn("REVISION_CONFLICT", app)
+        self.assertIn("canvasMapEditErrorNotice", app)
+        self.assertIn("REFERENCED_ID_REMOVED", app)
+        self.assertIn("open request still needs", app)
+        self.assertIn("WORKSPACE_BUSY", app)
 
     def test_pending_change_payloads_include_typed_refs(self):
         types = (PROJECT_ROOT / "frontend" / "src" / "lib" / "types.ts").read_text(encoding="utf-8")

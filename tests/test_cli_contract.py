@@ -207,6 +207,8 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                     self.assertEqual(main(["up", str(workspace), "--json", "--session-id", "session-1"]), 0)
             result = json.loads(stdout.getvalue())
             self.assertEqual(result["url"], payload["url"])
+            self.assertNotIn("token", result)
+            self.assertEqual(stdout.getvalue().count("secret"), 1)
             self.assertFalse(result["already_running"])
             ensure_up.assert_called_once()
             _, kwargs = ensure_up.call_args

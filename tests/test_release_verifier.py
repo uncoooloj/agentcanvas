@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import tempfile
 import unittest
@@ -77,6 +78,17 @@ class ReleaseVerifierTests(unittest.TestCase):
                 self.assertIn("name: %s" % name, source)
                 self.assertIn("- %s" % label, source)
                 self.assertIn("body:", source)
+
+    def test_frontend_node_version_is_pinned_to_ci_runtime(self):
+        workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        package = json.loads((PROJECT_ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
+        lockfile = json.loads((PROJECT_ROOT / "frontend" / "package-lock.json").read_text(encoding="utf-8"))
+        node_version = (PROJECT_ROOT / ".node-version").read_text(encoding="utf-8").strip()
+
+        self.assertEqual(node_version, "22.13.0")
+        self.assertIn('NODE_VERSION: "22.13.0"', workflow)
+        self.assertEqual(package["engines"]["node"], ">=22.13.0 <23")
+        self.assertEqual(lockfile["packages"][""]["engines"]["node"], ">=22.13.0 <23")
 
     def test_run_step_reports_missing_commands_in_plain_language(self):
         verifier = load_verifier()

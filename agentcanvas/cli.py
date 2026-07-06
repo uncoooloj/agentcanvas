@@ -7,7 +7,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Dict, Sequence
 
 from . import __version__
 from .adapters import (
@@ -349,12 +349,18 @@ def cmd_up(args: argparse.Namespace) -> int:
         return 1
 
     if args.json:
-        print(json.dumps(result, indent=2, sort_keys=True))
+        print(json.dumps(public_launch_payload(result), indent=2, sort_keys=True))
     elif args.stop:
         print("AgentCanvas stopped." if result.get("stopped") else "AgentCanvas was not running.")
     else:
         print(f"Canvas ready: {result['url']}")
     return 0
+
+
+def public_launch_payload(result: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(result)
+    payload.pop("token", None)
+    return payload
 
 
 def cmd_pending(args: argparse.Namespace) -> int:

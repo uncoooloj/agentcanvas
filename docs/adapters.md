@@ -10,14 +10,19 @@ The stable file contract is:
 <workspace>/.agentcanvas/canvas.ir.json
 <workspace>/.agentcanvas/pending/*.md
 <workspace>/.agentcanvas/pending/*.json
+<workspace>/.agentcanvas/pending/*.conversation.jsonl
 ```
 
-`workflow.ir.json` is raw repo evidence. `canvas.ir.json` is the browser display
-canvas. Pending files are for explicit source-code implementation requests.
+`workflow.ir.json` is raw repo evidence. `canvas.ir.json` is the stored
+revisioned browser canvas. Agents should update it through
+`agentcanvas canvas apply` so revision checks, validation, history, pending
+refs, and automatic legacy migration run before the browser reads it. Pending
+Markdown and JSON files are for explicit source-code implementation requests.
+Conversation JSONL files store questions, answers, and notes for those requests.
 
 An adapter should do two small jobs:
 
-- For canvas edits, help the agent update `.agentcanvas/canvas.ir.json`.
+- For canvas edits, help the agent run `agentcanvas canvas apply`.
 - For implementation requests, help the agent clarify, implement, verify,
   update status, and re-index to refresh evidence.
 
@@ -40,16 +45,20 @@ The skill tells the agent to:
 1. run `agentcanvas --help`
 2. index or start the workspace
 3. treat `.agentcanvas/workflow.ir.json` as evidence
-4. treat `.agentcanvas/canvas.ir.json` as the display canvas source of truth
-5. update `.agentcanvas/canvas.ir.json` for canvas-only edits
-6. read `.agentcanvas/pending/*.md` and matching `.json` only for implementation
-   requests
+4. treat `.agentcanvas/canvas.ir.json` as the stored browser canvas
+5. update the canvas with `agentcanvas canvas apply --base-revision <revision> --input <ops.json>` for canvas-only edits
+6. read `.agentcanvas/pending/*.md` and matching `.json` only for implementation requests
 7. inspect the current workspace context before source-code editing
 8. ask concise clarifying questions if the request is ambiguous, risky, or
    incomplete
-9. update status with `agentcanvas status`
-10. run the relevant tests
-11. re-index with `agentcanvas index` after code changes
+9. ask those questions with `agentcanvas reply`
+10. update status with `agentcanvas status`
+11. run the relevant tests
+12. re-index with `agentcanvas index` after code changes
+
+Legacy display canvases from older AgentCanvas builds auto-migrate on
+`agentcanvas canvas apply`. Use `agentcanvas canvas migrate --dry-run` for
+diagnostics, not as a normal user step.
 
 This is the best first integration because it stays portable and does not need a
 server-to-agent bridge.
@@ -63,6 +72,7 @@ Current endpoints:
 
 - `GET /api/context`
 - `GET /api/graph`
+- `GET /api/canvas/validate?mode=authoring|strict`
 - `GET /api/pending`
 - `POST /api/changes`
 - `POST /api/status`
@@ -76,17 +86,70 @@ refreshes `workflow.ir.json`; it should not be required for canvas-only edits.
 
 Use this when an agent prefers tools instead of shell commands or raw HTTP.
 
-MCP is a planned path. It should expose the same simple actions:
+Install MCP support with the optional extra:
 
-- get context
-- read or update the display canvas
-- list pending requests
-- create a request
-- update request status
-- re-index the workspace
+```bash
+pip install 'use-agentcanvas[mcp]'
+```
+
+Then run:
+
+```bash
+uvx --from 'use-agentcanvas[mcp]' agentcanvas mcp --workspace <workspace>
+```
+
+MCP exposes the same local state and lifecycle as the CLI:
+
+- `agentcanvas_workspace_status`
+- `agentcanvas_get_canvas`
+- `agentcanvas_get_evidence`
+- `agentcanvas_record_progress`
+- `agentcanvas_apply_canvas`
+- `agentcanvas_validate_canvas`
+- `agentcanvas_list_requests`
+- `agentcanvas_get_request`
+- `agentcanvas_update_request`
+- `agentcanvas_ask_user`
+- `agentcanvas_get_answers`
+- `agentcanvas_record_sync`
 
 Do not make MCP smarter than the product contract. It is a nicer handle for the
 same local state.
+
+If you already installed AgentCanvas locally with the MCP extra, `agentcanvas mcp
+--workspace <workspace>` is equivalent. If the optional MCP dependency is
+missing, `agentcanvas mcp` exits with code `3`, prints nothing to stdout, and
+prints the install hint to stderr.
+
+### 3.1 Setup
+
+Use setup when you want AgentCanvas to place the right local instructions for a
+specific agent:
+
+```bash
+agentcanvas setup --agent claude-code --workspace <workspace>
+agentcanvas setup --agent codex --workspace <workspace>
+agentcanvas setup --agent cursor --workspace <workspace>
+agentcanvas setup --agent generic --workspace <workspace>
+agentcanvas setup --agent auto --workspace <workspace>
+```
+
+`init` is accepted as an alias for agents that naturally try that word. `auto`
+only succeeds when AgentCanvas can prove the invoking agent from environment or
+workspace markers. If detection is empty or ambiguous it exits with code `4` and
+prints `AGENT_UNDETECTED` so the agent can rerun with an explicit `--agent`.
+
+Setup writes only adapter files:
+
+- Claude Code: `.claude/skills/agentcanvas/SKILL.md` and `.mcp.json`
+- Codex: an `AGENTS.md` section between AgentCanvas markers
+- Cursor: `.cursor/rules/agentcanvas.mdc` and `.cursor/mcp.json`
+- Generic: `AGENT_CANVAS.md` with no MCP dependency
+- Antigravity: prints manual instructions only for now
+
+Re-running setup is idempotent. Codex global config is not written unless
+`--write-codex-config` is passed; by default AgentCanvas prints the snippet
+instead.
 
 ### 4. Webhooks
 
@@ -170,7 +233,9 @@ I need one decision before editing: <short plain-language question about the req
 agentcanvas status --workspace <workspace> <pending-id> --status needs_input --note "I need one decision before editing: <question>"
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
 agentcanvas index --workspace <workspace>
-agentcanvas status --workspace <workspace> <pending-id> --status done --note "Implemented and verified: <test or smoke check>."
+agentcanvas status --workspace <workspace> <pending-id> --status implemented --note "Implemented."
+agentcanvas status --workspace <workspace> <pending-id> --status verified --note "Verified." --evidence-check "<test or smoke check>" --evidence-result "passed" --evidence-actor "<agent name>"
+agentcanvas status --workspace <workspace> <pending-id> --status done --note "Done."
 ```
 
 ## Adapter Rules

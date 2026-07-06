@@ -665,7 +665,7 @@ def _summary(facts: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _display_path(path: PathLike) -> str:
-    return PurePosixPath(str(Path(path))).as_posix()
+    return PurePosixPath(str(Path(path)).replace("\\", "/")).as_posix()
 
 
 def _stable_id(kind: str, path: str, line: int, label: str) -> str:

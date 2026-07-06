@@ -181,9 +181,9 @@ def _score_learning_program(
         "tutorial",
         "workshop",
     }
-    if "robotics" in full_text and any(word in full_text for word in {"adventure", "curriculum", "lesson"}):
+    if "robotics" in full_text and any(word in full_text for word in {"curriculum", "lesson", "lab"}):
         scores["learning_program"] += 6
-        signals.append("learning:robotics-adventure")
+        signals.append("learning:robotics")
     if any(word in name_text for word in {"curriculum", "course", "lesson", "learning", "tutorial"}):
         scores["learning_program"] += 3
         signals.append("learning:name")

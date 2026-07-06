@@ -2,25 +2,24 @@ import type { ReactNode } from "react"
 import { ArrowDown, Check, Pencil, Plus, Split, Trash2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ROLE } from "@/lib/roles"
-import { useChanges, type ChangeKind } from "@/lib/changeset"
+import { ChangeKind, useChanges } from "@/lib/changeset"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import type { BranchNode, FlowNode, StepNode } from "@/lib/types"
+import {
+  CanvasV2NodeKind,
+  FlowAction,
+  FlowNodeKind,
+  StepRole,
+  type BranchNode,
+  type FlowNode,
+  type StepNode,
+} from "@/lib/types"
 
 function useNodeBadge(nodeId: string): ChangeKind | null {
   return useChanges((s) => {
     const m = s.changes.find((c) => c.targetNodeId === nodeId)
-    return m && (m.kind === "edited" || m.kind === "removing") ? m.kind : null
+    return m && (m.kind === ChangeKind.Edited || m.kind === ChangeKind.Removing) ? m.kind : null
   })
 }
-
-export type FlowAction =
-  | "change"
-  | "add_after"
-  | "add_rule"
-  | "remove"
-  | "change_condition"
-  | "add_then"
-  | "add_else"
 
 interface CommonProps {
   selectedId: string | null
@@ -28,13 +27,26 @@ interface CommonProps {
   onAction: (action: FlowAction, node: FlowNode) => void
 }
 
-type BranchPresentation = "if" | "elseIf"
-type FlowPath = "root" | "then" | "otherwise"
+enum BranchPresentation {
+  If = "if",
+  ElseIf = "elseIf",
+}
+
+enum FlowPath {
+  Root = "root",
+  Then = "then",
+  Otherwise = "otherwise",
+}
+
+enum LaneTone {
+  Yes = "yes",
+  No = "no",
+}
 
 export function FlowColumn({
   nodes,
   depth = 0,
-  path = "root",
+  path = FlowPath.Root,
   ...rest
 }: CommonProps & { nodes: FlowNode[]; depth?: number; path?: FlowPath }) {
   if (!nodes.length) {
@@ -44,13 +56,13 @@ export function FlowColumn({
     <div className="flex flex-col">
       {nodes.map((node, i) => (
         <div key={node.id} className="animate-fade-in">
-          {node.kind === "step" ? (
+          {node.kind === FlowNodeKind.Step ? (
             <StepCard node={node} stacked={depth > 0} {...rest} />
           ) : (
             <BranchCard
               node={node}
               depth={depth}
-              presentation={path === "otherwise" && i === 0 ? "elseIf" : "if"}
+              presentation={path === FlowPath.Otherwise && i === 0 ? BranchPresentation.ElseIf : BranchPresentation.If}
               {...rest}
             />
           )}
@@ -68,11 +80,13 @@ function StepCard({
   onSelect,
   onAction,
 }: CommonProps & { node: StepNode; stacked?: boolean }) {
-  const role = ROLE[node.role === "when" ? "when" : "do"]
+  const role = ROLE[node.role === StepRole.When ? StepRole.When : StepRole.Do]
   const Icon = role.icon
   const selected = node.id === selectedId
   const badge = useNodeBadge(node.id)
-  const removing = badge === "removing"
+  const removing = badge === ChangeKind.Removing
+  const canAddAfter = canAddAfterNative(node.native?.nodeKind)
+  const canAddRule = canAddRuleNative(node.native?.nodeKind)
   return (
     <div className="group relative">
       <button
@@ -102,6 +116,7 @@ function StepCard({
             <Icon className="h-3 w-3" />
             {role.label}
           </span>
+          <NativeKindBadge node={node} />
           {badge && <ChangeBadge kind={badge} />}
         </span>
         <span className={cn("flex min-w-0 flex-col gap-1", stacked ? "w-full pr-1" : "pt-0.5 pr-16")}>
@@ -121,19 +136,23 @@ function StepCard({
         </span>
       </button>
       <HoverActions>
-        <ActionIcon label="Change what happens" onClick={() => onAction("change", node)}>
+        <ActionIcon label="Change what happens" onClick={() => onAction(FlowAction.Change, node)}>
           <Pencil className="h-3.5 w-3.5" />
         </ActionIcon>
-        <ActionIcon label="Add a step after" onClick={() => onAction("add_after", node)}>
-          <Plus className="h-3.5 w-3.5" />
-        </ActionIcon>
-        <ActionIcon label="Add a rule" onClick={() => onAction("add_rule", node)}>
-          <Split className="h-3.5 w-3.5" />
-        </ActionIcon>
+        {canAddAfter && (
+          <ActionIcon label="Add a step after" onClick={() => onAction(FlowAction.AddAfter, node)}>
+            <Plus className="h-3.5 w-3.5" />
+          </ActionIcon>
+        )}
+        {canAddRule && (
+          <ActionIcon label="Add a rule" onClick={() => onAction(FlowAction.AddRule, node)}>
+            <Split className="h-3.5 w-3.5" />
+          </ActionIcon>
+        )}
         <ActionIcon
           label="Remove this step"
           danger
-          onClick={() => onAction("remove", node)}
+          onClick={() => onAction(FlowAction.Remove, node)}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </ActionIcon>
@@ -164,28 +183,29 @@ function BranchCard({
             "flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2.5 text-center transition-all",
             "bg-rule-bg hover:shadow-sm",
             selected ? "border-primary/60 ring-2 ring-primary/15" : "border-rule-accent/40",
-            badge === "removing" && "opacity-60"
+            badge === ChangeKind.Removing && "opacity-60"
           )}
         >
           <Split className="h-3.5 w-3.5 text-rule-fg" />
           <span
             className={cn(
               "text-[13px] font-medium text-rule-fg",
-              badge === "removing" && "line-through"
+              badge === ChangeKind.Removing && "line-through"
             )}
           >
-            {presentation === "elseIf" ? "Else if" : "If"} {node.condition}
+            {presentation === BranchPresentation.ElseIf ? "Else if" : "If"} {node.condition}
           </span>
+          <NativeKindBadge node={node} />
           {badge && <ChangeBadge kind={badge} />}
         </button>
         <HoverActions>
           <ActionIcon
             label="Change the condition"
-            onClick={() => onAction("change_condition", node)}
+            onClick={() => onAction(FlowAction.ChangeCondition, node)}
           >
             <Pencil className="h-3.5 w-3.5" />
           </ActionIcon>
-          <ActionIcon label="Remove this rule" danger onClick={() => onAction("remove", node)}>
+          <ActionIcon label="Remove this rule" danger onClick={() => onAction(FlowAction.Remove, node)}>
             <Trash2 className="h-3.5 w-3.5" />
           </ActionIcon>
         </HoverActions>
@@ -198,23 +218,23 @@ function BranchCard({
         )}
       >
         <Lane
-          tone="yes"
+          tone={LaneTone.Yes}
           label={`If yes, ${node.condition}`.slice(0, 52)}
           empty="Nothing else happens"
           isEmpty={node.then.length === 0}
-          onAdd={() => onAction("add_then", node)}
+          onAdd={() => onAction(FlowAction.AddThen, node)}
         >
           <FlowColumn
             nodes={node.then}
             depth={depth + 1}
-            path="then"
+            path={FlowPath.Then}
             selectedId={selectedId}
             onSelect={onSelect}
             onAction={onAction}
           />
         </Lane>
         <Lane
-          tone="no"
+          tone={LaneTone.No}
           label={
             leadingElseIf
               ? `Else if ${leadingElseIf.condition}`.slice(0, 52)
@@ -222,12 +242,12 @@ function BranchCard({
           }
           empty="Nothing else happens"
           isEmpty={node.otherwise.length === 0}
-          onAdd={() => onAction("add_else", node)}
+          onAdd={() => onAction(FlowAction.AddElse, node)}
         >
           <FlowColumn
             nodes={node.otherwise}
             depth={depth + 1}
-            path="otherwise"
+            path={FlowPath.Otherwise}
             selectedId={selectedId}
             onSelect={onSelect}
             onAction={onAction}
@@ -240,7 +260,7 @@ function BranchCard({
 
 function getLeadingElseIf(nodes: FlowNode[]): BranchNode | null {
   const first = nodes[0]
-  return first?.kind === "branch" ? first : null
+  return first?.kind === FlowNodeKind.Branch ? first : null
 }
 
 function Lane({
@@ -251,7 +271,7 @@ function Lane({
   onAdd,
   children,
 }: {
-  tone: "yes" | "no"
+  tone: LaneTone
   label: string
   empty: string
   isEmpty: boolean
@@ -262,17 +282,17 @@ function Lane({
     <div
       className={cn(
         "rounded-xl border border-dashed p-3",
-        tone === "yes" ? "border-act-accent/40 bg-act-bg/30" : "border-border bg-secondary/30"
+        tone === LaneTone.Yes ? "border-act-accent/40 bg-act-bg/30" : "border-border bg-secondary/30"
       )}
     >
       <div className="mb-2 flex items-center gap-1.5 px-1">
         <span
           className={cn(
             "inline-flex h-4 w-4 items-center justify-center rounded-full text-white",
-            tone === "yes" ? "bg-act-accent" : "bg-muted-foreground"
+            tone === LaneTone.Yes ? "bg-act-accent" : "bg-muted-foreground"
           )}
         >
-          {tone === "yes" ? <Check className="h-2.5 w-2.5" /> : <X className="h-2.5 w-2.5" />}
+          {tone === LaneTone.Yes ? <Check className="h-2.5 w-2.5" /> : <X className="h-2.5 w-2.5" />}
         </span>
         <span className="truncate text-xs font-medium text-muted-foreground">{label}</span>
       </div>
@@ -344,15 +364,68 @@ function Connector() {
 }
 
 function ChangeBadge({ kind }: { kind: ChangeKind }) {
-  const label = kind === "edited" ? "Edited" : "Removing"
+  const label = kind === ChangeKind.Edited ? "Edited" : "Removing"
   return (
     <span
       className={cn(
         "inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium",
-        kind === "edited" ? "bg-when-bg text-when-fg" : "bg-destructive/10 text-destructive"
+        kind === ChangeKind.Edited ? "bg-when-bg text-when-fg" : "bg-destructive/10 text-destructive"
       )}
     >
       {label}
     </span>
   )
+}
+
+function NativeKindBadge({ node }: { node: FlowNode }) {
+  const kind = node.native?.nodeKind
+  if (!kind) return null
+  if (node.kind === FlowNodeKind.Step && (kind === CanvasV2NodeKind.When || kind === CanvasV2NodeKind.Do)) {
+    return null
+  }
+  if (node.kind === FlowNodeKind.Branch && kind === CanvasV2NodeKind.Decision) {
+    return null
+  }
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-md bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+      {nativeKindLabel(kind)}
+    </span>
+  )
+}
+
+function nativeKindLabel(kind: CanvasV2NodeKind): string {
+  switch (kind) {
+    case CanvasV2NodeKind.Loop:
+      return "Repeat"
+    case CanvasV2NodeKind.Parallel:
+      return "Parallel"
+    case CanvasV2NodeKind.Join:
+      return "Join"
+    case CanvasV2NodeKind.Wait:
+      return "Wait"
+    case CanvasV2NodeKind.SubFlow:
+      return "Sub-flow"
+    case CanvasV2NodeKind.End:
+      return "End"
+    case CanvasV2NodeKind.Decision:
+      return "Rule"
+    case CanvasV2NodeKind.When:
+      return "When"
+    case CanvasV2NodeKind.Do:
+      return "Do"
+  }
+}
+
+function canAddAfterNative(kind?: CanvasV2NodeKind): boolean {
+  if (!kind) return true
+  return (
+    kind === CanvasV2NodeKind.When ||
+    kind === CanvasV2NodeKind.Do ||
+    kind === CanvasV2NodeKind.Wait ||
+    kind === CanvasV2NodeKind.SubFlow
+  )
+}
+
+function canAddRuleNative(kind?: CanvasV2NodeKind): boolean {
+  return !kind || kind === CanvasV2NodeKind.Do || kind === CanvasV2NodeKind.When
 }

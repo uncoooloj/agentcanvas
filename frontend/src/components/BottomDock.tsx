@@ -1,4 +1,4 @@
-import { useChanges } from "@/lib/changeset"
+import { HandoffPhase, useChanges } from "@/lib/changeset"
 import type { ChangeEntry } from "@/lib/changeset"
 import { ChangeTray } from "./ChangeTray"
 import { HandoffOverlay } from "./HandoffOverlay"
@@ -10,6 +10,7 @@ interface Props {
   onSubmitEdit: (edit: StagedEdit) => void
   onCancelEdit: () => void
   onHandoffDone: () => void
+  onHandoffDismiss: () => void
   onSelectChange: (change: ChangeEntry) => void
   onModifyChange: (change: ChangeEntry) => void
 }
@@ -21,13 +22,14 @@ export function BottomDock({
   onSubmitEdit,
   onCancelEdit,
   onHandoffDone,
+  onHandoffDismiss,
   onSelectChange,
   onModifyChange,
 }: Props) {
   const phase = useChanges((s) => s.handoff.phase)
 
-  if (phase !== "composing") {
-    return <HandoffOverlay onAcknowledge={onHandoffDone} />
+  if (phase !== HandoffPhase.Composing) {
+    return <HandoffOverlay onAcknowledge={onHandoffDone} onDismiss={onHandoffDismiss} />
   }
   if (request) {
     return <StepComposer request={request} onSubmit={onSubmitEdit} onCancel={onCancelEdit} />

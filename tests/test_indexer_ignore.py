@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agentcanvas.indexer import discover_files
+from agentcanvas.indexer import discover_files, is_ignored_path, to_posix
 
 
 def _write(root: Path, relative_path: str, content: str = "") -> None:
@@ -26,6 +26,10 @@ class AgentCanvasIgnoreTests(unittest.TestCase):
 
             self.assertFalse(truncated)
             self.assertEqual({"agentcanvas/indexer.py", ".agentcanvasignore"}, rels)
+
+    def test_path_helpers_normalize_windows_separators(self):
+        self.assertEqual("agentcanvas/web/assets/index.js", to_posix(r"agentcanvas\web\assets\index.js"))
+        self.assertTrue(is_ignored_path(r"agentcanvas\web\assets\index.js", ["agentcanvas/web/"]))
 
 
 if __name__ == "__main__":

@@ -8,18 +8,16 @@ import {
   GitBranch,
   Loader2,
   MousePointer2,
-  Orbit,
   Play,
   Send,
   Sparkles,
-  SquareTerminal,
   X,
   Zap,
 } from "lucide-react"
-import { siClaudecode, siCursor, siGooglegemini } from "simple-icons"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { BrandMark } from "@/components/BrandMark"
+import { LANDING_BOOTSTRAP_PERMISSION_PROMPTS, LANDING_BOOTSTRAP_PROMPT } from "@/lib/landingBootstrapPrompt"
 import { cn } from "@/lib/utils"
 
 export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
@@ -84,8 +82,6 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
           </div>
         </section>
 
-        <WorksWith />
-
         <HowItWorks />
 
         <AgentPrompt />
@@ -108,7 +104,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
               <p className="mt-1 text-sm text-muted-foreground">
                 Point AgentCanvas at it from your terminal, or ask whoever set it up to run:
               </p>
-              <CopyBox text="agentcanvas start --workspace ./your-project" oneLine />
+              <CopyBox text="agentcanvas up ./your-project" oneLine />
             </div>
           </div>
         </section>
@@ -126,44 +122,6 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
         </div>
       </footer>
     </div>
-  )
-}
-
-// ---- "Works with" logo strip ----
-
-function SimpleLogo({ path }: { path: string }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="size-[18px] fill-current">
-      <path d={path} />
-    </svg>
-  )
-}
-
-function WorksWith() {
-  const tools = [
-    { name: "Claude Code", logo: <SimpleLogo path={siClaudecode.path} /> },
-    { name: "Codex", logo: <SquareTerminal className="size-[18px]" /> },
-    { name: "Cursor", logo: <SimpleLogo path={siCursor.path} /> },
-    { name: "Antigravity", logo: <Orbit className="size-[18px]" /> },
-    { name: "Gemini", logo: <SimpleLogo path={siGooglegemini.path} /> },
-  ]
-  return (
-    <section className="mx-auto max-w-4xl px-6 pb-16">
-      <p className="mb-7 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Works with your AI coding agent
-      </p>
-      <div className="flex flex-wrap items-center justify-center gap-x-9 gap-y-5">
-        {tools.map((t) => (
-          <span
-            key={t.name}
-            className="inline-flex items-center gap-2 text-[15px] font-medium text-foreground/70 transition-colors hover:text-foreground"
-          >
-            {t.logo}
-            {t.name}
-          </span>
-        ))}
-      </div>
-    </section>
   )
 }
 
@@ -220,11 +178,11 @@ function useDemo(active: boolean) {
 const STEPS = [
   {
     title: "Open your app",
-    body: "Point AgentCanvas at your project. It reads everything and lays your app out as plain flows.",
+    body: "Point AgentCanvas at your project. It indexes repo evidence and lays important app flows out plainly.",
   },
   {
     title: "See what it does",
-    body: "Every part of your app, written as plain steps you can read: when this happens, do that, with the branches in between.",
+    body: "The key behavior it can prove, written as plain steps you can read: when this happens, do that, with the branches in between.",
   },
   {
     title: "Change a step",
@@ -350,7 +308,7 @@ function DemoFrame({ step }: { step: number }) {
         </span>
         <span className="ml-auto hidden items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-[11px] text-muted-foreground sm:inline-flex">
           <Sparkles className="size-3 text-clay" /> Assistant:{" "}
-          <span className="font-medium text-foreground">Claude Code</span>
+          <span className="font-medium text-foreground">Your agent</span>
         </span>
       </div>
 
@@ -403,18 +361,18 @@ function DemoFrame({ step }: { step: number }) {
               <p className="text-sm font-medium">Placing an order</p>
               <p className="mb-4 text-xs text-muted-foreground">What happens when someone checks out</p>
               <div className="space-y-2.5">
-                <HeroRow tone="when" label="When" text="Someone places an order" />
-                <HeroRow tone="act" label="Do" text="Check the items are in stock" />
+                <HeroRow tone={HeroRowTone.When} label="When" text="Someone places an order" />
+                <HeroRow tone={HeroRowTone.Act} label="Do" text="Check the items are in stock" />
                 <div className="flex justify-center py-0.5">
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-rule-bg px-3 py-1 text-xs font-medium text-rule-fg">
                     <GitBranch className="size-3" /> If everything is in stock
                   </span>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Lane tone="yes" label="If yes">
-                    <HeroRow tone="act" label="Do" text="Work out the total" compact />
+                  <Lane tone={LandingLaneTone.Yes} label="If yes">
+                    <HeroRow tone={HeroRowTone.Act} label="Do" text="Work out the total" compact />
                     <HeroRow
-                      tone="act"
+                      tone={HeroRowTone.Act}
                       label="Do"
                       text="Charge their card"
                       compact
@@ -429,14 +387,14 @@ function DemoFrame({ step }: { step: number }) {
                     >
                       <div className="overflow-hidden">
                         <div className="pt-2">
-                          <HeroRow tone="act" label="Do" text="Text them the delivery date" compact fresh />
+                          <HeroRow tone={HeroRowTone.Act} label="Do" text="Text them the delivery date" compact fresh />
                         </div>
                       </div>
                     </div>
                   </Lane>
-                  <Lane tone="no" label="Otherwise">
-                    <HeroRow tone="act" label="Do" text="Tell them what's sold out" compact />
-                    <HeroRow tone="act" label="Do" text="Save their cart for later" compact />
+                  <Lane tone={LandingLaneTone.No} label="Otherwise">
+                    <HeroRow tone={HeroRowTone.Act} label="Do" text="Tell them what's sold out" compact />
+                    <HeroRow tone={HeroRowTone.Act} label="Do" text="Save their cart for later" compact />
                   </Lane>
                 </div>
               </div>
@@ -462,7 +420,7 @@ function DemoFrame({ step }: { step: number }) {
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-sm font-medium">1 change ready</span>
                       <span className="relative inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground">
-                        <Send className="size-3" /> Send to Claude Code
+                        <Send className="size-3" /> Preview send
                         <Cursor className="-bottom-1.5 -right-1.5" />
                       </span>
                     </div>
@@ -477,13 +435,13 @@ function DemoFrame({ step }: { step: number }) {
                 {step === 4 && !done && (
                   <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-3 text-sm">
                     <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
-                    <span className="text-muted-foreground">Claude Code is making your change…</span>
+                    <span className="text-muted-foreground">Example agent run in progress...</span>
                   </div>
                 )}
                 {step === 4 && done && (
                   <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-3 text-sm">
                     <CircleCheck className="size-4 shrink-0 text-act-fg" />
-                    <span className="font-medium">All set, your change is live</span>
+                    <span className="font-medium">Example change complete</span>
                   </div>
                 )}
               </div>
@@ -495,22 +453,32 @@ function DemoFrame({ step }: { step: number }) {
   )
 }
 
-function Lane({ tone, label, children }: { tone: "yes" | "no"; label: string; children: ReactNode }) {
+enum LandingLaneTone {
+  Yes = "yes",
+  No = "no",
+}
+
+enum HeroRowTone {
+  When = "when",
+  Act = "act",
+}
+
+function Lane({ tone, label, children }: { tone: LandingLaneTone; label: string; children: ReactNode }) {
   return (
     <div
       className={cn(
         "rounded-xl border border-dashed p-2.5",
-        tone === "yes" ? "border-act-accent/40 bg-act-bg/20" : "border-border bg-secondary/30"
+        tone === LandingLaneTone.Yes ? "border-act-accent/40 bg-act-bg/20" : "border-border bg-secondary/30"
       )}
     >
       <div className="mb-2 flex items-center gap-1.5 px-0.5">
         <span
           className={cn(
             "flex size-3.5 items-center justify-center rounded-full text-white",
-            tone === "yes" ? "bg-act-accent" : "bg-muted-foreground"
+            tone === LandingLaneTone.Yes ? "bg-act-accent" : "bg-muted-foreground"
           )}
         >
-          {tone === "yes" ? <Check className="size-2.5" /> : <X className="size-2.5" />}
+          {tone === LandingLaneTone.Yes ? <Check className="size-2.5" /> : <X className="size-2.5" />}
         </span>
         <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
       </div>
@@ -536,7 +504,7 @@ function HeroRow({
   cursor,
   fresh,
 }: {
-  tone: "when" | "act"
+  tone: HeroRowTone
   label: string
   text: string
   compact?: boolean
@@ -556,10 +524,10 @@ function HeroRow({
       <span
         className={cn(
           "flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-          tone === "when" ? "bg-when-bg text-when-fg" : "bg-act-bg text-act-fg"
+          tone === HeroRowTone.When ? "bg-when-bg text-when-fg" : "bg-act-bg text-act-fg"
         )}
       >
-        {tone === "when" ? <Zap className="size-3" /> : <Play className="size-3" />}
+        {tone === HeroRowTone.When ? <Zap className="size-3" /> : <Play className="size-3" />}
         {label}
       </span>
       <span className="min-w-0 truncate text-[13px]">{text}</span>
@@ -570,14 +538,6 @@ function HeroRow({
 
 // ---- Agent prompt section ----
 
-const AGENT_PROMPT = `Use AgentCanvas to help me change this app.
-
-1. Start it: run \`agentcanvas start --workspace .\` (if it isn't installed, run \`pip install agentcanvas\` first). Open the local URL it prints so I can see and edit my app's flows in plain English.
-2. When I make a change there, AgentCanvas writes it to \`.agentcanvas/pending/\` as a plain-English request (a .md and a .json per change).
-3. For each pending request: read it, make the change in the code, run the relevant tests, then re-index with \`agentcanvas index --workspace .\` and tell me what changed.
-
-Keep checking \`.agentcanvas/pending/\` for new requests while we work.`
-
 function AgentPrompt() {
   return (
     <section id="agent" className="mx-auto max-w-3xl scroll-mt-20 px-6 py-24 text-center">
@@ -586,10 +546,18 @@ function AgentPrompt() {
         Already chatting with an AI coding agent?
       </h2>
       <p className="mx-auto mt-3 max-w-lg text-muted-foreground">
-        Paste this into Claude Code, Codex, or Cursor and it'll launch AgentCanvas and pick up the
-        changes you make. No setup from you.
+        Paste this into your AI coding agent. It can launch or connect AgentCanvas when your
+        setup allows it, and copy mode is there when it does not.
       </p>
-      <CopyBox text={AGENT_PROMPT} className="mt-8 text-left" />
+      <div className="mx-auto mt-5 grid max-w-2xl gap-2 text-left sm:grid-cols-3">
+        {LANDING_BOOTSTRAP_PERMISSION_PROMPTS.map((prompt) => (
+          <div key={prompt.label} className="rounded-lg border bg-card px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-clay">{prompt.label}</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{prompt.reason}</p>
+          </div>
+        ))}
+      </div>
+      <CopyBox text={LANDING_BOOTSTRAP_PROMPT} className="mt-8 text-left" />
     </section>
   )
 }

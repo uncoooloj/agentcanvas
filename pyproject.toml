@@ -7,8 +7,8 @@ name = "use-agentcanvas"
 version = "0.1.1"
 description = "Local editable workflow canvas for AI coding agents."
 readme = "README.md"
-requires-python = ">=3.7"
-license = { text = "MIT" }
+requires-python = ">=3.9"
+license = "MIT"
 authors = [{ name = "AgentCanvas contributors" }]
 keywords = ["ai-agents", "workflow", "canvas", "developer-tools"]
 classifiers = [
@@ -16,13 +16,15 @@ classifiers = [
   "Environment :: Console",
   "Environment :: Web Environment",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Topic :: Software Development",
   "Topic :: Software Development :: Documentation",
 ]
 dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.2"]
 
 [project.urls]
 Homepage = "https://github.com/uncoooloj/agentcanvas"
@@ -40,6 +42,8 @@ include = ["agentcanvas*"]
 agentcanvas = [
   "web/*",
   "web/assets/*",
+  "templates/*",
+  "templates/adapters/*",
   "demo_project/*",
   "demo_project/src/*",
   "demo_project/src/actions/*",

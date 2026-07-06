@@ -10,3 +10,6 @@ dist/
 node_modules/
 .DS_Store
 .wrangler/
+docs/private/
+docs/specs/
+docs/execution-plan.md

@@ -20,9 +20,11 @@ AgentCanvas helps with the messy part between "this flow is wrong" and "make
 this exact code change."
 
 - It indexes your repo into `.agentcanvas/workflow.ir.json`.
-- It lets the invoking agent turn that evidence into readable flows in
+- It lets the invoking agent turn that evidence into readable flows through
+  `agentcanvas canvas apply`, stored as a revisioned v2 canvas in
   `.agentcanvas/canvas.ir.json`.
-- It shows the display canvas from `.agentcanvas/canvas.ir.json`.
+- It shows that stored canvas in the current browser UI through a compatibility
+  display layer.
 - It lets you add, remove, rename, or re-route canvas steps without changing
   source code.
 - It creates implementation requests only when you explicitly ask for source
@@ -51,9 +53,9 @@ The core loop is intentionally small:
 1. Point AgentCanvas at a workspace.
 2. It writes the raw evidence index to `.agentcanvas/workflow.ir.json`.
 3. The invoking agent translates repo behavior into readable flows and writes
-   `.agentcanvas/canvas.ir.json`.
-4. The browser shows `.agentcanvas/canvas.ir.json` as the display canvas.
-5. Canvas-only edits update `.agentcanvas/canvas.ir.json` progressively.
+   them with `agentcanvas canvas apply`.
+4. The browser shows `.agentcanvas/canvas.ir.json` as a plain-English canvas.
+5. Canvas-only edits update the stored canvas through `agentcanvas canvas apply`.
 6. If you ask for source-code changes, AgentCanvas creates a Markdown brief and
    a JSON brief in `.agentcanvas/pending/`.
 7. A coding agent picks up that implementation request, verifies the change, and
@@ -105,23 +107,10 @@ python3 -m agentcanvas --help
 
 ## Run It
 
-Start with the landing page when you do not have a workspace selected yet:
-
-```bash
-agentcanvas start --port 8765
-```
-
-Try the bundled demo project:
-
-```bash
-agentcanvas start --demo --port 8765
-```
-
 Use a real workspace:
 
 ```bash
-agentcanvas index --workspace /path/to/your/project
-agentcanvas start --workspace /path/to/your/project --port 8765
+agentcanvas up /path/to/your/project --port 8765
 ```
 
 Open the printed URL, usually:
@@ -133,23 +122,43 @@ http://127.0.0.1:8765
 If an agent is launching AgentCanvas, it can pass its name and session id:
 
 ```bash
-agentcanvas start --workspace /path/to/your/project --agent codex --session-id <session-id>
+agentcanvas up /path/to/your/project --agent codex --session-id <session-id>
+```
+
+For foreground/manual server modes, use `start` directly:
+
+```bash
+agentcanvas start --port 8765
+agentcanvas start --demo --port 8765
+```
+
+To run a real workspace in foreground server mode:
+
+```bash
+agentcanvas index --workspace /path/to/your/project
+agentcanvas start --workspace /path/to/your/project --port 8765
 ```
 
 ## What Happens When You Run It
 
-AgentCanvas has three plain modes. The important difference is whether it is
-looking at a real project and where it writes local AgentCanvas files.
+AgentCanvas has a normal workspace launcher plus lower-level foreground server
+modes. The important difference is whether it is looking at a real project and
+where it writes local AgentCanvas files.
 
-- `agentcanvas start` opens the landing page. No project has been read yet.
-- `agentcanvas start --demo` opens the bundled sample project. This is safe for
+- `agentcanvas up /path/to/project` starts or reuses a background browser server
+  for that real project and reads AgentCanvas state from
+  `<workspace>/.agentcanvas/`.
+- `agentcanvas start` opens the foreground landing page. No project has been
+  read yet.
+- `agentcanvas start --demo` opens the bundled sample project in foreground
+  server mode. This is safe for
   trying the product because it writes demo AgentCanvas files, not files in your
   own repo.
 - `agentcanvas index --workspace /path/to/project` reads a real project and
   writes the raw evidence file:
   `<workspace>/.agentcanvas/workflow.ir.json`.
 - `agentcanvas start --workspace /path/to/project` opens the browser for that
-  real project and reads AgentCanvas state from `<workspace>/.agentcanvas/`.
+  real project in foreground server mode.
 
 Starting or indexing AgentCanvas does not change source code. It creates or
 refreshes AgentCanvas files beside the project. Source-code changes only happen
@@ -167,9 +176,8 @@ For a new or stale map, the agent should:
 
 1. Read `.agentcanvas/workflow.ir.json`.
 2. Turn the useful repo behavior into a plain-English canvas.
-3. Write or update `.agentcanvas/canvas.ir.json`.
-4. Validate before writing when using a generated canvas query:
-   `agentcanvas apply-query --workspace /path/to/project --query canvas-query.json --dry-run`.
+3. Write or update the canvas with `agentcanvas canvas apply`.
+4. Use `--dry-run` first when the operation batch is generated or uncertain.
 
 For a user-requested source-code change, the agent should:
 
@@ -221,22 +229,38 @@ AgentCanvas writes all local state under the selected repo:
 <workspace>/.agentcanvas/canvas.ir.json
 <workspace>/.agentcanvas/pending/*.md
 <workspace>/.agentcanvas/pending/*.json
+<workspace>/.agentcanvas/pending/*.conversation.jsonl
 ```
 
 `workflow.ir.json` is the raw index and evidence grounding file.
-`canvas.ir.json` is the browser display canvas source of truth. Pending
-Markdown and JSON files are for implementation requests, not normal canvas-only
-edits.
+`canvas.ir.json` is the stored revisioned canvas. Agents should update it
+through `agentcanvas canvas apply` so revision checks, validation, history,
+pending references, and automatic legacy migration run before the browser reads
+it. Pending Markdown and JSON files are for implementation requests, not normal
+canvas-only edits. Conversation JSONL files store clarifying questions, user
+answers, and agent notes for those pending requests.
 
 The invoking agent authors the display canvas. In plain English:
 
 1. AgentCanvas indexes the repo into `workflow.ir.json`.
 2. The agent reads that evidence and asks questions if the intended journey,
    actor, outcome, or source evidence is unclear.
-3. The agent writes or updates `canvas.ir.json` with human-readable flows.
+3. The agent writes or updates the canvas with `agentcanvas canvas apply`.
 4. The browser reads `canvas.ir.json`.
-5. Canvas-only edits keep updating `canvas.ir.json`.
+5. Canvas-only edits keep updating the canvas through the same command.
 6. Explicit implementation requests create pending Markdown and JSON files.
+
+Legacy display canvases created by older AgentCanvas builds are upgraded
+automatically the first time `agentcanvas canvas apply` touches them. Use
+`agentcanvas canvas migrate --dry-run` only when you want to preview that
+upgrade without applying an edit.
+
+Inspect or undo canvas-only edits with:
+
+```bash
+agentcanvas canvas history --workspace /path/to/your/project
+agentcanvas canvas restore --workspace /path/to/your/project --revision 3 --base-revision 8
+```
 
 Preserve evidence links where possible, and use plain language over file
 inventory language. A person should see what the project does, not just which
@@ -246,7 +270,7 @@ files exist.
 
 Use this loop only when the user explicitly wants source-code implementation.
 Canvas edits like "add this step", "remove that branch", or "re-route this flow"
-should update `.agentcanvas/canvas.ir.json` instead.
+should update the stored canvas through `agentcanvas canvas apply` instead.
 
 An agent can list pending requests:
 
@@ -276,7 +300,9 @@ When it has implemented and verified the change:
 
 ```bash
 agentcanvas index --workspace /path/to/your/project
-agentcanvas status --workspace /path/to/your/project <pending-id> --status done --note "Implemented and verified."
+agentcanvas status --workspace /path/to/your/project <pending-id> --status implemented --note "Implemented."
+agentcanvas status --workspace /path/to/your/project <pending-id> --status verified --note "Verified." --evidence-check "<test or smoke check>" --evidence-result "passed" --evidence-actor "<agent name>"
+agentcanvas status --workspace /path/to/your/project <pending-id> --status done --note "Done."
 ```
 
 `agentcanvas index` refreshes `.agentcanvas/workflow.ir.json` after code changes.
@@ -322,7 +348,7 @@ Current and planned integration paths:
 - **Skill**: install `skill/agentcanvas/` into an agent that supports skills.
 - **Local API**: the browser/server path uses `/api/context`, `/api/graph`,
   `/api/pending`, `/api/changes`, `/api/status`, and `/api/reindex`.
-- **MCP**: planned tool path for agents that prefer structured tools over shell
+- **MCP**: structured local tools for agents that prefer tool calls over shell
   commands.
 - **Webhooks**: planned callback path for outside tools to report status,
   questions, or completion.
@@ -401,14 +427,16 @@ Write only after validation passes:
 agentcanvas apply-query --workspace /path/to/your/project --query canvas-query.json
 ```
 
-`apply-query` writes the display canvas. It does not overwrite
-`.agentcanvas/workflow.ir.json` or replace repo facts.
+`apply-query` validates the projection query and writes the resulting canvas
+through the same v2 apply pipeline, so revision history and safeguards still
+apply. It does not overwrite `.agentcanvas/workflow.ir.json` or replace repo
+facts.
 
 See [docs/projection.md](docs/projection.md).
 
 ## Safety Rules
 
-- Canvas-only edits update `.agentcanvas/canvas.ir.json`.
+- Canvas-only edits update the stored canvas through `agentcanvas canvas apply`.
 - AgentCanvas creates requests before source code changes.
 - Agents should read the request before editing.
 - Agents should ask with `needs_input` when the request is unclear.
@@ -417,6 +445,30 @@ See [docs/projection.md](docs/projection.md).
 - Agents should not mark a request `done` until the work is verified.
 - Migrations, seeds, deploys, and destructive commands still need explicit user
   permission.
+
+## Security And Privacy
+
+AgentCanvas is a local tool. It reads the workspace you point it at and writes
+state inside that workspace under `.agentcanvas/`. The browser server binds to
+localhost by default, and `agentcanvas up` refuses non-loopback hosts. The older
+foreground `agentcanvas start --host ...` path also requires
+`--allow-remote-host` before it will bind outside loopback.
+
+The launch URL includes a token. That token protects the local HTTP API from
+casual cross-site browser requests and other local users; it is not a promise
+against someone who already controls your machine or shell. The token is printed
+once at launch so your agent or terminal can open the right URL. Heartbeat files
+store only a token hint, and runtime smoke logs redact launch tokens.
+
+MCP tools can read and update AgentCanvas state for the workspace: status,
+canvas, evidence, pending requests, answers, and progress. They do not get a
+separate permission model from your coding agent. If your agent can call the
+tool, treat it like that agent reading and writing the local `.agentcanvas/`
+files.
+
+AgentCanvas ships with no telemetry. There is no analytics endpoint, no consent
+toggle hiding a future data path, and no background network reporting from the
+local app.
 
 ## Development
 
@@ -431,7 +483,7 @@ Useful local loop:
 ```bash
 python3 -m pip install -e .
 agentcanvas index --workspace examples/sample-js-app
-agentcanvas start --workspace examples/sample-js-app --port 8765
+python3 -m agentcanvas up examples/sample-js-app --port 8765
 python3 -m unittest discover
 ```
 
@@ -470,6 +522,16 @@ not verified there:
 ```bash
 python3 scripts/verify_release.py --skip-runtime-smoke
 ```
+
+Before a public release or PyPI publish, point the verifier at the real dogfood
+matrix and require the gate:
+
+```bash
+python3 scripts/verify_release.py --dogfood-matrix path/to/release-matrix.json --require-dogfood-gate
+```
+
+The checked-in dogfood matrix fixture is intentionally partial. It keeps the
+evidence contract tested without pretending the release dogfood gate has passed.
 
 Use the Python-only path only when the change cannot affect the browser app or
 packaged frontend assets, for example a docs-only change or a Python-only check

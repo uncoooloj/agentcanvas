@@ -20,11 +20,9 @@ import {
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { countSteps, type CanvasSourceSummary, type Journey } from "@/lib/types"
+import { CanvasSourceTone, JourneyActivity, countSteps, type CanvasSourceSummary, type Journey } from "@/lib/types"
 import type { ProductLanguage } from "@/lib/appcontext"
 import type { ChangeEntry } from "@/lib/changeset"
-
-type JourneyActivity = "idle" | "edited" | "working"
 
 interface Props {
   appName: string
@@ -100,7 +98,7 @@ export function Overview({ appName, productLanguage, source, journeys, changes, 
               key={journey.id}
               journey={journey}
               pending={pendingByJourney.get(journey.id) ?? 0}
-              status={activity.get(journey.id) ?? "idle"}
+              status={activity.get(journey.id) ?? JourneyActivity.Idle}
               onOpen={() => onOpen(journey.id)}
             />
           ))}
@@ -122,14 +120,14 @@ export function Overview({ appName, productLanguage, source, journeys, changes, 
 }
 
 function SourceTruth({ source }: { source: CanvasSourceSummary }) {
-  const Icon = source.tone === "warning" || source.tone === "error" ? AlertCircle : Info
+  const Icon = source.tone === CanvasSourceTone.Warning || source.tone === CanvasSourceTone.Error ? AlertCircle : Info
   return (
     <div
       className={cn(
         "mx-auto mt-4 inline-flex max-w-2xl items-center gap-2 rounded-full border px-3 py-1.5 text-xs",
-        source.tone === "warning"
+        source.tone === CanvasSourceTone.Warning
           ? "border-gold/30 bg-gold/10 text-foreground"
-          : source.tone === "error"
+          : source.tone === CanvasSourceTone.Error
             ? "border-destructive/25 bg-destructive/10 text-destructive"
             : "border-border bg-secondary/70 text-muted-foreground"
       )}
@@ -167,7 +165,7 @@ function FlowCard({
         <span className="flex size-10 items-center justify-center rounded-xl bg-when-bg text-when-fg">
           <Icon className="size-[18px]" />
         </span>
-        {status === "working" ? (
+        {status === JourneyActivity.Working ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground">
             <Loader2 className="size-3 animate-spin" /> Updating
           </span>

@@ -1,0 +1,42 @@
+{
+  "env": [
+    {
+      "agent": "claude-code",
+      "keys": ["CLAUDECODE", "CLAUDE_CODE", "CLAUDE_CODE_ENTRYPOINT"],
+      "prefixes": ["CLAUDE_CODE_"]
+    },
+    {
+      "agent": "codex",
+      "keys": ["CODEX", "OPENAI_CODEX"],
+      "prefixes": ["CODEX_", "OPENAI_CODEX"]
+    },
+    {
+      "agent": "cursor",
+      "keys": ["CURSOR_TRACE_ID"],
+      "prefixes": ["CURSOR_"]
+    }
+  ],
+  "workspace": [
+    {
+      "agent": "claude-code",
+      "paths": [".claude"]
+    },
+    {
+      "agent": "cursor",
+      "paths": [".cursor"]
+    },
+    {
+      "agent": "codex",
+      "files": [
+        {
+          "path": "AGENTS.md",
+          "contains": "AGENTS.md instructions"
+        },
+        {
+          "path": "AGENTS.md",
+          "contains": "Global Operating Rules"
+        }
+      ]
+    }
+  ]
+}

@@ -10,9 +10,11 @@ from __future__ import annotations
 import ast
 import re
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from .app_surface import AppSurfaceType, app_surface_type_value
 from .workspace_profile import infer_workspace_profile
 
 BEHAVIOR_CANVAS_SCHEMA = "agentcanvas.behavior_canvas.v1"
@@ -49,13 +51,93 @@ SCRIPT_NAMES_OF_INTEREST = {
     "test",
     "typecheck",
 }
+
+
+class BehaviorNodeKind(str, Enum):
+    FILE = "file"
+    ROUTE = "route"
+    STEP = "step"
+
+
+class BehaviorStepRole(str, Enum):
+    DO = "do"
+    WHEN = "when"
+
+
+class AgentTriggerKind(str, Enum):
+    COMMAND = "command"
+    ENTRYPOINT = "entrypoint"
+    EVENT = "event"
+    PAGE = "page"
+    ROUTE = "route"
+    SCREEN = "screen"
+    TRIGGER = "trigger"
+    WHEN = "when"
+
+
+class RouteSourceKind(str, Enum):
+    FILE = "file"
+
+
+class CanvasSourceKind(str, Enum):
+    AGENT_AUTHORED = "agent-authored"
+    HEURISTIC_PROJECTION = "heuristic-projection"
+    DEMO = "demo"
+    DEMO_FALLBACK = "demo-fallback"
+    EMPTY = "empty"
+    WORKSPACE = "workspace"
+
+
+class CanvasSourceStatus(str, Enum):
+    READY = "ready"
+    DEMO = "demo"
+    DEMO_FALLBACK = "demo_fallback"
+    EMPTY = "empty"
+    STALE_CACHE = "stale_cache"
+    WORKSPACE = "workspace"
+
+
+class CanvasSourceReason(str, Enum):
+    DEMO_WORKSPACE = "demo_workspace"
+    LAUNCH_PAGE_WITHOUT_WORKSPACE = "launch_page_without_workspace"
+    REQUESTED_DEMO_WORKSPACE = "requested_demo_workspace"
+
+
+class CanvasMappingMode(str, Enum):
+    AGENT_AUTHORED = "agent-authored"
+    DETERMINISTIC = "deterministic"
+    HEURISTIC_PROJECTION = "heuristic-projection"
+    LLM_ASSISTED = "llm-assisted"
+    V2_COMPAT = "v2-compat"
+
+
+class CanvasProjectionEngine(str, Enum):
+    CANVAS_V2_FLATTEN = "canvas-v2-flatten"
+    DETERMINISTIC = "deterministic"
+    LOCAL_FALLBACK = "local-fallback"
+
+
+class MappingStageStatus(str, Enum):
+    DONE = "done"
+    EMPTY = "empty"
+
+
 SOURCE_LABELS = {
-    "agent-authored": "Agent-authored canvas",
-    "heuristic-projection": "Heuristic projection",
-    "demo": "Demo content",
-    "demo-fallback": "Demo fallback content",
-    "empty": "No runtime flows",
+    CanvasSourceKind.AGENT_AUTHORED.value: "Agent-authored canvas",
+    CanvasSourceKind.HEURISTIC_PROJECTION.value: "Heuristic projection",
+    CanvasSourceKind.DEMO.value: "Demo content",
+    CanvasSourceKind.DEMO_FALLBACK.value: "Demo fallback content",
+    CanvasSourceKind.EMPTY.value: "No runtime flows",
+    CanvasSourceKind.WORKSPACE.value: "Workspace content",
 }
+
+
+def _enum_value(value: Any, fallback: Enum) -> str:
+    if isinstance(value, Enum):
+        return str(value.value)
+    if value:
+        return str(value)
+    return str(fallback.value)
 
 
 @dataclass
@@ -69,7 +151,7 @@ class _Step:
 
     def to_dict(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
-            "kind": "step",
+            "kind": BehaviorNodeKind.STEP.value,
             "id": self.id,
             "role": self.role,
             "text": self.text,
@@ -128,8 +210,8 @@ class _CliCommand:
 
 
 def canvas_source_metadata(
-    kind: str,
-    status: str,
+    kind: str | CanvasSourceKind,
+    status: str | CanvasSourceStatus,
     *,
     is_demo_content: bool = False,
     is_fallback: bool = False,
@@ -140,8 +222,8 @@ def canvas_source_metadata(
 ) -> Dict[str, Any]:
     """Return the machine-readable source status shared by canvas and mapping."""
 
-    normalized_kind = kind or "heuristic-projection"
-    normalized_status = status or "ready"
+    normalized_kind = _enum_value(kind, CanvasSourceKind.HEURISTIC_PROJECTION)
+    normalized_status = _enum_value(status, CanvasSourceStatus.READY)
     source: Dict[str, Any] = {
         "kind": normalized_kind,
         "status": normalized_status,
@@ -165,8 +247,22 @@ def _canvas_source(canvas: Mapping[str, Any]) -> Dict[str, Any]:
     journeys = canvas.get("journeys") if isinstance(canvas.get("journeys"), list) else []
     fallback = bool(projection.get("fallback"))
     is_empty = bool(source.get("isEmpty")) or fallback or not journeys
-    kind = str(source.get("kind") or ("empty" if is_empty else "heuristic-projection"))
-    status = str(source.get("status") or ("empty" if is_empty else "ready"))
+    kind = str(
+        source.get("kind")
+        or (
+            CanvasSourceKind.EMPTY.value
+            if is_empty
+            else CanvasSourceKind.HEURISTIC_PROJECTION.value
+        )
+    )
+    status = str(
+        source.get("status")
+        or (
+            CanvasSourceStatus.EMPTY.value
+            if is_empty
+            else CanvasSourceStatus.READY.value
+        )
+    )
     flow_count = source.get("flowCount")
     if not isinstance(flow_count, int):
         flow_count = 0 if is_empty else len(journeys)
@@ -222,8 +318,20 @@ def workflow_ir_to_behavior_canvas(
     if not ordered:
         fallback_used = True
         ordered = [_fallback_journey(workflow_ir, components)]
-    source_kind = "demo" if is_demo else "empty" if fallback_used else "heuristic-projection"
-    source_status = "demo" if is_demo else "empty" if fallback_used else "ready"
+    source_kind = (
+        CanvasSourceKind.DEMO
+        if is_demo
+        else CanvasSourceKind.EMPTY
+        if fallback_used
+        else CanvasSourceKind.HEURISTIC_PROJECTION
+    )
+    source_status = (
+        CanvasSourceStatus.DEMO
+        if is_demo
+        else CanvasSourceStatus.EMPTY
+        if fallback_used
+        else CanvasSourceStatus.READY
+    )
     source = canvas_source_metadata(
         source_kind,
         source_status,
@@ -249,8 +357,8 @@ def workflow_ir_to_behavior_canvas(
             "components": _public_components(components),
             "source": source,
             "projection": {
-                "mode": "heuristic-projection",
-                "engine": "deterministic",
+                "mode": CanvasMappingMode.HEURISTIC_PROJECTION.value,
+                "engine": CanvasProjectionEngine.DETERMINISTIC.value,
                 "fallback": fallback_used,
                 "detectedFlowCount": len(journeys),
                 "displayFlowCount": len(ordered),
@@ -281,8 +389,12 @@ def build_behavior_canvas(
     source = _canvas_source(canvas)
     flow_count = int(source.get("flowCount", 0))
     display_flow_count = len(canvas.get("journeys") or [])
-    entrypoint_status = "empty" if source.get("isEmpty") else "done"
-    mapping_status = str(source.get("status") or "ready")
+    entrypoint_status = (
+        MappingStageStatus.EMPTY.value
+        if source.get("isEmpty")
+        else MappingStageStatus.DONE.value
+    )
+    mapping_status = str(source.get("status") or CanvasSourceStatus.READY.value)
     return {
         "schema": BEHAVIOR_CANVAS_WRAPPER_SCHEMA,
         "version": "0.1.0",
@@ -290,20 +402,20 @@ def build_behavior_canvas(
         "mapping": {
             "schema": CANVAS_MAPPING_SCHEMA,
             "status": mapping_status,
-            "mode": str(source.get("kind") or "heuristic-projection"),
-            "primaryMode": "llm-assisted",
+            "mode": str(source.get("kind") or CanvasSourceKind.HEURISTIC_PROJECTION.value),
+            "primaryMode": CanvasMappingMode.LLM_ASSISTED.value,
             "flowCount": flow_count,
             "displayFlowCount": display_flow_count,
             "source": source,
             "stale": bool(source.get("isStale")),
             "empty": bool(source.get("isEmpty")),
-            "demoFallback": source.get("kind") == "demo-fallback",
+            "demoFallback": source.get("kind") == CanvasSourceKind.DEMO_FALLBACK.value,
             "warnings": warnings,
             "stages": [
                 {
                     "id": "index",
                     "label": "Indexed workspace",
-                    "status": "done",
+                    "status": MappingStageStatus.DONE.value,
                 },
                 {
                     "id": "entrypoints",
@@ -346,7 +458,7 @@ def build_agent_authored_canvas(
         .get("warnings", [])
     )
     source = _canvas_source(canvas)
-    mapping_status = str(source.get("status") or "ready")
+    mapping_status = str(source.get("status") or CanvasSourceStatus.READY.value)
     return {
         "schema": BEHAVIOR_CANVAS_WRAPPER_SCHEMA,
         "version": "0.1.0",
@@ -354,25 +466,25 @@ def build_agent_authored_canvas(
         "mapping": {
             "schema": CANVAS_MAPPING_SCHEMA,
             "status": mapping_status,
-            "mode": "agent-authored",
-            "primaryMode": "agent-authored",
+            "mode": CanvasMappingMode.AGENT_AUTHORED.value,
+            "primaryMode": CanvasMappingMode.AGENT_AUTHORED.value,
             "flowCount": len(canvas.get("journeys") or []),
             "displayFlowCount": len(canvas.get("journeys") or []),
             "source": source,
             "stale": bool(source.get("isStale")),
             "empty": bool(source.get("isEmpty")),
-            "demoFallback": source.get("kind") == "demo-fallback",
+            "demoFallback": source.get("kind") == CanvasSourceKind.DEMO_FALLBACK.value,
             "warnings": warnings,
             "stages": [
                 {
                     "id": "evidence",
                     "label": "Read workspace evidence",
-                    "status": "done",
+                    "status": MappingStageStatus.DONE.value,
                 },
                 {
                     "id": "agent-map",
                     "label": "Agent wrote behavior canvas",
-                    "status": "done",
+                    "status": MappingStageStatus.DONE.value,
                 },
                 {
                     "id": "canvas",
@@ -406,7 +518,7 @@ def _agent_authored_behavior_canvas(
     query_mode = (
         str(canvas_query.get("mode"))
         if isinstance(canvas_query, Mapping) and canvas_query.get("mode")
-        else str(projection.get("mode") or "agent-authored")
+        else str(projection.get("mode") or CanvasMappingMode.AGENT_AUTHORED.value)
     )
     raw_warnings = list(projection.get("warnings") or [])
     if isinstance(canvas_query, Mapping):
@@ -416,8 +528,8 @@ def _agent_authored_behavior_canvas(
         warnings.append("Agent-authored canvas had no displayable flows.")
     workspace_profile = infer_workspace_profile(canvas_model, workspace=workspace)
     source = canvas_source_metadata(
-        "agent-authored",
-        "empty" if not ordered else "ready",
+        CanvasSourceKind.AGENT_AUTHORED,
+        CanvasSourceStatus.EMPTY if not ordered else CanvasSourceStatus.READY,
         is_demo_content=is_demo,
         is_empty=not ordered,
         flow_count=len(ordered),
@@ -438,7 +550,7 @@ def _agent_authored_behavior_canvas(
             "workspace_profile": workspace_profile,
             "source": source,
             "projection": {
-                "mode": "agent-authored",
+                "mode": CanvasMappingMode.AGENT_AUTHORED.value,
                 "query_mode": query_mode,
                 "warnings": _dedupe(warnings),
             },
@@ -470,7 +582,10 @@ def _agent_annotation_journeys(canvas_model: Mapping[str, Any]) -> List[_Journey
             text = _agent_step_text(raw_step, default=("Someone starts this flow" if index == 0 else "Do the next step"))
             steps.append((role, text, [*refs, *_agent_refs(raw_step)]))
         if not steps:
-            steps = [("when", entry, refs), ("do", title, refs)]
+            steps = [
+                (BehaviorStepRole.WHEN.value, entry, refs),
+                (BehaviorStepRole.DO.value, title, refs),
+            ]
 
         order = journey_data.get("order")
         sort_index = int(order) if isinstance(order, int) else 20
@@ -484,7 +599,7 @@ def _agent_annotation_journeys(canvas_model: Mapping[str, Any]) -> List[_Journey
                 sort_key=(sort_index, title.lower()),
                 steps=steps,
                 refs=refs,
-                metadata={"projection": "agent-authored"},
+                metadata={"projection": CanvasMappingMode.AGENT_AUTHORED.value},
             ),
         )
     return list(journeys.values())
@@ -572,7 +687,7 @@ def _journey_from_agent_chain(chain: Sequence[Mapping[str, Any]], index: int) ->
         sort_key=(20 + index, title.lower()),
         steps=steps,
         refs=refs,
-        metadata={"projection": "agent-authored"},
+        metadata={"projection": CanvasMappingMode.AGENT_AUTHORED.value},
     )
 
 
@@ -593,7 +708,7 @@ def _agent_node_looks_like_start(node: Mapping[str, Any]) -> bool:
     node_id = str(node.get("id") or "").lower()
     label = str(node.get("label") or "").lower()
     return (
-        node_type in {"command", "entrypoint", "event", "page", "route", "screen", "trigger", "when"}
+        node_type in {kind.value for kind in AgentTriggerKind}
         or node_id.startswith("when:")
         or label.startswith(("someone ", "a user ", "the user "))
     )
@@ -601,9 +716,9 @@ def _agent_node_looks_like_start(node: Mapping[str, Any]) -> bool:
 
 def _agent_step_role(item: Mapping[str, Any], index: int) -> str:
     raw = str(item.get("role") or item.get("kind") or item.get("type") or "").lower()
-    if raw in {"when", "trigger", "event", "route", "screen", "page", "command", "entrypoint"}:
-        return "when" if index == 0 else "do"
-    return "when" if index == 0 else "do"
+    if raw in {kind.value for kind in AgentTriggerKind}:
+        return BehaviorStepRole.WHEN.value if index == 0 else BehaviorStepRole.DO.value
+    return BehaviorStepRole.WHEN.value if index == 0 else BehaviorStepRole.DO.value
 
 
 def _agent_step_text(item: Mapping[str, Any], *, default: str) -> str:
@@ -663,8 +778,8 @@ def _cli_journeys(workflow_ir: Mapping[str, Any], workspace: Optional[Path]) -> 
                 sort_key=(10, command),
                 refs=(ref,),
                 steps=[
-                    ("when", f"Someone runs `{command}`", (ref,)),
-                    ("do", f"Run `{target}`", (ref,)),
+                    (BehaviorStepRole.WHEN.value, f"Someone runs `{command}`", (ref,)),
+                    (BehaviorStepRole.DO.value, f"Run `{target}`", (ref,)),
                 ],
             )
             for command, target, ref in executables
@@ -684,8 +799,8 @@ def _cli_journeys(workflow_ir: Mapping[str, Any], workspace: Optional[Path]) -> 
                     sort_key=(10, full_command),
                     refs=(script_ref, ref),
                     steps=[
-                        ("when", f"Someone runs `{full_command}`", (script_ref, ref)),
-                        ("do", _cli_action_text(command.name, command.help), (ref,)),
+                        (BehaviorStepRole.WHEN.value, f"Someone runs `{full_command}`", (script_ref, ref)),
+                        (BehaviorStepRole.DO.value, _cli_action_text(command.name, command.help), (ref,)),
                     ],
                     metadata={"entrypoint": executable, "command": command.name},
                 )
@@ -708,8 +823,8 @@ def _api_journeys(workflow_ir: Mapping[str, Any], workspace: Optional[Path]) -> 
                 sort_key=(20, title),
                 refs=(ref,),
                 steps=[
-                    ("when", f"A {endpoint.method} request hits {endpoint.path}", (ref,)),
-                    ("do", _api_action_text(endpoint.method, endpoint.path), (ref,)),
+                    (BehaviorStepRole.WHEN.value, f"A {endpoint.method} request hits {endpoint.path}", (ref,)),
+                    (BehaviorStepRole.DO.value, _api_action_text(endpoint.method, endpoint.path), (ref,)),
                 ],
                 metadata={"method": endpoint.method, "path": endpoint.path},
             )
@@ -723,7 +838,7 @@ def _route_journeys(
 ) -> List[_Journey]:
     journeys: List[_Journey] = []
     for node in workflow_ir.get("nodes") or []:
-        if not isinstance(node, Mapping) or node.get("type") != "route":
+        if not isinstance(node, Mapping) or node.get("type") != BehaviorNodeKind.ROUTE.value:
             continue
         data = node.get("data") if isinstance(node.get("data"), Mapping) else {}
         source_path = str(node.get("path") or data.get("file") or "")
@@ -740,7 +855,7 @@ def _route_journeys(
         )
         title = f"{method} {route_path}" if method != "ANY" else route_path
         action = "Run the route handler"
-        if data.get("source") == "file":
+        if data.get("source") == RouteSourceKind.FILE.value:
             action = "Render the file-based route"
         journeys.append(
             _journey(
@@ -751,8 +866,8 @@ def _route_journeys(
                 sort_key=(30, title),
                 refs=tuple(refs),
                 steps=[
-                    ("when", _request_entry(method, route_path), tuple(refs[:2])),
-                    ("do", action, tuple(refs)),
+                    (BehaviorStepRole.WHEN.value, _request_entry(method, route_path), tuple(refs[:2])),
+                    (BehaviorStepRole.DO.value, action, tuple(refs)),
                 ],
                 metadata={"method": method, "path": route_path, "source": source_path},
             )
@@ -768,7 +883,7 @@ def _source_fact_route_journeys(workflow_ir: Mapping[str, Any]) -> List[_Journey
         if not isinstance(fact, Mapping):
             continue
         attributes = fact.get("attributes") if isinstance(fact.get("attributes"), Mapping) else {}
-        if attributes.get("fact_type") != "route":
+        if attributes.get("fact_type") != BehaviorNodeKind.ROUTE.value:
             continue
         source_path = _fact_path(fact, attributes)
         if _is_fixture_path(source_path):
@@ -794,8 +909,8 @@ def _source_fact_route_journeys(workflow_ir: Mapping[str, Any]) -> List[_Journey
                 sort_key=(35, title),
                 refs=tuple(refs),
                 steps=[
-                    ("when", _request_entry(method, route_path), tuple(refs)),
-                    ("do", f"Run {handler}" if handler else "Run the route handler", tuple(refs)),
+                    (BehaviorStepRole.WHEN.value, _request_entry(method, route_path), tuple(refs)),
+                    (BehaviorStepRole.DO.value, f"Run {handler}" if handler else "Run the route handler", tuple(refs)),
                 ],
                 metadata={"method": method, "path": route_path, "source": source_path},
             )
@@ -811,7 +926,7 @@ def _app_surface_journeys(workflow_ir: Mapping[str, Any], *, have_cli: bool) -> 
         root = str(surface.get("root") or ".")
         if _is_fixture_path(root):
             continue
-        surface_type = str(surface.get("type") or "package")
+        surface_type = app_surface_type_value(surface.get("type"))
         if root == "." and have_cli:
             continue
         refs = _surface_refs(surface)
@@ -827,8 +942,8 @@ def _app_surface_journeys(workflow_ir: Mapping[str, Any], *, have_cli: bool) -> 
                 sort_key=(40, title),
                 refs=tuple(refs),
                 steps=[
-                    ("when", entry, tuple(refs[:2])),
-                    ("do", _surface_action(surface), tuple(refs)),
+                    (BehaviorStepRole.WHEN.value, entry, tuple(refs[:2])),
+                    (BehaviorStepRole.DO.value, _surface_action(surface), tuple(refs)),
                 ],
                 metadata={
                     "app_surface_id": surface.get("id"),
@@ -868,8 +983,8 @@ def _script_journeys(workflow_ir: Mapping[str, Any]) -> List[_Journey]:
                     sort_key=(50, f"{package_label}:{name}"),
                     refs=(ref,),
                     steps=[
-                        ("when", f"Someone runs `{run_command}` in {package_label}", (ref,)),
-                        ("do", f"Execute `{command}`", (ref,)),
+                        (BehaviorStepRole.WHEN.value, f"Someone runs `{run_command}` in {package_label}", (ref,)),
+                        (BehaviorStepRole.DO.value, f"Execute `{command}`", (ref,)),
                     ],
                     metadata={"package": package_label, "script": name},
                 )
@@ -888,9 +1003,9 @@ def _fallback_journey(workflow_ir: Mapping[str, Any], components: Sequence[Mappi
         sort_key=(90, "workspace-overview"),
         refs=tuple(refs),
         steps=[
-            ("when", "Someone opens the workspace", tuple(refs[:2])),
+            (BehaviorStepRole.WHEN.value, "Someone opens the workspace", tuple(refs[:2])),
             (
-                "do",
+                BehaviorStepRole.DO.value,
                 f"Review {summary.get('source_files', 0)} source files across {summary.get('components', 0)} components",
                 tuple(refs),
             ),
@@ -1110,9 +1225,9 @@ def _source_paths(
 ) -> List[str]:
     paths: set[str] = set()
     for node in workflow_ir.get("nodes") or []:
-        if not isinstance(node, Mapping) or node.get("type") != "file":
+        if not isinstance(node, Mapping) or node.get("type") != BehaviorNodeKind.FILE.value:
             continue
-        path = str(node.get("path") or "")
+        path = _normalize_repo_path(str(node.get("path") or ""))
         if not path:
             continue
         if suffixes and PurePosixPath(path).suffix.lower() not in suffixes:
@@ -1256,24 +1371,26 @@ def _cli_action_text(name: str, help_text: str) -> str:
     return actions.get(name, _sentence(help_text or "Run the command handler"))
 
 
-def _surface_title(name: str, surface_type: str) -> str:
+def _surface_title(name: str, surface_type: str | AppSurfaceType) -> str:
+    surface_type = app_surface_type_value(surface_type)
     label = _human_title(name)
-    if surface_type == "web":
+    if surface_type == AppSurfaceType.WEB.value:
         return f"{label} web app"
-    if surface_type == "mobile":
+    if surface_type == AppSurfaceType.MOBILE.value:
         return f"{label} mobile app"
-    if surface_type == "backend":
+    if surface_type == AppSurfaceType.BACKEND.value:
         return f"{label} backend service"
     return f"{label} package"
 
 
-def _surface_entry(name: str, surface_type: str) -> str:
+def _surface_entry(name: str, surface_type: str | AppSurfaceType) -> str:
+    surface_type = app_surface_type_value(surface_type)
     label = _human_title(name).lower()
-    if surface_type == "web":
+    if surface_type == AppSurfaceType.WEB.value:
         return f"Someone opens the {label} web app"
-    if surface_type == "mobile":
+    if surface_type == AppSurfaceType.MOBILE.value:
         return f"Someone opens the {label} mobile app"
-    if surface_type == "backend":
+    if surface_type == AppSurfaceType.BACKEND.value:
         return f"The {label} backend receives work"
     return f"Someone uses the {label} package"
 
@@ -1282,12 +1399,12 @@ def _surface_action(surface: Mapping[str, Any]) -> str:
     hints = surface.get("entry_hints") or []
     if hints and isinstance(hints[0], Mapping) and hints[0].get("detail"):
         return f"Use {hints[0]['detail']}"
-    surface_type = str(surface.get("type") or "package")
-    if surface_type == "web":
+    surface_type = app_surface_type_value(surface.get("type"))
+    if surface_type == AppSurfaceType.WEB.value:
         return "Load the browser interface"
-    if surface_type == "mobile":
+    if surface_type == AppSurfaceType.MOBILE.value:
         return "Load the mobile interface"
-    if surface_type == "backend":
+    if surface_type == AppSurfaceType.BACKEND.value:
         return "Run the service entrypoint"
     return "Run the package entrypoint"
 
@@ -1306,18 +1423,19 @@ def _workspace_root(workflow_ir: Mapping[str, Any]) -> Optional[Path]:
 
 
 def _parent_path(path: str) -> str:
-    parent = PurePosixPath(path).parent.as_posix()
+    parent = PurePosixPath(_normalize_repo_path(path)).parent.as_posix()
     return "." if parent in {"", "."} else parent
 
 
 def _line_ref(path: str, line: Any) -> str:
     if not path:
         return ""
+    normalized_path = _normalize_repo_path(path)
     try:
         line_int = int(line)
     except (TypeError, ValueError):
         line_int = 0
-    return f"{path}:{line_int}" if line_int > 0 else path
+    return f"{normalized_path}:{line_int}" if line_int > 0 else normalized_path
 
 
 def _safe_read(path: Path) -> str:
@@ -1332,8 +1450,12 @@ def _safe_read(path: Path) -> str:
 def _is_fixture_path(path: str) -> bool:
     if not path:
         return False
-    parts = {part.lower() for part in PurePosixPath(path).parts}
+    parts = {part.lower() for part in PurePosixPath(_normalize_repo_path(path)).parts}
     return bool(parts.intersection(FIXTURE_PARTS))
+
+
+def _normalize_repo_path(path: str) -> str:
+    return PurePosixPath(str(path).replace("\\", "/")).as_posix()
 
 
 def _dedupe(values: Iterable[str]) -> List[str]:

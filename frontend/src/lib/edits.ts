@@ -1,5 +1,9 @@
-import type { FlowAction } from "@/components/FlowCanvas"
-import type { FlowNode } from "./types"
+import { FlowAction, FlowNodeKind, type FlowNode } from "./types"
+
+export enum EditDelivery {
+  CanvasMap = "canvas_map",
+  ImplementationRequest = "implementation_request",
+}
 
 export interface EditRequest {
   action: FlowAction
@@ -16,15 +20,33 @@ export interface StagedEdit {
   journeyTitle: string
   summary: string
   changeId?: string
+  delivery?: EditDelivery
   text1?: string
   text2?: string
 }
 
-export function nodeLabel(node: FlowNode): string {
-  return node.kind === "branch" ? `If ${node.condition}` : node.text
+export function canSaveToMapAction(action: FlowAction): boolean {
+  switch (action) {
+    case FlowAction.Change:
+    case FlowAction.ChangeCondition:
+    case FlowAction.AddAfter:
+    case FlowAction.AddRule:
+    case FlowAction.AddThen:
+    case FlowAction.AddElse:
+    case FlowAction.Remove:
+      return true
+  }
 }
 
-export type FieldKind = "single" | "double" | "reason"
+export function nodeLabel(node: FlowNode): string {
+  return node.kind === FlowNodeKind.Branch ? `If ${node.condition}` : node.text
+}
+
+export enum FieldKind {
+  Single = "single",
+  Double = "double",
+  Reason = "reason",
+}
 
 interface EditMeta {
   title: string
@@ -37,55 +59,55 @@ interface EditMeta {
 }
 
 export const EDIT_META: Record<FlowAction, EditMeta> = {
-  change: {
+  [FlowAction.Change]: {
     title: "Change this step",
     context: (s) => `How should “${s}” work instead?`,
     cta: "Save",
-    field: "single",
+    field: FieldKind.Single,
     firstPlaceholder: "e.g. Also add loyalty points before charging",
   },
-  add_after: {
+  [FlowAction.AddAfter]: {
     title: "Add a step",
     context: (s) => `What should happen right after “${s}”?`,
     cta: "Add",
-    field: "single",
+    field: FieldKind.Single,
     firstPlaceholder: "e.g. Text them the delivery date",
   },
-  add_rule: {
+  [FlowAction.AddRule]: {
     title: "Add a rule",
     context: (s) => `Add an “if…” around “${s}”.`,
     cta: "Add",
-    field: "double",
+    field: FieldKind.Double,
     firstPlaceholder: "If… e.g. the order is over £100",
     secondPlaceholder: "then… e.g. send it to a manager to approve",
   },
-  change_condition: {
+  [FlowAction.ChangeCondition]: {
     title: "Change the condition",
     context: (s) => `When should this path be taken? (now: “${s}”)`,
     cta: "Save",
-    field: "single",
+    field: FieldKind.Single,
     firstPlaceholder: "e.g. the order is over £100",
   },
-  add_then: {
+  [FlowAction.AddThen]: {
     title: "Add a step",
     context: (s) => `What should happen when “${s}” is true?`,
     cta: "Add",
-    field: "single",
+    field: FieldKind.Single,
     firstPlaceholder: "e.g. Send a thank-you note",
   },
-  add_else: {
+  [FlowAction.AddElse]: {
     title: "Add a step",
     context: (s) => `What should happen otherwise — when “${s}” is not true?`,
     cta: "Add",
-    field: "single",
+    field: FieldKind.Single,
     firstPlaceholder: "e.g. Ask them to try again",
   },
-  remove: {
+  [FlowAction.Remove]: {
     title: "Remove this",
     context: (s) => `Remove “${s}”? We'll ask your assistant to take it out safely.`,
     cta: "Remove",
     danger: true,
-    field: "reason",
+    field: FieldKind.Reason,
     firstPlaceholder: "Why remove it? (optional)",
   },
 }
@@ -97,19 +119,19 @@ export function buildSummary(
   text2: string
 ): string {
   switch (action) {
-    case "change":
+    case FlowAction.Change:
       return `Change the step “${label}” so that instead it: ${text1}`
-    case "add_after":
+    case FlowAction.AddAfter:
       return `Right after “${label}”, add a new step: ${text1}`
-    case "add_rule":
+    case FlowAction.AddRule:
       return `Around “${label}”, add a rule: if ${text1}, then ${text2}`
-    case "change_condition":
+    case FlowAction.ChangeCondition:
       return `Change the rule “${label}” so the condition becomes: ${text1}`
-    case "add_then":
+    case FlowAction.AddThen:
       return `In the rule “${label}”, on the path where it is true, add a step: ${text1}`
-    case "add_else":
+    case FlowAction.AddElse:
       return `In the rule “${label}”, on the otherwise path, add a step: ${text1}`
-    case "remove":
+    case FlowAction.Remove:
       return `Remove “${label}”.${text1 ? ` Reason: ${text1}` : ""}`
   }
 }

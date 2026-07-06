@@ -1,27 +1,75 @@
-import type {
-  AppModel,
-  BranchNode,
-  CanvasMapping,
-  CanvasSourceMetadata,
-  CodeGraph,
-  FlowNode,
-  Journey,
-  MappingStage,
-  PendingItem,
+import {
+  CanvasMappingMode,
+  CanvasSourceKind,
+  CanvasSourceReason,
+  CanvasSourceStatus,
+  CanvasStepKind,
+  CanvasV2ConfidenceLevel,
+  CanvasV2EdgeKind,
+  CanvasV2NodeKind,
+  CanvasV2Schema,
+  CanvasV2Status,
+  ConversationRole,
+  ConversationTurnKind,
+  FlowNodeKind,
+  LegacyPendingStatus,
+  MapFreshnessStatus,
+  MapHealthReason,
+  MapHealthStatus,
+  MappingStageStatus,
   PendingStatus,
-  PendingStatusHistoryEntry,
-  StepNode,
+  StepRole,
+  type AppModel,
+  type BranchNode,
+  type CanvasApplyBatch,
+  type CanvasApplyResult,
+  type CanvasHistoryEntry,
+  type CanvasHistoryResponse,
+  type CanvasMapping,
+  type CanvasRestoreRequest,
+  type CanvasRestoreResult,
+  type CanvasV2Confidence,
+  type CanvasSourceMetadata,
+  type CanvasV2Document,
+  type CanvasV2Edge,
+  type CanvasV2Evidence,
+  type CanvasV2Flow,
+  type CanvasV2NativeRef,
+  type CanvasV2Node,
+  type ChangeKind,
+  type CodeGraph,
+  type FlowAction,
+  type FlowNode,
+  type Journey,
+  type MapHealth,
+  type MapHealthFileRef,
+  type MappingStage,
+  type PendingConversationSummary,
+  type PendingConversationTurn,
+  type PendingItem,
+  type PendingRef,
+  type PendingStatusHistoryEntry,
+  type StepNode,
+  type WorkspaceProgressStage,
+  type WorkspaceProgressPayload,
+  type WorkspaceProgressStatus,
 } from "./types"
 
 export class ApiError extends Error {
   readonly path: string
   readonly status: number
+  readonly code?: string
+  readonly details?: unknown
+  readonly payload?: unknown
 
-  constructor(path: string, status: number, detail?: string) {
+  constructor(path: string, status: number, detail?: string, options: { code?: string; details?: unknown; payload?: unknown } = {}) {
     super(`${status}${detail ? `: ${detail}` : ""}`)
     this.name = "ApiError"
     this.path = path
     this.status = status
+    this.code = options.code
+    this.details = options.details
+    this.payload = options.payload
   }
 }
 
@@ -47,10 +95,41 @@ async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(url(path), { headers: { "content-type": "application/json" } })
   const data = (await res.json().catch(() => null)) as T | { error?: unknown } | null
   if (!res.ok) {
-    const error = recordValue(data)?.error
-    throw new ApiError(path, res.status, error ? String(error) : res.statusText)
+    throw apiError(path, res.status, data, res.statusText)
   }
   return data as T
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(url(path), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  const data = (await res.json().catch(() => null)) as T | { error?: unknown } | null
+  if (!res.ok) {
+    throw apiError(path, res.status, data, res.statusText)
+  }
+  return data as T
+}
+
+function apiError(path: string, status: number, payload: unknown, fallback: string): ApiError {
+  const root = recordValue(payload)
+  const error = recordValue(root?.error)
+  if (error) {
+    return new ApiError(
+      path,
+      status,
+      stringValue(error.message) || stringValue(error.code) || fallback,
+      {
+        code: stringValue(error.code),
+        details: error.details,
+        payload,
+      },
+    )
+  }
+  const plain = root?.error
+  return new ApiError(path, status, plain ? String(plain) : fallback, { payload })
 }
 
 export async function fetchCanvasModel(): Promise<AppModel> {
@@ -61,15 +140,13 @@ export async function fetchCanvasModel(): Promise<AppModel> {
 export interface CanvasResponse {
   model: AppModel
   mapping?: CanvasMapping
+  revision?: number
+  canvasV2?: CanvasV2Document
 }
 
 export async function fetchCanvas(): Promise<CanvasResponse> {
   const data = await getJson<unknown>("/api/canvas")
-  const root = recordValue(data)
-  return {
-    model: normalizeCanvasPayload(data),
-    mapping: normalizeCanvasMapping(recordValue(root?.mapping)),
-  }
+  return normalizeCanvasResponse(data)
 }
 
 export async function fetchGraph(): Promise<CodeGraph> {
@@ -80,6 +157,49 @@ export async function fetchGraph(): Promise<CodeGraph> {
 export async function fetchPending(): Promise<PendingItem[]> {
   const data = await getJson<{ ok: boolean; pending: unknown[] }>("/api/pending")
   return (data.pending || []).map(normalizePending)
+}
+
+export async function fetchPendingRequest(id: string, options: { since?: string } = {}): Promise<PendingItem> {
+  const path = pendingPath(id, options.since)
+  const data = await getJson<{ ok: boolean; pending: unknown }>(path)
+  return normalizePending(data.pending)
+}
+
+export async function answerPendingRequest(id: string, answer: string): Promise<PendingItem> {
+  const data = await postJson<{ ok: boolean; pending: unknown }>(`${pendingPath(id)}/answer`, {
+    answer,
+    sessionId: sessionId(),
+  })
+  return normalizePending(data.pending)
+}
+
+export async function fetchMapHealth(): Promise<MapHealth> {
+  const data = await getJson<{ ok: boolean; health: unknown }>("/api/health")
+  return normalizeMapHealth(data.health)
+}
+
+export async function fetchProgress(): Promise<WorkspaceProgressStatus> {
+  const data = await getJson<{ ok: boolean; progress: unknown }>("/api/progress")
+  return normalizeWorkspaceProgress(data.progress)
+}
+
+export async function fetchCanvasHistory(): Promise<CanvasHistoryResponse> {
+  const data = await getJson<unknown>("/api/canvas/history")
+  return normalizeCanvasHistory(data)
+}
+
+export async function applyCanvasBatch(batch: CanvasApplyBatch): Promise<CanvasApplyResult> {
+  const data = await postJson<unknown>("/api/canvas/apply", batch)
+  return normalizeCanvasApplyResult(data)
+}
+
+export async function restoreCanvasRevision(request: CanvasRestoreRequest): Promise<CanvasRestoreResult> {
+  const data = await postJson<unknown>("/api/canvas/restore", {
+    revision: request.revision,
+    base_revision: request.baseRevision,
+    authored_by: request.authoredBy,
+  })
+  return normalizeCanvasRestoreResult(data)
 }
 
 export async function reindex(): Promise<CodeGraph> {
@@ -96,6 +216,12 @@ export async function reindex(): Promise<CodeGraph> {
   return data.graph
 }
 
+function pendingPath(id: string, since?: string): string {
+  const path = `/api/pending/${encodeURIComponent(id)}`
+  if (!since) return path
+  return `${path}?since=${encodeURIComponent(since)}`
+}
+
 export async function reindexCanvas(): Promise<CanvasResponse> {
   const res = await fetch(url("/api/reindex"), {
     method: "POST",
@@ -107,15 +233,91 @@ export async function reindexCanvas(): Promise<CanvasResponse> {
     throw new ApiError("/api/reindex", res.status, data?.error ? String(data.error) : res.statusText)
   }
   const data = await res.json()
+  return normalizeCanvasResponse(data)
+}
+
+export function normalizeCanvasResponse(data: unknown): CanvasResponse {
   const root = recordValue(data)
+  const canvasV2 = normalizeCanvasV2Document(root?.canvas_v2 || root?.canvasV2)
+  const revision = numberValue(root?.revision) ?? canvasV2?.revision
   return {
     model: normalizeCanvasPayload(data),
     mapping: normalizeCanvasMapping(recordValue(root?.mapping)),
+    revision,
+    canvasV2,
+  }
+}
+
+export function normalizeMapHealth(value: unknown): MapHealth {
+  const health = recordValue(value)
+  const freshness = recordValue(health?.freshness)
+  return {
+    schema: "agentcanvas.map_health.v1",
+    workspacePath: stringValue(health?.workspacePath) || stringValue(health?.workspace_path) || "",
+    stateDir: normalizeMapHealthFile(health?.stateDir || health?.state_dir),
+    workflowIr: normalizeMapHealthFile(health?.workflowIr || health?.workflow_ir),
+    canvasIr: normalizeMapHealthFile(health?.canvasIr || health?.canvas_ir),
+    freshness: {
+      status: normalizeMapFreshnessStatus(freshness?.status),
+      stale: booleanOrNull(freshness?.stale),
+      reason: stringValue(freshness?.reason) || null,
+    },
+    pendingFiles: {
+      ...normalizeMapHealthFile(health?.pendingFiles || health?.pending_files),
+      fileCount: numberValue(recordValue(health?.pendingFiles || health?.pending_files)?.fileCount) ??
+        numberValue(recordValue(health?.pendingFiles || health?.pending_files)?.file_count) ??
+        0,
+      changeCount: numberValue(recordValue(health?.pendingFiles || health?.pending_files)?.changeCount) ??
+        numberValue(recordValue(health?.pendingFiles || health?.pending_files)?.change_count) ??
+        0,
+    },
+    status: normalizeMapHealthStatus(health?.status),
+    ready: booleanValue(health?.ready),
+    summary: stringList(health?.summary),
+  }
+}
+
+export function normalizeCanvasHistory(value: unknown): CanvasHistoryResponse {
+  const history = recordValue(value)
+  return {
+    ok: booleanValue(history?.ok),
+    currentRevision: numberValue(history?.current_revision) ?? numberValue(history?.currentRevision) ?? 0,
+    current: normalizeCanvasHistoryEntry(history?.current),
+    history: Array.isArray(history?.history)
+      ? history.history.map(normalizeCanvasHistoryEntry).filter((entry): entry is CanvasHistoryEntry => Boolean(entry))
+      : [],
+  }
+}
+
+export function normalizeCanvasApplyResult(value: unknown): CanvasApplyResult {
+  const result = recordValue(value)
+  return {
+    ok: booleanValue(result?.ok),
+    autoMigrated: booleanValue(result?.auto_migrated) || booleanValue(result?.autoMigrated),
+    dryRun: booleanValue(result?.dry_run) || booleanValue(result?.dryRun),
+    revision: numberValue(result?.revision) ?? 0,
+    baseRevision: numberValue(result?.base_revision) ?? numberValue(result?.baseRevision) ?? 0,
+    path: stringValue(result?.path),
+  }
+}
+
+export function normalizeCanvasRestoreResult(value: unknown): CanvasRestoreResult {
+  const result = recordValue(value)
+  return {
+    ok: booleanValue(result?.ok),
+    revision: numberValue(result?.revision) ?? 0,
+    baseRevision: numberValue(result?.base_revision) ?? numberValue(result?.baseRevision) ?? 0,
+    restoredRevision: numberValue(result?.restored_revision) ?? numberValue(result?.restoredRevision) ?? 0,
+    path: stringValue(result?.path),
   }
 }
 
 export function isApiNotFound(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404
+}
+
+export function isApiAuthExpired(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403)
 }
 
 export function describeApiError(error: unknown): string {
@@ -128,7 +330,7 @@ export function describeApiError(error: unknown): string {
 export interface ChangeRequest {
   changeId: string
   clientChangeId: string
-  kind: string
+  kind: ChangeKind
   title: string
   summary: string // the plain-language instruction, in the user's words
   journey?: string
@@ -137,7 +339,11 @@ export interface ChangeRequest {
   afterStep?: string | null
   targetStep?: string | null
   targetNodeId?: string | null
-  action?: string
+  targetNativeNodeId?: string | null
+  targetNativeKind?: string | null
+  targetFlowId?: string | null
+  refs?: PendingRef[]
+  action?: FlowAction
   text1?: string
   text2?: string
 }
@@ -187,10 +393,52 @@ function normalizePending(item: unknown): PendingItem {
           ? it.markdownPath
           : null,
     statusHistory: normalizeStatusHistory(it.status_history || it.statusHistory),
+    conversationSummary: normalizePendingConversationSummary(it.conversation_summary || it.conversationSummary),
+    conversation: normalizePendingConversation(it.conversation),
   }
 }
 
-function normalizeCanvasPayload(data: unknown): AppModel {
+function normalizePendingConversation(value: unknown): PendingConversationTurn[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const turns = value.map(normalizePendingConversationTurn).filter((turn): turn is PendingConversationTurn => Boolean(turn))
+  return turns.length ? turns : undefined
+}
+
+function normalizePendingConversationTurn(value: unknown): PendingConversationTurn | null {
+  const turn = recordValue(value)
+  if (!turn) return null
+  const id = stringValue(turn.id)
+  const text = stringValue(turn.text)
+  if (!id || !text) return null
+  return {
+    id,
+    at: stringValue(turn.at),
+    role: normalizeConversationRole(turn.role),
+    kind: normalizeConversationTurnKind(turn.kind),
+    text,
+  }
+}
+
+function normalizePendingConversationSummary(value: unknown): PendingConversationSummary | undefined {
+  const summary = recordValue(value)
+  if (!summary) return undefined
+  const unanswered = recordValue(summary.unanswered_question || summary.unansweredQuestion)
+  return {
+    turns: numberValue(summary.turns) ?? 0,
+    lastRole: normalizeOptionalConversationRole(summary.last_role || summary.lastRole),
+    lastKind: normalizeOptionalConversationTurnKind(summary.last_kind || summary.lastKind),
+    lastAt: stringValue(summary.last_at) || stringValue(summary.lastAt),
+    unansweredQuestion: unanswered
+      ? {
+          id: stringValue(unanswered.id),
+          text: stringValue(unanswered.text),
+          at: stringValue(unanswered.at),
+        }
+      : undefined,
+  }
+}
+
+export function normalizeCanvasPayload(data: unknown): AppModel {
   const payload = unwrapCanvasPayload(data)
   const journeys = Array.isArray(payload.journeys) ? payload.journeys : []
 
@@ -221,10 +469,10 @@ function normalizeCanvasMapping(value: Record<string, unknown> | undefined): Can
   if (!value) return undefined
   return {
     schema: stringValue(value.schema),
-    status: stringValue(value.status),
-    mode: stringValue(value.mode),
-    primaryMode: stringValue(value.primaryMode) || stringValue(value.primary_mode),
-    fallbackMode: stringValue(value.fallbackMode) || stringValue(value.fallback_mode),
+    status: normalizeCanvasSourceStatus(value.status),
+    mode: normalizeCanvasMappingMode(value.mode),
+    primaryMode: normalizeCanvasMappingMode(value.primaryMode || value.primary_mode),
+    fallbackMode: normalizeCanvasMappingMode(value.fallbackMode || value.fallback_mode),
     flowCount: typeof value.flowCount === "number" ? value.flowCount : undefined,
     displayFlowCount: typeof value.displayFlowCount === "number" ? value.displayFlowCount : undefined,
     stale:
@@ -236,7 +484,7 @@ function normalizeCanvasMapping(value: Record<string, unknown> | undefined): Can
       stringLooksStale(value.cache_status),
     empty: booleanValue(value.empty),
     demoFallback: booleanValue(value.demoFallback) || booleanValue(value.demo_fallback),
-    cacheStatus: stringValue(value.cacheStatus) || stringValue(value.cache_status),
+    cacheStatus: normalizeCanvasSourceStatus(value.cacheStatus || value.cache_status),
     source: normalizeCanvasSource(value.source) || sourceFromLegacyFields(value),
     warnings: Array.isArray(value.warnings) ? value.warnings.map((item) => String(item)).filter(Boolean) : undefined,
     stages: Array.isArray(value.stages)
@@ -245,14 +493,342 @@ function normalizeCanvasMapping(value: Record<string, unknown> | undefined): Can
   }
 }
 
+export function normalizeCanvasV2Document(value: unknown): CanvasV2Document | undefined {
+  const document = recordValue(value)
+  if (!document || document.schema !== CanvasV2Schema.Canvas) return undefined
+  const app = recordValue(document.app)
+  return {
+    schema: CanvasV2Schema.Canvas,
+    revision: numberValue(document.revision) ?? 0,
+    authoredBy: stringValue(document.authored_by) || stringValue(document.authoredBy),
+    updatedAt: stringValue(document.updated_at) || stringValue(document.updatedAt) || null,
+    evidence: recordValue(document.evidence),
+    app: {
+      name: stringValue(app?.name) || "Your app",
+      summary: stringValue(app?.summary) || "",
+      isDemo: booleanValue(app?.is_demo) || booleanValue(app?.isDemo),
+    },
+    flows: Array.isArray(document.flows)
+      ? document.flows.map(normalizeCanvasV2Flow).filter((flow): flow is CanvasV2Flow => Boolean(flow))
+      : [],
+    metadata: recordValue(document.metadata),
+  }
+}
+
+function normalizeCanvasV2Flow(value: unknown): CanvasV2Flow | null {
+  const flow = recordValue(value)
+  const id = stringValue(flow?.id)
+  if (!flow || !id) return null
+  const title = stringValue(flow.title) || id
+  const confidence = normalizeCanvasV2Confidence(flow.confidence)
+  const evidenceRefs = stringList(flow.evidence_refs || flow.evidenceRefs)
+  const evidence = normalizeCanvasV2EvidenceList(flow.evidence, {
+    refs: evidenceRefs,
+    confidence,
+  })
+  return {
+    id,
+    title,
+    summary: stringValue(flow.summary) || "",
+    entryNode: stringValue(flow.entry_node) || stringValue(flow.entryNode),
+    altitude: stringValue(flow.altitude),
+    nodes: Array.isArray(flow.nodes)
+      ? flow.nodes.map(normalizeCanvasV2Node).filter((node): node is CanvasV2Node => Boolean(node))
+      : [],
+    edges: Array.isArray(flow.edges)
+      ? flow.edges.map(normalizeCanvasV2Edge).filter((edge): edge is CanvasV2Edge => Boolean(edge))
+      : [],
+    evidence,
+    evidenceRefs: evidenceRefsFromEvidence(evidence, evidenceRefs),
+    confidence,
+    metadata: recordValue(flow.metadata),
+  }
+}
+
+function normalizeCanvasV2Node(value: unknown): CanvasV2Node | null {
+  const node = recordValue(value)
+  const id = stringValue(node?.id)
+  if (!node || !id) return null
+  const confidence = normalizeCanvasV2Confidence(node.confidence)
+  const status = normalizeCanvasV2Status(node.status)
+  const evidenceRefs = stringList(node.evidence_refs || node.evidenceRefs)
+  const evidence = normalizeCanvasV2EvidenceList(node.evidence, {
+    refs: evidenceRefs,
+    status,
+    confidence,
+  })
+  return {
+    id,
+    kind: normalizeCanvasV2NodeKind(node.kind),
+    title: stringValue(node.title) || stringValue(node.label) || id,
+    summary: stringValue(node.summary),
+    evidence,
+    evidenceRefs: evidenceRefsFromEvidence(evidence, evidenceRefs),
+    confidence,
+    status,
+    flowRef: stringValue(node.flow_ref) || stringValue(node.flowRef),
+    metadata: recordValue(node.metadata),
+  }
+}
+
+function normalizeCanvasV2Edge(value: unknown): CanvasV2Edge | null {
+  const edge = recordValue(value)
+  const id = stringValue(edge?.id)
+  const source = stringValue(edge?.source)
+  const target = stringValue(edge?.target)
+  if (!edge || !id || !source || !target) return null
+  const confidence = normalizeCanvasV2Confidence(edge.confidence)
+  const evidenceRefs = stringList(edge.evidence_refs || edge.evidenceRefs)
+  const evidence = normalizeCanvasV2EvidenceList(edge.evidence, {
+    refs: evidenceRefs,
+    confidence,
+  })
+  return {
+    id,
+    kind: normalizeCanvasV2EdgeKind(edge.kind),
+    source,
+    target,
+    label: stringValue(edge.label),
+    isDefault: booleanValue(edge.is_default) || booleanValue(edge.isDefault),
+    evidence,
+    evidenceRefs: evidenceRefsFromEvidence(evidence, evidenceRefs),
+    confidence,
+    metadata: recordValue(edge.metadata),
+  }
+}
+
+export function normalizeWorkspaceProgress(value: unknown): WorkspaceProgressStatus {
+  const progress = recordValue(value)
+  const payload = normalizeWorkspaceProgressPayload(progress?.progress || progress)
+  return {
+    exists: Boolean(progress?.exists),
+    readable: Boolean(progress?.readable),
+    path: stringValue(progress?.path),
+    relativePath: stringValue(progress?.relativePath || progress?.relative_path),
+    progress: payload,
+    schema: payload?.schema,
+    stage: payload?.stage,
+    message: payload?.message,
+    updated_at: payload?.updated_at,
+    current: payload?.current,
+    total: payload?.total,
+    notice: stringValue(progress?.notice),
+    error: progress?.error,
+  }
+}
+
+function normalizeWorkspaceProgressPayload(value: unknown): WorkspaceProgressPayload | null {
+  const payload = recordValue(value)
+  if (!payload) return null
+  const stage = normalizeWorkspaceProgressStage(payload.stage)
+  const message = stringValue(payload.message)
+  if (!stage || !message) return null
+  return {
+    schema: "agentcanvas.progress.v1",
+    stage,
+    message,
+    updated_at: stringValue(payload.updated_at || payload.updatedAt),
+    current: numberValue(payload.current),
+    total: numberValue(payload.total),
+  }
+}
+
+function normalizeWorkspaceProgressStage(value: unknown): WorkspaceProgressStage | null {
+  const stage = stringValue(value)
+  return stage && WORKSPACE_PROGRESS_STAGES.has(stage) ? (stage as WorkspaceProgressStage) : null
+}
+
+function normalizeMapHealthFile(value: unknown): MapHealthFileRef {
+  const file = recordValue(value)
+  return {
+    path: stringValue(file?.path) || "",
+    relativePath: stringValue(file?.relativePath) || stringValue(file?.relative_path) || "",
+    exists: booleanValue(file?.exists),
+    readable: optionalBoolean(file?.readable),
+    reason: normalizeOptionalMapHealthReason(file?.reason),
+    error: stringValue(file?.error),
+  }
+}
+
+function normalizeCanvasHistoryEntry(value: unknown): CanvasHistoryEntry | undefined {
+  const entry = recordValue(value)
+  const revision = numberValue(entry?.revision)
+  if (!entry || revision === undefined) return undefined
+  return {
+    revision,
+    sha256: stringValue(entry.sha256),
+    updatedAt: stringValue(entry.updated_at) || stringValue(entry.updatedAt) || null,
+    authoredBy: stringValue(entry.authored_by) || stringValue(entry.authoredBy),
+    path: stringValue(entry.path),
+    sizeBytes: numberValue(entry.size_bytes) ?? numberValue(entry.sizeBytes),
+    opSummary: recordValue(entry.op_summary) || recordValue(entry.opSummary),
+    allowRewriteReason: stringValue(entry.allow_rewrite_reason) || stringValue(entry.allowRewriteReason) || null,
+    flowSummary: normalizeCanvasHistoryFlowSummary(entry.flow_summary || entry.flowSummary),
+    document: normalizeCanvasV2Document(entry.document),
+  }
+}
+
+function normalizeCanvasHistoryFlowSummary(value: unknown): CanvasHistoryEntry["flowSummary"] | undefined {
+  const summary = recordValue(value)
+  if (!summary) return undefined
+  return {
+    count: numberValue(summary.count) ?? 0,
+    titles: stringList(summary.titles),
+    truncated: booleanValue(summary.truncated),
+  }
+}
+
+const CANVAS_V2_NODE_KINDS = new Set<string>(Object.values(CanvasV2NodeKind))
+const CANVAS_V2_EDGE_KINDS = new Set<string>(Object.values(CanvasV2EdgeKind))
+const CANVAS_V2_STATUSES = new Set<string>(Object.values(CanvasV2Status))
+const CANVAS_V2_CONFIDENCE_LEVELS = new Set<string>(Object.values(CanvasV2ConfidenceLevel))
+
+function normalizeCanvasV2NodeKind(value: unknown): CanvasV2NodeKind {
+  const kind = String(value || CanvasV2NodeKind.Do)
+  return CANVAS_V2_NODE_KINDS.has(kind) ? (kind as CanvasV2NodeKind) : CanvasV2NodeKind.Do
+}
+
+function normalizeCanvasV2EdgeKind(value: unknown): CanvasV2EdgeKind {
+  const kind = String(value || CanvasV2EdgeKind.Normal)
+  return CANVAS_V2_EDGE_KINDS.has(kind) ? (kind as CanvasV2EdgeKind) : CanvasV2EdgeKind.Normal
+}
+
+function normalizeCanvasV2Status(value: unknown): CanvasV2Status | undefined {
+  const status = stringValue(value)
+  return status && CANVAS_V2_STATUSES.has(status) ? (status as CanvasV2Status) : undefined
+}
+
+function normalizeCanvasV2Confidence(value: unknown): CanvasV2Confidence | undefined {
+  const confidence = recordValue(value)
+  if (!confidence) return undefined
+  const level = stringValue(confidence.level)
+  const normalized: CanvasV2Confidence = {}
+  if (level && CANVAS_V2_CONFIDENCE_LEVELS.has(level)) {
+    normalized.level = level as CanvasV2ConfidenceLevel
+  }
+  const reason = stringValue(confidence.reason)
+  if (reason) normalized.reason = reason
+  return normalized.level || normalized.reason ? normalized : undefined
+}
+
+function normalizeCanvasV2EvidenceList(
+  value: unknown,
+  fallback: {
+    refs?: string[]
+    status?: CanvasV2Status
+    confidence?: CanvasV2Confidence
+  } = {}
+): CanvasV2Evidence[] {
+  const evidence = Array.isArray(value)
+    ? value.map(normalizeCanvasV2Evidence).filter((item): item is CanvasV2Evidence => Boolean(item))
+    : []
+  if (evidence.length > 0) return evidence
+  return (fallback.refs || []).map((ref) =>
+    stripUndefined({
+      ref,
+      status: fallback.status,
+      confidence: fallback.confidence,
+      reason: fallback.confidence?.reason,
+    })
+  )
+}
+
+function normalizeCanvasV2Evidence(value: unknown): CanvasV2Evidence | null {
+  if (typeof value === "string" && value.trim()) {
+    return { ref: value }
+  }
+  const evidence = recordValue(value)
+  const ref = stringValue(evidence?.ref)
+  if (!evidence || !ref) return null
+  const confidence = normalizeCanvasV2Confidence(evidence.confidence)
+  return stripUndefined({
+    ref,
+    status: normalizeCanvasV2Status(evidence.status),
+    confidence,
+    reason: stringValue(evidence.reason) || confidence?.reason,
+  })
+}
+
+function evidenceRefsFromEvidence(evidence: CanvasV2Evidence[], fallbackRefs: string[]): string[] {
+  return Array.from(new Set([...fallbackRefs, ...evidence.map((item) => item.ref)]))
+}
+
+function stripUndefined<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T
+}
+
+const CANVAS_MAPPING_MODES = new Set<string>(Object.values(CanvasMappingMode))
+const CANVAS_SOURCE_KINDS = new Set<string>(Object.values(CanvasSourceKind))
+const CANVAS_SOURCE_STATUSES = new Set<string>(Object.values(CanvasSourceStatus))
+const CANVAS_SOURCE_REASONS = new Set<string>(Object.values(CanvasSourceReason))
+const MAP_FRESHNESS_STATUSES = new Set<string>(Object.values(MapFreshnessStatus))
+const WORKSPACE_PROGRESS_STAGES = new Set<string>(["indexing", "surveying", "mapping_flows", "done"])
+const MAP_HEALTH_STATUSES = new Set<string>(Object.values(MapHealthStatus))
+const MAP_HEALTH_REASONS = new Set<string>(Object.values(MapHealthReason))
+const CONVERSATION_ROLES = new Set<string>(Object.values(ConversationRole))
+const CONVERSATION_TURN_KINDS = new Set<string>(Object.values(ConversationTurnKind))
+
+function normalizeCanvasMappingMode(value: unknown): CanvasMappingMode | undefined {
+  const mode = stringValue(value)
+  return mode && CANVAS_MAPPING_MODES.has(mode) ? (mode as CanvasMappingMode) : undefined
+}
+
+function normalizeCanvasSourceKind(value: unknown): CanvasSourceKind | undefined {
+  const kind = stringValue(value)
+  return kind && CANVAS_SOURCE_KINDS.has(kind) ? (kind as CanvasSourceKind) : undefined
+}
+
+function normalizeCanvasSourceStatus(value: unknown): CanvasSourceStatus | undefined {
+  const status = stringValue(value)
+  return status && CANVAS_SOURCE_STATUSES.has(status) ? (status as CanvasSourceStatus) : undefined
+}
+
+function normalizeCanvasSourceReason(value: unknown): CanvasSourceReason | undefined {
+  const reason = stringValue(value)
+  return reason && CANVAS_SOURCE_REASONS.has(reason) ? (reason as CanvasSourceReason) : undefined
+}
+
+function normalizeMapFreshnessStatus(value: unknown): MapFreshnessStatus {
+  const status = stringValue(value)
+  return status && MAP_FRESHNESS_STATUSES.has(status) ? (status as MapFreshnessStatus) : MapFreshnessStatus.Unknown
+}
+
+function normalizeMapHealthStatus(value: unknown): MapHealthStatus {
+  const status = stringValue(value)
+  return status && MAP_HEALTH_STATUSES.has(status) ? (status as MapHealthStatus) : MapHealthStatus.Ready
+}
+
+function normalizeOptionalMapHealthReason(value: unknown): MapHealthReason | undefined {
+  const reason = stringValue(value)
+  return reason && MAP_HEALTH_REASONS.has(reason) ? (reason as MapHealthReason) : undefined
+}
+
+function normalizeConversationRole(value: unknown): ConversationRole {
+  return normalizeOptionalConversationRole(value) || ConversationRole.Agent
+}
+
+function normalizeOptionalConversationRole(value: unknown): ConversationRole | undefined {
+  const role = stringValue(value)
+  return role && CONVERSATION_ROLES.has(role) ? (role as ConversationRole) : undefined
+}
+
+function normalizeConversationTurnKind(value: unknown): ConversationTurnKind {
+  return normalizeOptionalConversationTurnKind(value) || ConversationTurnKind.Note
+}
+
+function normalizeOptionalConversationTurnKind(value: unknown): ConversationTurnKind | undefined {
+  const kind = stringValue(value)
+  return kind && CONVERSATION_TURN_KINDS.has(kind) ? (kind as ConversationTurnKind) : undefined
+}
+
 function normalizeCanvasSource(value: unknown): CanvasSourceMetadata | undefined {
   const source = recordValue(value)
   if (!source) return undefined
   return {
-    kind: stringValue(source.kind),
-    status: stringValue(source.status),
+    kind: normalizeCanvasSourceKind(source.kind),
+    status: normalizeCanvasSourceStatus(source.status),
     label: stringValue(source.label),
-    reason: stringValue(source.reason),
+    reason: normalizeCanvasSourceReason(source.reason),
     flowCount: typeof source.flowCount === "number" ? source.flowCount : undefined,
     isDemoContent: booleanValue(source.isDemoContent) || booleanValue(source.is_demo_content),
     isFallback: booleanValue(source.isFallback) || booleanValue(source.is_fallback),
@@ -276,19 +852,25 @@ function normalizeMappingStage(value: unknown): MappingStage | null {
   return {
     id,
     label,
-    status:
-      status === "pending" || status === "active" || status === "done" || status === "ready" || status === "error"
-        ? status
-        : "pending",
+    status: normalizeMappingStageStatus(status),
     detail: stringValue(stage.detail),
   }
+}
+
+const MAPPING_STAGE_STATUSES = new Set<string>(Object.values(MappingStageStatus))
+
+function normalizeMappingStageStatus(status: string | undefined): MappingStageStatus {
+  return status && MAPPING_STAGE_STATUSES.has(status)
+    ? (status as MappingStageStatus)
+    : MappingStageStatus.Pending
 }
 
 function unwrapCanvasPayload(data: unknown): Record<string, unknown> {
   const root = recordValue(data)
   if (!root) throw new Error("Canvas response was empty.")
+  const displayCanvas = recordValue(root.canvas)
+  if (displayCanvas) return displayCanvas
   return (
-    recordValue(root.canvas) ||
     recordValue(root.canvas_model) ||
     recordValue(root.canvasModel) ||
     recordValue(root.model) ||
@@ -318,7 +900,7 @@ function normalizeExistingJourney(value: unknown): Journey | null {
   if (!nodes.length) return null
 
   const title = stringValue(journey.title) || "Workspace flow"
-  const firstWhen = nodes.find((node): node is StepNode => node.kind === "step" && node.role === "when")
+  const firstWhen = nodes.find((node): node is StepNode => node.kind === FlowNodeKind.Step && node.role === StepRole.When)
   return {
     id: stringValue(journey.id) || slug(title, "journey"),
     title,
@@ -349,7 +931,7 @@ function normalizeCanvasJourney(value: unknown): Journey | null {
 
   const metadata = recordValue(journey.metadata)
   const title = stringValue(journey.title) || stringValue(metadata?.title) || "Workspace flow"
-  const firstWhen = nodes.find((node): node is StepNode => node.kind === "step" && node.role === "when")
+  const firstWhen = nodes.find((node): node is StepNode => node.kind === FlowNodeKind.Step && node.role === StepRole.When)
   return {
     id: stringValue(journey.id) || slug(title, "journey"),
     title,
@@ -371,25 +953,25 @@ function canvasStepsToFlow(value: unknown): FlowNode[] {
     const step = steps[index]
     const kind = canvasStepKind(step?.kind)
 
-    if (kind === "if") {
+    if (kind === CanvasStepKind.If) {
       const chain = [step]
       while (index + 1 < steps.length) {
         const next = steps[index + 1]
         const nextKind = canvasStepKind(next?.kind)
-        if (nextKind !== "elseIf" && nextKind !== "else") break
+        if (nextKind !== CanvasStepKind.ElseIf && nextKind !== CanvasStepKind.Else) break
         chain.push(next)
         index += 1
-        if (nextKind === "else") break
+        if (nextKind === CanvasStepKind.Else) break
       }
       nodes.push(branchFromCanvasChain(chain))
       continue
     }
 
-    if (kind === "elseIf" || kind === "else") {
+    if (kind === CanvasStepKind.ElseIf || kind === CanvasStepKind.Else) {
       continue
     }
 
-    nodes.push(stepFromCanvas(step, kind === "when" ? "when" : "do"))
+    nodes.push(stepFromCanvas(step, kind === CanvasStepKind.When ? StepRole.When : StepRole.Do))
   }
 
   return nodes
@@ -402,37 +984,39 @@ function branchFromCanvasChain(chain: Array<Record<string, unknown> | undefined>
   const refs = refsFromCanvasStep(head)
 
   return {
-    kind: "branch",
-    id: stepId(head, "branch"),
+    kind: FlowNodeKind.Branch,
+    id: stepId(head, FlowNodeKind.Branch),
     condition: conditionText(head),
     then: canvasStepsToFlow(head?.steps),
     otherwise:
-      nextKind === "elseIf"
+      nextKind === CanvasStepKind.ElseIf
         ? [branchFromCanvasChain(rest)]
-        : nextKind === "else"
+        : nextKind === CanvasStepKind.Else
           ? canvasStepsToFlow(next?.steps)
           : [],
     uncertain: isUncertain(head),
     tech: refs.length ? { refs } : undefined,
+    native: normalizeNativeRef(head?.native),
   }
 }
 
-function stepFromCanvas(step: Record<string, unknown> | undefined, role: "when" | "do"): StepNode {
+function stepFromCanvas(step: Record<string, unknown> | undefined, role: StepRole): StepNode {
   const refs = refsFromCanvasStep(step)
   return {
-    kind: "step",
+    kind: FlowNodeKind.Step,
     id: stepId(step, role),
     role,
-    text: stringValue(step?.text) || stringValue(step?.label) || (role === "when" ? "Someone uses this flow" : "Do the mapped step"),
+    text: stringValue(step?.text) || stringValue(step?.label) || (role === StepRole.When ? "Someone uses this flow" : "Do the mapped step"),
     uncertain: isUncertain(step),
     tech: refs.length ? { refs } : undefined,
+    native: normalizeNativeRef(step?.native),
   }
 }
 
 function normalizeFlowNode(value: unknown): FlowNode | null {
   const node = recordValue(value)
   if (!node) return null
-  if (node.kind === "branch") {
+  if (node.kind === FlowNodeKind.Branch) {
     const thenNodes = (Array.isArray(node.then) ? node.then : [])
       .map(normalizeFlowNode)
       .filter((child): child is FlowNode => Boolean(child))
@@ -440,28 +1024,48 @@ function normalizeFlowNode(value: unknown): FlowNode | null {
       .map(normalizeFlowNode)
       .filter((child): child is FlowNode => Boolean(child))
     return {
-      kind: "branch",
-      id: stringValue(node.id) || slug(stringValue(node.condition) || "branch", "branch"),
+      kind: FlowNodeKind.Branch,
+      id: stringValue(node.id) || slug(stringValue(node.condition) || FlowNodeKind.Branch, FlowNodeKind.Branch),
       condition: stringValue(node.condition) || "mapped condition",
       then: thenNodes,
       otherwise: otherwiseNodes,
       uncertain: Boolean(node.uncertain),
       tech: normalizeTech(node.tech),
+      native: normalizeNativeRef(node.native),
     }
   }
-  if (node.kind === "step") {
-    const role = node.role === "when" ? "when" : "do"
+  if (node.kind === FlowNodeKind.Step) {
+    const role = node.role === StepRole.When ? StepRole.When : StepRole.Do
     return {
-      kind: "step",
+      kind: FlowNodeKind.Step,
       id: stringValue(node.id) || slug(stringValue(node.text) || role, role),
       role,
       text: stringValue(node.text) || "Mapped step",
       detail: stringValue(node.detail),
       uncertain: Boolean(node.uncertain),
       tech: normalizeTech(node.tech),
+      native: normalizeNativeRef(node.native),
     }
   }
   return null
+}
+
+function normalizeNativeRef(value: unknown): CanvasV2NativeRef | undefined {
+  const native = recordValue(value)
+  if (!native || native.schema !== CanvasV2Schema.Canvas) return undefined
+  const nodeId = stringValue(native.nodeId) || stringValue(native.node_id)
+  if (!nodeId) return undefined
+  const edgeKinds = stringList(native.edgeKinds || native.edge_kinds)
+    .map(normalizeCanvasV2EdgeKind)
+    .filter(Boolean)
+  return {
+    schema: CanvasV2Schema.Canvas,
+    flowId: stringValue(native.flowId) || stringValue(native.flow_id),
+    nodeId,
+    nodeKind: normalizeCanvasV2NodeKind(native.nodeKind || native.node_kind),
+    edgeKinds: edgeKinds.length ? edgeKinds : undefined,
+    flowRef: stringValue(native.flowRef) || stringValue(native.flow_ref),
+  }
 }
 
 function normalizeTech(value: unknown): { nodeId?: string; refs: string[] } | undefined {
@@ -472,13 +1076,13 @@ function normalizeTech(value: unknown): { nodeId?: string; refs: string[] } | un
   return { nodeId: stringValue(tech.nodeId), refs }
 }
 
-function canvasStepKind(value: unknown): "when" | "do" | "if" | "elseIf" | "else" {
+function canvasStepKind(value: unknown): CanvasStepKind {
   const normalized = String(value || "Do").replace(/[_-]+/g, "").toLowerCase()
-  if (normalized === "when") return "when"
-  if (normalized === "if") return "if"
-  if (normalized === "elseif" || normalized === "elif") return "elseIf"
-  if (normalized === "else") return "else"
-  return "do"
+  if (normalized === "when") return CanvasStepKind.When
+  if (normalized === "if") return CanvasStepKind.If
+  if (normalized === "elseif" || normalized === "elif") return CanvasStepKind.ElseIf
+  if (normalized === "else") return CanvasStepKind.Else
+  return CanvasStepKind.Do
 }
 
 function stepId(step: Record<string, unknown> | undefined, fallback: string): string {
@@ -552,12 +1156,17 @@ export function hasToken(): boolean {
   return Boolean(token())
 }
 
-const PENDING_STATUSES: PendingStatus[] = ["pending", "sent", "in_progress", "done", "needs_input", "blocked"]
+const PENDING_STATUS_VALUES = Object.values(PendingStatus) as PendingStatus[]
+const PENDING_STATUS_SET = new Set<PendingStatus>(PENDING_STATUS_VALUES)
+
+function isPendingStatus(value: unknown): value is PendingStatus {
+  return typeof value === "string" && PENDING_STATUS_SET.has(value as PendingStatus)
+}
 
 function normalizePendingStatus(status: unknown): PendingStatus {
-  const value = String(status || "pending")
-  if ((PENDING_STATUSES as string[]).includes(value)) return value as PendingStatus
-  return value === "queued" ? "pending" : "blocked"
+  const value = String(status || PendingStatus.Pending)
+  if (isPendingStatus(value)) return value
+  return value === LegacyPendingStatus.Queued ? PendingStatus.Pending : PendingStatus.Rejected
 }
 
 function normalizeStatusHistory(value: unknown): PendingStatusHistoryEntry[] | undefined {
@@ -580,8 +1189,30 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined
 }
 
+function numberValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value)
+  }
+  return undefined
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : []
+}
+
 function booleanValue(value: unknown): boolean {
   return value === true || value === "true" || value === "1"
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  if (value === true || value === "true" || value === "1") return true
+  if (value === false || value === "false" || value === "0") return false
+  return undefined
+}
+
+function booleanOrNull(value: unknown): boolean | null {
+  return optionalBoolean(value) ?? null
 }
 
 function stringLooksStale(value: unknown): boolean {

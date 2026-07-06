@@ -1,18 +1,22 @@
-import type {
-  AppModel,
-  BranchNode,
-  CodeGraph,
-  CodeNode,
-  FlowNode,
-  Journey,
-  StepNode,
+import {
+  CanvasStepKind,
+  CodeGraphNodeType,
+  FlowNodeKind,
+  StepRole,
+  type AppModel,
+  type BranchNode,
+  type CodeGraph,
+  type CodeNode,
+  type FlowNode,
+  type Journey,
+  type StepNode,
 } from "./types"
 
 let seq = 0
 const sid = () => `n${seq++}`
 
-function step(role: "when" | "do", text: string, extra: Partial<StepNode> = {}): StepNode {
-  return { kind: "step", id: sid(), role, text, ...extra }
+function step(role: StepRole, text: string, extra: Partial<StepNode> = {}): StepNode {
+  return { kind: FlowNodeKind.Step, id: sid(), role, text, ...extra }
 }
 function branch(
   condition: string,
@@ -20,7 +24,7 @@ function branch(
   otherwise: FlowNode[] = [],
   extra: Partial<BranchNode> = {}
 ): BranchNode {
-  return { kind: "branch", id: sid(), condition, then, otherwise, ...extra }
+  return { kind: FlowNodeKind.Branch, id: sid(), condition, then, otherwise, ...extra }
 }
 
 // A hand-authored, fully non-technical example. Shown on first run or when we
@@ -36,30 +40,30 @@ export const DEMO_MODEL: AppModel = {
       summary: "What happens from the moment someone checks out.",
       entry: "Someone places an order",
       nodes: [
-        step("when", "Someone places an order"),
-        step("do", "Check the items are still in stock", {
+        step(StepRole.When, "Someone places an order"),
+        step(StepRole.Do, "Check the items are still in stock", {
           tech: { refs: ["checks the inventory service"] },
         }),
         branch(
           "everything is in stock",
           [
-            step("do", "Work out the total, including any discount code"),
-            step("do", "Charge their card", {
+            step(StepRole.Do, "Work out the total, including any discount code"),
+            step(StepRole.Do, "Charge their card", {
               detail: "Happens right after the total is worked out.",
               tech: { refs: ["payments/charge.js"] },
             }),
             branch(
               "the card is approved",
               [
-                step("do", "Send them an order confirmation email"),
-                step("do", "Start preparing the order for delivery"),
+                step(StepRole.Do, "Send them an order confirmation email"),
+                step(StepRole.Do, "Start preparing the order for delivery"),
               ],
-              [step("do", "Ask them to try another card")]
+              [step(StepRole.Do, "Ask them to try another card")]
             ),
           ],
           [
-            step("do", "Tell them which item sold out"),
-            step("do", "Save their cart so they can finish later"),
+            step(StepRole.Do, "Tell them which item sold out"),
+            step(StepRole.Do, "Save their cart so they can finish later"),
           ]
         ),
       ],
@@ -70,13 +74,13 @@ export const DEMO_MODEL: AppModel = {
       summary: "How someone new gets set up.",
       entry: "Someone creates an account",
       nodes: [
-        step("when", "Someone creates an account"),
+        step(StepRole.When, "Someone creates an account"),
         branch(
           "that email is already used",
-          [step("do", "Ask them to sign in instead")],
+          [step(StepRole.Do, "Ask them to sign in instead")],
           [
-            step("do", "Save their account securely"),
-            step("do", "Send them a welcome email"),
+            step(StepRole.Do, "Save their account securely"),
+            step(StepRole.Do, "Send them a welcome email"),
           ]
         ),
       ],
@@ -87,15 +91,15 @@ export const DEMO_MODEL: AppModel = {
       summary: "What happens when someone comes back.",
       entry: "Someone tries to sign in",
       nodes: [
-        step("when", "Someone tries to sign in"),
+        step(StepRole.When, "Someone tries to sign in"),
         branch(
           "the password is correct",
-          [step("do", "Let them in and show their dashboard")],
+          [step(StepRole.Do, "Let them in and show their dashboard")],
           [
             branch(
               "they've gotten it wrong too many times",
-              [step("do", "Pause the account for a little while")],
-              [step("do", "Ask them to try again")]
+              [step(StepRole.Do, "Pause the account for a little while")],
+              [step(StepRole.Do, "Ask them to try again")]
             ),
           ]
         ),
@@ -107,13 +111,13 @@ export const DEMO_MODEL: AppModel = {
       summary: "What happens when someone wants their money back.",
       entry: "Someone asks for a refund",
       nodes: [
-        step("when", "Someone asks for a refund"),
+        step(StepRole.When, "Someone asks for a refund"),
         branch(
           "the order is more than 30 days old",
-          [step("do", "Send it to a person to review")],
+          [step(StepRole.Do, "Send it to a person to review")],
           [
-            step("do", "Put the money back on their card"),
-            step("do", "Let them know the refund is on its way"),
+            step(StepRole.Do, "Put the money back on their card"),
+            step(StepRole.Do, "Let them know the refund is on its way"),
           ]
         ),
       ],
@@ -192,20 +196,20 @@ function sentenceCase(s: string): string {
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : t
 }
 
-type Role = "when" | "do" | "if"
+type Role = StepRole | CanvasStepKind.If
 
 function classify(node: CodeNode): Role | null {
   const type = `${node.type || node.kind || ""}`.toLowerCase()
   const text = `${type} ${node.label || node.name || ""} ${refsOf(node).join(" ")}`.toLowerCase()
   const refs = refsOf(node)
   if (refs.some(isFixtureRef) || /test|spec|coverage/.test(text)) return null
-  if (type === "file") return refs.some(isEntrypointRef) ? "when" : null
-  if (type === "export") return null
-  if (type === "component" || type === "app_surface") return null
-  if (/route|endpoint|page|screen|handler|controller|webhook/.test(text)) return "when"
-  if (/valid|check|guard|branch|decision|condition|permission/.test(text)) return "if"
+  if (type === CodeGraphNodeType.File) return refs.some(isEntrypointRef) ? StepRole.When : null
+  if (type === CodeGraphNodeType.Export) return null
+  if (type === CodeGraphNodeType.Component || type === CodeGraphNodeType.AppSurface) return null
+  if (/route|endpoint|page|screen|handler|controller|webhook/.test(text)) return StepRole.When
+  if (/valid|check|guard|branch|decision|condition|permission/.test(text)) return CanvasStepKind.If
   if (/action|service|job|queue|function|mutation|command|send|create|update|delete|charge/.test(text))
-    return "do"
+    return StepRole.Do
   return null
 }
 
@@ -256,14 +260,14 @@ export function projectToBehavior(graph: CodeGraph | null | undefined): AppModel
     const h = humanize(label)
 
     let fnode: FlowNode
-    if (role === "if") {
-      fnode = { kind: "branch", id: node.id || sid(), condition: h, then: [], otherwise: [], uncertain, tech }
+    if (role === CanvasStepKind.If) {
+      fnode = { kind: FlowNodeKind.Branch, id: node.id || sid(), condition: h, then: [], otherwise: [], uncertain, tech }
     } else {
       fnode = {
-        kind: "step",
+        kind: FlowNodeKind.Step,
         id: node.id || sid(),
-        role: role === "when" ? "when" : "do",
-        text: role === "when" ? sentenceCase(`someone uses ${h}`) : sentenceCase(h),
+        role: role === StepRole.When ? StepRole.When : StepRole.Do,
+        text: role === StepRole.When ? sentenceCase(`someone uses ${h}`) : sentenceCase(h),
         uncertain,
         tech,
       }
@@ -277,7 +281,7 @@ export function projectToBehavior(graph: CodeGraph | null | undefined): AppModel
 
   for (const j of journeys) {
     j.nodes.sort((a, b) => order(a) - order(b))
-    const firstWhen = j.nodes.find((n) => n.kind === "step" && n.role === "when") as StepNode | undefined
+    const firstWhen = j.nodes.find((n) => n.kind === FlowNodeKind.Step && n.role === StepRole.When) as StepNode | undefined
     j.entry = firstWhen?.text || j.title
   }
 
@@ -290,12 +294,12 @@ export function projectToBehavior(graph: CodeGraph | null | undefined): AppModel
 }
 
 function isFixtureRef(ref: string): boolean {
-  const normalized = ref.toLowerCase()
+  const normalized = ref.replace(/\\/g, "/").toLowerCase()
   return /(^|\/)(__tests__|demo_project|demo_projects|examples|fixtures?|tests?)(\/|$)/.test(normalized)
 }
 
 function isEntrypointRef(ref: string): boolean {
-  const normalized = ref.toLowerCase()
+  const normalized = ref.replace(/\\/g, "/").toLowerCase()
   return /(^|\/)(cli|__main__|main|server|app|index)\.(py|tsx?|jsx?|mjs|cjs)$/.test(normalized)
 }
 
@@ -314,6 +318,6 @@ function appNameFromGraph(graph: CodeGraph | null | undefined): string {
 }
 
 function order(n: FlowNode): number {
-  if (n.kind === "step") return n.role === "when" ? 0 : 1
+  if (n.kind === FlowNodeKind.Step) return n.role === StepRole.When ? 0 : 1
   return 2
 }

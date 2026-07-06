@@ -4,7 +4,9 @@ import {
   Check,
   ChevronLeft,
   Clipboard,
+  History,
   Lightbulb,
+  ListChecks,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -17,23 +19,69 @@ import {
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ActivityDialog } from "@/components/ActivityDialog"
 import { BrandMark } from "@/components/BrandMark"
-import { FlowColumn, type FlowAction } from "@/components/FlowCanvas"
+import { CanvasHistoryDialog } from "@/components/CanvasHistoryDialog"
+import { CanvasV2FlowCanvas } from "@/components/CanvasV2FlowCanvas"
+import { FlowColumn } from "@/components/FlowCanvas"
 import { Overview } from "@/components/Overview"
 import { Inspector } from "@/components/Inspector"
+import { PendingRequestDialog } from "@/components/PendingRequestDialog"
 import { Provenance } from "@/components/Provenance"
 import { BottomDock } from "@/components/BottomDock"
 import { LandingPage } from "@/components/LandingPage"
 import { WorkspaceMappingState } from "@/components/WorkspaceMappingState"
 import { DEMO_MODEL, emptyAppModel } from "@/lib/behavioral"
-import { applyChanges, useChanges, type ChangeEntry, type HandoffItem, type Phase } from "@/lib/changeset"
-import { ApiError, fetchCanvas, reindexCanvas } from "@/lib/api"
-import { useAppContext, type AppContext } from "@/lib/appcontext"
-import type { EditRequest, StagedEdit } from "@/lib/edits"
-import { findNode, type AppModel, type CanvasMapping, type CanvasSourceSummary, type FlowNode, type Journey } from "@/lib/types"
+import {
+  HandoffItemStatus,
+  HandoffPhase,
+  applyChanges,
+  changeRequestFor,
+  kindForAction,
+  useChanges,
+  type ChangeEntry,
+  type HandoffItem,
+} from "@/lib/changeset"
+import { ApiError, applyCanvasBatch, fetchCanvas, fetchMapHealth, fetchProgress, isApiAuthExpired, postChange, reindexCanvas } from "@/lib/api"
+import { AppContextMode, useAppContext, type AppContext } from "@/lib/appcontext"
+import { EditDelivery, type EditRequest, type StagedEdit } from "@/lib/edits"
+import {
+  buildMapEditOperations,
+  mapEditCreatesProposedNodes,
+  proposedNodeIdsFromOperations,
+  withPendingRequestMetadata,
+} from "@/lib/canvasMapOps"
+import { CANVAS_POLL_INTERVAL_MS, documentIsVisible, HEALTH_POLL_INTERVAL_MS, PENDING_ACTIVITY_POLL_INTERVAL_MS } from "@/lib/polling"
+import {
+  CanvasStateKind,
+  CanvasMappingMode,
+  CanvasSourceKind,
+  CanvasSourceTone,
+  CopyState,
+  FlowAction,
+  JourneyActivity,
+  MapFreshnessStatus,
+  MapHealthStatus,
+  PendingRefKind,
+  findNode,
+  type AppModel,
+  type CanvasMapping,
+  type CanvasSourceSummary,
+  type CanvasV2Document,
+  type CanvasV2Flow,
+  type CanvasV2Node,
+  type FlowNode,
+  type Journey,
+  type MapHealth,
+  type PendingRef,
+  type WorkspaceProgressStatus,
+} from "@/lib/types"
+import { findNativeDisplayNodeByDisplayId, findNodeByNativeId, nativeNodeToDisplayNode } from "@/lib/nativeDisplay"
+import type { PendingRequestLink } from "@/components/CanvasV2FlowCanvas"
 
 const HOME = "__home__"
-const CANVAS_POLL_INTERVAL_MS = 2500
+const AUTH_EXPIRED_NOTICE = "This AgentCanvas link cannot sync anymore. Reopen AgentCanvas from your agent to keep this map live."
+const ONBOARDING_MAJOR_VERSION = "1"
 const MAPPING_STAGES = [
   "Reading project",
   "Finding where work starts",
@@ -42,9 +90,9 @@ const MAPPING_STAGES = [
 ]
 
 type CanvasState =
-  | { kind: "idle" | "ready"; notice?: string; mapping?: CanvasMapping }
+  | { kind: CanvasStateKind.Idle | CanvasStateKind.Ready; notice?: string; mapping?: CanvasMapping }
   | {
-      kind: "loading" | "reindexing" | "empty" | "error"
+      kind: CanvasStateKind.Loading | CanvasStateKind.Reindexing | CanvasStateKind.Empty | CanvasStateKind.Error
       message?: string
       detail?: string
       nextSteps?: string[]
@@ -57,12 +105,20 @@ type WorkspaceModelResult = {
   model: AppModel
   mapping?: CanvasMapping
   notice?: string
+  revision?: number
+  canvasV2?: CanvasV2Document
 }
 
 type MapRefreshAction = {
   title: string
   detail: string
   prompt: string
+}
+
+enum MapInstructionKind {
+  Refresh = "refresh",
+  Starter = "starter",
+  Author = "author",
 }
 
 export default function App() {
@@ -88,32 +144,42 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editRequest, setEditRequest] = useState<EditRequest | null>(null)
   const [leftOpen, setLeftOpen] = useState(true)
-  const [canvasState, setCanvasState] = useState<CanvasState>({ kind: "loading" })
+  const [canvasState, setCanvasState] = useState<CanvasState>({ kind: CanvasStateKind.Loading })
   const [dark, setDark] = useState(false)
-  const mappingActive = canvasState.kind === "loading" || canvasState.kind === "reindexing"
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [activityOpen, setActivityOpen] = useState(false)
+  const [pendingRequestLink, setPendingRequestLink] = useState<PendingRequestLink | null>(null)
+  const mappingActive = canvasState.kind === CanvasStateKind.Loading || canvasState.kind === CanvasStateKind.Reindexing
   const [mappingStage, setMappingStage] = useState(0)
+  const [mappingProgress, setMappingProgress] = useState<WorkspaceProgressStatus | null>(null)
+  const [mapHealth, setMapHealth] = useState<MapHealth | null>(null)
+  const [canvasV2, setCanvasV2] = useState<CanvasV2Document | null>(null)
+  const [authNotice, setAuthNotice] = useState<string | null>(null)
+  const [onboardingVisible, setOnboardingVisible] = useState(false)
   const canvasSignatureRef = useRef<string | null>(null)
+  const canvasRevisionRef = useRef<number | null>(null)
   const pollBlockedRef = useRef(false)
 
   const phase = useChanges((s) => s.handoff.phase)
   const handoffItems = useChanges((s) => s.handoff.items)
+  const refreshHandoff = useChanges((s) => s.refreshHandoff)
   const stagedChanges = useChanges((s) => s.changes)
   const queuedNext = useChanges((s) => s.queuedNext)
   const orderingChanges = useMemo(() => [...stagedChanges, ...queuedNext], [queuedNext, stagedChanges])
   const localChanges = useMemo(
-    () => (phase === "composing" ? stagedChanges : queuedNext),
+    () => (phase === HandoffPhase.Composing ? stagedChanges : queuedNext),
     [phase, queuedNext, stagedChanges]
   )
-  const locked = phase === "sending" || phase === "working"
+  const locked = phase === HandoffPhase.Sending || phase === HandoffPhase.Working
   const hasLocalPendingChanges =
-    Boolean(editRequest) || stagedChanges.length > 0 || queuedNext.length > 0 || phase !== "composing"
+    Boolean(editRequest) || stagedChanges.length > 0 || queuedNext.length > 0 || phase !== HandoffPhase.Composing
   const journeyActivity = useMemo(
     () => getJourneyActivity(model.journeys, localChanges, orderingChanges, phase, handoffItems),
     [handoffItems, localChanges, model.journeys, orderingChanges, phase]
   )
   const canvasSource = useMemo(
-    () => describeCanvasSource(context, model, canvasState),
-    [context, model, canvasState]
+    () => describeCanvasSource(context, model, canvasState, mapHealth),
+    [context, model, canvasState, mapHealth]
   )
   const mapRefreshAction = useMemo(
     () => describeMapRefreshAction(canvasSource, context, model.appName),
@@ -127,6 +193,10 @@ export default function App() {
   useEffect(() => {
     pollBlockedRef.current = hasLocalPendingChanges
   }, [hasLocalPendingChanges])
+
+  useEffect(() => {
+    setMappingProgress(context.progress ?? null)
+  }, [context.progress])
 
   // Switching flows (or returning to All Flows) clears any in-progress step
   // edit, so the composer never lingers on a page where it has no context.
@@ -143,50 +213,69 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [mappingActive])
 
+  function rememberWorkspaceResult(result: WorkspaceModelResult) {
+    canvasSignatureRef.current = canvasSignature(result)
+    canvasRevisionRef.current = result.revision ?? null
+  }
+
+  function showWorkspaceResult(result: WorkspaceModelResult) {
+    setCanvasV2(result.canvasV2 ?? null)
+    if (isUnreadyMap(result.mapping)) {
+      setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
+      setCanvasState({
+        kind: CanvasStateKind.Empty,
+        message: unreadyMapTitle(result),
+        detail: starterMapDetail(result, context.assistant),
+        nextSteps: mapNextSteps(result, context),
+        fallbackPrompt: mapFallbackPrompt(result, context),
+        mapping: result.mapping,
+      })
+    } else if (!result.model.journeys.length) {
+      setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
+      setCanvasState({
+        kind: CanvasStateKind.Empty,
+        message: "No plain-English map yet",
+        detail: emptyWorkspaceDetail(result),
+        nextSteps: mapNextSteps(result, context),
+        fallbackPrompt: mapFallbackPrompt(result, context),
+        mapping: result.mapping,
+      })
+    } else {
+      setModel((current) => preserveLocalJourneyRecency(result.model, current))
+      setCanvasState({ kind: CanvasStateKind.Ready, notice: result.notice, mapping: result.mapping })
+    }
+  }
+
   async function load({ refresh = false }: { refresh?: boolean } = {}) {
     // Demo mode shows the curated, hand-authored flows (great first impression);
     // the heuristic projection over real code isn't good enough to lead with yet.
     // Edits still write real pending requests via /api/changes.
-    if (context.mode === "demo") {
+    if (context.mode === AppContextMode.Demo) {
       setModel((current) => preserveLocalJourneyRecency(DEMO_MODEL, current))
       setSelectedId(null)
-      setCanvasState({ kind: "ready" })
+      setMapHealth(null)
+      setCanvasV2(null)
+      setAuthNotice(null)
+      canvasSignatureRef.current = null
+      canvasRevisionRef.current = null
+      setCanvasState({ kind: CanvasStateKind.Ready })
       return
     }
 
     setMappingStage(0)
-    setCanvasState({ kind: refresh ? "reindexing" : "loading" })
+    setMappingProgress(context.progress ?? null)
+    setMapHealth(null)
+    setCanvasState({ kind: refresh ? CanvasStateKind.Reindexing : CanvasStateKind.Loading })
     try {
       const result = await loadWorkspaceModel(refresh)
-      canvasSignatureRef.current = canvasSignature(result)
-      if (isUnreadyMap(result.mapping)) {
-        setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
-        setCanvasState({
-          kind: "empty",
-          message: unreadyMapTitle(result),
-          detail: starterMapDetail(result, context.assistant),
-          nextSteps: mapNextSteps(result, context),
-          fallbackPrompt: mapFallbackPrompt(result, context),
-          mapping: result.mapping,
-        })
-      } else if (!result.model.journeys.length) {
-        setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
-        setCanvasState({
-          kind: "empty",
-          message: "No plain-English map yet",
-          detail: emptyWorkspaceDetail(result),
-          nextSteps: mapNextSteps(result, context),
-          fallbackPrompt: mapFallbackPrompt(result, context),
-          mapping: result.mapping,
-        })
-      } else {
-        setModel((current) => preserveLocalJourneyRecency(result.model, current))
-        setCanvasState({ kind: "ready", notice: result.notice, mapping: result.mapping })
-      }
+      rememberWorkspaceResult(result)
+      showWorkspaceResult(result)
+      setAuthNotice(null)
     } catch (error) {
+      if (isApiAuthExpired(error)) setAuthNotice(AUTH_EXPIRED_NOTICE)
       setModel(emptyAppModel(context.workspace || model.appName || "Your app"))
       setCanvasState({
-        kind: "error",
+        kind: CanvasStateKind.Error,
         message: "Couldn't open the project map",
         detail: plainLoadError(error),
       })
@@ -196,13 +285,13 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (contextLoading || context.mode === "landing") return
+    if (contextLoading || context.mode === AppContextMode.Landing) return
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contextLoading, context.mode])
 
   useEffect(() => {
-    if (contextLoading || context.mode !== "workspace" || onWelcome) return
+    if (contextLoading || context.mode !== AppContextMode.Workspace || onWelcome) return
 
     let cancelled = false
     let inFlight = false
@@ -214,36 +303,23 @@ export default function App() {
         const result = await loadWorkspaceModel(false)
         if (cancelled || pollBlockedRef.current) return
 
-        const signature = canvasSignature(result)
-        if (signature === canvasSignatureRef.current) return
-
-        canvasSignatureRef.current = signature
-        if (isUnreadyMap(result.mapping)) {
-          setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
-          setCanvasState({
-            kind: "empty",
-            message: unreadyMapTitle(result),
-            detail: starterMapDetail(result, context.assistant),
-            nextSteps: mapNextSteps(result, context),
-            fallbackPrompt: mapFallbackPrompt(result, context),
-            mapping: result.mapping,
-          })
-        } else if (!result.model.journeys.length) {
-          setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
-          setCanvasState({
-            kind: "empty",
-            message: "No plain-English map yet",
-            detail: emptyWorkspaceDetail(result),
-            nextSteps: mapNextSteps(result, context),
-            fallbackPrompt: mapFallbackPrompt(result, context),
-            mapping: result.mapping,
-          })
-        } else {
-          setModel((current) => preserveLocalJourneyRecency(result.model, current))
-          setCanvasState({ kind: "ready", notice: result.notice, mapping: result.mapping })
+        if (typeof result.revision === "number" && result.revision === canvasRevisionRef.current) {
+          setAuthNotice(null)
+          return
         }
-      } catch {
-        // Polling is quiet; keep the current canvas visible through transient read errors.
+
+        const signature = canvasSignature(result)
+        if (typeof result.revision !== "number" && signature === canvasSignatureRef.current) {
+          setAuthNotice(null)
+          return
+        }
+
+        rememberWorkspaceResult(result)
+        showWorkspaceResult(result)
+        setAuthNotice(null)
+      } catch (error) {
+        if (!cancelled && isApiAuthExpired(error)) setAuthNotice(AUTH_EXPIRED_NOTICE)
+        // Other polling failures are quiet; keep the current canvas visible through transient read errors.
       } finally {
         inFlight = false
       }
@@ -256,18 +332,135 @@ export default function App() {
     }
   }, [contextLoading, context.mode, context.workspace, onWelcome])
 
+  useEffect(() => {
+    if (
+      contextLoading ||
+      context.mode !== AppContextMode.Workspace ||
+      onWelcome ||
+      phase === HandoffPhase.Composing ||
+      phase === HandoffPhase.Done ||
+      phase === HandoffPhase.Stopped
+    ) {
+      return
+    }
+
+    let cancelled = false
+    let inFlight = false
+
+    async function pollPendingActivity() {
+      if (inFlight || !documentIsVisible()) return
+      inFlight = true
+      try {
+        await refreshHandoff()
+        if (!cancelled) setAuthNotice(null)
+      } catch (error) {
+        if (!cancelled && isApiAuthExpired(error)) setAuthNotice(AUTH_EXPIRED_NOTICE)
+      } finally {
+        inFlight = false
+      }
+    }
+
+    void pollPendingActivity()
+    const timer = window.setInterval(pollPendingActivity, PENDING_ACTIVITY_POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [contextLoading, context.mode, context.workspace, onWelcome, phase, refreshHandoff])
+
+  useEffect(() => {
+    if (contextLoading || context.mode !== AppContextMode.Workspace || !mappingActive || onWelcome) return
+
+    let cancelled = false
+    let inFlight = false
+
+    async function pollProgress() {
+      if (inFlight || !documentIsVisible()) return
+      inFlight = true
+      try {
+        const progress = await fetchProgress()
+        if (!cancelled) {
+          setMappingProgress(progress)
+          setAuthNotice(null)
+        }
+      } catch (error) {
+        if (!cancelled && isApiAuthExpired(error)) setAuthNotice(AUTH_EXPIRED_NOTICE)
+      } finally {
+        inFlight = false
+      }
+    }
+
+    void pollProgress()
+    const timer = window.setInterval(pollProgress, PENDING_ACTIVITY_POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [contextLoading, context.mode, context.workspace, mappingActive, onWelcome])
+
+  useEffect(() => {
+    if (contextLoading || context.mode !== AppContextMode.Workspace || onWelcome) return
+
+    let cancelled = false
+    let inFlight = false
+
+    async function pollHealth() {
+      if (inFlight || !documentIsVisible()) return
+      inFlight = true
+      try {
+        const health = await fetchMapHealth()
+        if (!cancelled) {
+          setMapHealth(health)
+          setAuthNotice(null)
+        }
+      } catch (error) {
+        if (!cancelled && isApiAuthExpired(error)) setAuthNotice(AUTH_EXPIRED_NOTICE)
+      } finally {
+        inFlight = false
+      }
+    }
+
+    void pollHealth()
+    const timer = window.setInterval(pollHealth, HEALTH_POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [contextLoading, context.mode, context.workspace, onWelcome])
+
+  const routeCanvasV2Flow: CanvasV2Flow | null = useMemo(
+    () => (view === HOME ? null : canvasV2?.flows.find((flow) => flow.id === view) ?? null),
+    [canvasV2, view]
+  )
   const activeJourney: Journey | null = useMemo(
-    () => (view === HOME ? null : model.journeys.find((j) => j.id === view) ?? null),
-    [model, view]
+    () =>
+      view === HOME
+        ? null
+        : model.journeys.find((j) => j.id === view) ??
+          (routeCanvasV2Flow ? journeyFromCanvasV2Flow(routeCanvasV2Flow) : null),
+    [model.journeys, routeCanvasV2Flow, view]
+  )
+  const activeCanvasV2Flow: CanvasV2Flow | null = useMemo(
+    () => (activeJourney ? canvasV2?.flows.find((flow) => flow.id === activeJourney.id) ?? null : null),
+    [activeJourney, canvasV2]
   )
   const orderedJourneys = useMemo(
     () => orderJourneysByEdit(model.journeys, orderingChanges),
     [model.journeys, orderingChanges]
   )
   const selectedNode: FlowNode | null = useMemo(
-    () => (activeJourney && selectedId ? findNode(activeJourney.nodes, selectedId) : null),
-    [activeJourney, selectedId]
+    () =>
+      activeJourney && selectedId
+        ? findNode(activeJourney.nodes, selectedId) ?? findNativeDisplayNodeByDisplayId(activeCanvasV2Flow, selectedId)
+        : null,
+    [activeCanvasV2Flow, activeJourney, selectedId]
   )
+  const selectedNativeNode: CanvasV2Node | null = useMemo(() => {
+    if (!canvasV2 || !selectedNode?.native) return null
+    const flowId = selectedNode.native.flowId || activeJourney?.id
+    if (!flowId) return null
+    return findCanvasV2Node(canvasV2, flowId, selectedNode.native.nodeId)
+  }, [activeJourney?.id, canvasV2, selectedNode])
 
   function openAction(action: FlowAction, node: FlowNode) {
     if (!activeJourney || locked) return
@@ -275,14 +468,42 @@ export default function App() {
     setSelectedId(null) // the action moves to the bottom composer; let the popover go
   }
 
-  function stageEdit(edit: StagedEdit) {
+  async function stageEdit(edit: StagedEdit) {
     if (!activeJourney) return
+    if (edit.delivery === EditDelivery.CanvasMap) {
+      setEditRequest(null)
+      try {
+        await applyCanvasMapEdit(edit, canvasV2, activeJourney.id)
+        await load()
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          error.code === "REVISION_CONFLICT" &&
+          !mapEditCreatesProposedNodes(edit.action)
+        ) {
+          try {
+            const latest = await fetchCanvas()
+            await applyCanvasMapEdit(edit, latest.canvasV2 ?? null, activeJourney.id)
+            await load()
+            return
+          } catch {
+            setAuthNotice("The map changed before that edit could be saved. Refresh and try again.")
+            return
+          }
+        }
+        setAuthNotice(canvasMapEditErrorNotice(error))
+      }
+      return
+    }
     const input = {
       action: edit.action,
       summary: edit.summary,
       journeyId: activeJourney.id,
       journeyTitle: edit.journeyTitle,
       targetNodeId: edit.node.id,
+      targetNativeNodeId: edit.node.native?.nodeId,
+      targetNativeKind: edit.node.native?.nodeKind,
+      targetFlowId: edit.node.native?.flowId || activeJourney.id,
       text1: edit.text1,
       text2: edit.text2,
     }
@@ -296,7 +517,10 @@ export default function App() {
 
   function locateChange(change: ChangeEntry) {
     const journey = model.journeys.find((j) => j.id === change.journeyId) ?? null
-    const node = journey ? findNode(journey.nodes, change.targetNodeId) : null
+    const nativeFlow = canvasV2?.flows.find((flow) => flow.id === change.journeyId) ?? null
+    const node = journey
+      ? findNode(journey.nodes, change.targetNodeId) ?? findNativeDisplayNodeByDisplayId(nativeFlow, change.targetNodeId)
+      : null
     return { journey, node }
   }
 
@@ -325,6 +549,7 @@ export default function App() {
 
   function onHandoffDone() {
     const applied = useChanges.getState().acknowledgeDone()
+    if (!applied.length) return
     const editedAtByJourney = new Map<string, number>()
     for (const change of applied) {
       const editedAt = change.updatedAt || change.createdAt
@@ -346,20 +571,62 @@ export default function App() {
     setSelectedId(null)
   }
 
+  function onHandoffDismiss() {
+    useChanges.getState().dismissHandoff()
+  }
+
   const inJourney = view !== HOME && !!activeJourney
-  const appAvailable = !contextLoading && context.mode !== "landing"
+  const appAvailable = !contextLoading && context.mode !== AppContextMode.Landing
   const landing =
-    onWelcome || (!hasRuntimeLaunchContext && contextLoading) || (!contextLoading && context.mode === "landing")
+    onWelcome || (!hasRuntimeLaunchContext && contextLoading) || (!contextLoading && context.mode === AppContextMode.Landing)
   const loading = mappingActive
   const workspaceState =
-    canvasState.kind === "loading" ||
-    canvasState.kind === "reindexing" ||
-    canvasState.kind === "empty" ||
-    canvasState.kind === "error"
+    canvasState.kind === CanvasStateKind.Loading ||
+    canvasState.kind === CanvasStateKind.Reindexing ||
+    canvasState.kind === CanvasStateKind.Empty ||
+    canvasState.kind === CanvasStateKind.Error
       ? canvasState
       : null
-  const readyMapRefreshAction = canvasState.kind === "ready" && !model.isDemo ? mapRefreshAction : null
+  const readyMapRefreshAction = canvasState.kind === CanvasStateKind.Ready && !model.isDemo ? mapRefreshAction : null
   const headerStatus = mappingActive ? MAPPING_STAGES[mappingStage] : canvasSource.shortLabel
+  const canvasHistoryAvailable =
+    context.mode === AppContextMode.Workspace &&
+    canvasState.kind === CanvasStateKind.Ready &&
+    !model.isDemo &&
+    !context.isDemo &&
+    !loading
+  const canvasHistoryBlocked = !canvasHistoryAvailable || hasLocalPendingChanges
+  const activityAvailable =
+    context.mode === AppContextMode.Workspace &&
+    canvasState.kind === CanvasStateKind.Ready &&
+    !model.isDemo &&
+    !context.isDemo &&
+    !loading
+  const onboardingKey = useMemo(
+    () => onboardingStorageKey(context.workspacePath || context.workspace || "unknown"),
+    [context.workspace, context.workspacePath]
+  )
+
+  useEffect(() => {
+    if (contextLoading || context.mode !== AppContextMode.Workspace || !context.workspacePath) {
+      setOnboardingVisible(false)
+      return
+    }
+    try {
+      setOnboardingVisible(window.localStorage.getItem(onboardingKey) !== "dismissed")
+    } catch {
+      setOnboardingVisible(false)
+    }
+  }, [context.mode, context.workspacePath, contextLoading, onboardingKey])
+
+  function dismissOnboarding() {
+    try {
+      window.localStorage.setItem(onboardingKey, "dismissed")
+    } catch {
+      // localStorage may be blocked; the in-memory dismissal still keeps this session quiet.
+    }
+    setOnboardingVisible(false)
+  }
 
   if (landing) {
     return <LandingPage onEnterApp={appAvailable ? () => go("/") : undefined} />
@@ -407,6 +674,26 @@ export default function App() {
           <Button
             variant="ghost"
             size="icon"
+            onClick={() => setHistoryOpen(true)}
+            aria-label="Canvas history"
+            title={hasLocalPendingChanges ? "Finish or discard pending changes before restoring history" : "Canvas history"}
+            disabled={canvasHistoryBlocked}
+          >
+            <History className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setActivityOpen(true)}
+            aria-label="Activity"
+            title="Activity"
+            disabled={!activityAvailable}
+          >
+            <ListChecks className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => load({ refresh: true })}
             aria-label="Refresh"
             disabled={loading}
@@ -418,6 +705,19 @@ export default function App() {
           </Button>
         </div>
       </header>
+      <CanvasHistoryDialog
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        currentRevision={canvasRevisionRef.current ?? canvasV2?.revision ?? null}
+        onRestored={() => load()}
+      />
+      <ActivityDialog open={activityOpen} onOpenChange={setActivityOpen} />
+      <PendingRequestDialog
+        link={pendingRequestLink}
+        onOpenChange={(open) => {
+          if (!open) setPendingRequestLink(null)
+        }}
+      />
 
       <div className="relative flex min-h-0 flex-1">
         {(!inJourney || leftOpen) && (
@@ -438,15 +738,20 @@ export default function App() {
 
         <main className="min-w-0 flex-1 overflow-auto">
           {(model.isDemo || context.isDemo) && <DemoBanner thin={model.thin} />}
-          {readyMapRefreshAction ? (
+          {authNotice ? (
+            <WorkspaceNotice message={authNotice} />
+          ) : readyMapRefreshAction ? (
             <MapRefreshNotice
               action={readyMapRefreshAction}
               loading={loading}
               onRefresh={() => load({ refresh: true })}
             />
-          ) : !model.isDemo && canvasState.kind === "ready" && canvasState.notice ? (
+          ) : !model.isDemo && canvasState.kind === CanvasStateKind.Ready && canvasState.notice ? (
             <WorkspaceNotice message={canvasState.notice} />
           ) : null}
+          {onboardingVisible && !model.isDemo && !context.isDemo && (
+            <FirstRunTour workspaceName={context.workspace || model.appName} onDismiss={dismissOnboarding} />
+          )}
           {workspaceState ? (
             <WorkspaceMappingState
               kind={workspaceState.kind}
@@ -456,12 +761,14 @@ export default function App() {
               detail={workspaceState.detail}
               nextSteps={workspaceState.nextSteps}
               fallbackPrompt={workspaceState.fallbackPrompt}
+              progress={mappingProgress}
               source={canvasSource}
               onRetry={() => load({ refresh: true })}
             />
           ) : inJourney ? (
             <JourneyView
               journey={activeJourney!}
+              nativeFlow={activeCanvasV2Flow}
               selectedId={selectedId}
               locked={locked}
               onBack={() => {
@@ -469,6 +776,11 @@ export default function App() {
                 setSelectedId(null)
               }}
               onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))}
+              onOpenFlow={(flowId) => {
+                go(`/flows/${encodeURIComponent(flowId)}`)
+                setSelectedId(null)
+              }}
+              onOpenPendingRequest={(link) => setPendingRequestLink(link)}
               onAction={openAction}
             />
           ) : (
@@ -488,6 +800,7 @@ export default function App() {
         {inJourney && selectedNode && (
           <StepDetailsPanel
             node={selectedNode}
+            nativeNode={selectedNativeNode}
             className="absolute bottom-24 right-4 top-4 z-30 hidden w-[340px] lg:flex"
             onClose={() => setSelectedId(null)}
             onAction={(a) => selectedNode && openAction(a, selectedNode)}
@@ -501,6 +814,7 @@ export default function App() {
           {inJourney && selectedNode && (
             <StepDetailsPanel
               node={selectedNode}
+              nativeNode={selectedNativeNode}
               className="flex max-h-[52vh] w-full lg:hidden"
               onClose={() => setSelectedId(null)}
               onAction={(a) => selectedNode && openAction(a, selectedNode)}
@@ -514,6 +828,7 @@ export default function App() {
               onSubmitEdit={stageEdit}
               onCancelEdit={() => setEditRequest(null)}
               onHandoffDone={onHandoffDone}
+              onHandoffDismiss={onHandoffDismiss}
               onSelectChange={selectChange}
               onModifyChange={modifyChange}
             />
@@ -524,13 +839,192 @@ export default function App() {
   )
 }
 
+function onboardingStorageKey(workspaceKey: string): string {
+  return `agentcanvas:onboarding:v${ONBOARDING_MAJOR_VERSION}:${hashWorkspaceKey(workspaceKey)}`
+}
+
+function hashWorkspaceKey(value: string): string {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+function FirstRunTour({ workspaceName, onDismiss }: { workspaceName: string; onDismiss: () => void }) {
+  return (
+    <section className="border-b bg-clay/5 px-4 py-3">
+      <div className="mx-auto flex max-w-5xl items-start gap-3">
+        <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-clay text-white">
+          <Sparkles className="size-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-foreground">AgentCanvas is ready for {workspaceName}.</p>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            Review the flows, change the map in plain English, and keep this page open while your agent works through requests.
+          </p>
+        </div>
+        <Button variant="ghost" size="icon" onClick={onDismiss} aria-label="Dismiss first-run tour" className="shrink-0">
+          <X className="size-4" />
+        </Button>
+      </div>
+    </section>
+  )
+}
+
 async function loadWorkspaceModel(refresh: boolean): Promise<WorkspaceModelResult> {
   const result = refresh ? await reindexCanvas() : await fetchCanvas()
   return {
     model: result.model,
     mapping: result.mapping,
     notice: mappingNotice(result.mapping),
+    revision: result.revision,
+    canvasV2: result.canvasV2,
   }
+}
+
+async function applyCanvasMapEdit(
+  edit: StagedEdit,
+  document: CanvasV2Document | null,
+  fallbackFlowId: string
+) {
+  if (!document) throw new Error("No native canvas is available.")
+  const flowId = edit.node.native?.flowId || fallbackFlowId
+  const nodeId = edit.node.native?.nodeId
+  if (!flowId || !nodeId) throw new Error("This canvas step is missing a native node reference.")
+
+  const flow = findCanvasV2Flow(document, flowId)
+  if (!flow) throw new Error("That canvas flow moved or no longer exists.")
+  const node = flow.nodes.find((item) => item.id === nodeId) ?? null
+  if (!node) throw new Error("That canvas step moved or no longer exists.")
+
+  const clientChangeId = newCanvasMapChangeId()
+  const operations = buildMapEditOperations(flow, node, edit.action, edit.text1, edit.text2, { clientChangeId })
+  const applyResult = await applyCanvasBatch({
+    base_revision: document.revision,
+    authored_by: "agentcanvas-web",
+    operations,
+  })
+
+  if (mapEditCreatesProposedNodes(edit.action)) {
+    const proposedNodeIds = proposedNodeIdsFromOperations(operations)
+    const proposedRefs = pendingRefsForProposedNodes(flow.id, proposedNodeIds)
+    const request = changeRequestFor({
+      id: clientChangeId,
+      action: edit.action,
+      kind: kindForAction(edit.action),
+      summary: edit.summary,
+      journeyId: flow.id,
+      journeyTitle: edit.journeyTitle,
+      targetNodeId: edit.node.id,
+      targetNativeNodeId: node.id,
+      targetNativeKind: node.kind,
+      targetFlowId: flow.id,
+      text1: edit.text1,
+      text2: edit.text2,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+    const pending = await postChange({ ...request, refs: [...(request.refs ?? []), ...proposedRefs] })
+    const metadataOperations = withProposedNodeRefs(
+      withPendingRequestMetadata(operations, {
+        clientChangeId,
+        pendingRequestId: pending.id,
+      }),
+      proposedNodeIds,
+      proposedRefs
+    ).filter((operation): operation is Extract<ReturnType<typeof buildMapEditOperations>[number], { op: "upsert_node" }> => {
+      return operation.op === "upsert_node" && proposedNodeIds.includes(operation.node.id)
+    })
+    if (metadataOperations.length) {
+      await applyCanvasMetadataBatch(metadataOperations, applyResult.revision)
+    }
+  }
+}
+
+async function applyCanvasMetadataBatch(
+  operations: Extract<ReturnType<typeof buildMapEditOperations>[number], { op: "upsert_node" }>[],
+  baseRevision: number
+) {
+  try {
+    await applyCanvasBatch({
+      base_revision: baseRevision,
+      authored_by: "agentcanvas-web",
+      operations,
+    })
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.code !== "REVISION_CONFLICT") throw error
+    const latest = await fetchCanvas()
+    await applyCanvasBatch({
+      base_revision: latest.revision,
+      authored_by: "agentcanvas-web",
+      operations,
+    })
+  }
+}
+
+function newCanvasMapChangeId(): string {
+  return `map-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+}
+
+function pendingRefsForProposedNodes(flowId: string, nodeIds: string[]): PendingRef[] {
+  return nodeIds.map((id) => ({
+    kind: PendingRefKind.Node,
+    id,
+    flow: flowId,
+    source: "canvas.proposed_node",
+  }))
+}
+
+function withProposedNodeRefs(
+  operations: ReturnType<typeof buildMapEditOperations>,
+  nodeIds: string[],
+  refs: PendingRef[]
+): ReturnType<typeof buildMapEditOperations> {
+  if (!nodeIds.length || !refs.length) return operations
+  return operations.map((operation) => {
+    if (operation.op !== "upsert_node" || !nodeIds.includes(operation.node.id)) return operation
+    return {
+      ...operation,
+      node: {
+        ...operation.node,
+        metadata: {
+          ...(operation.node.metadata ?? {}),
+          pending_refs: refs,
+        },
+      },
+    }
+  })
+}
+
+function canvasMapEditErrorNotice(error: unknown): string {
+  if (error instanceof ApiError && error.code === "REFERENCED_ID_REMOVED") {
+    const ids = referencedIdsFromError(error)
+    return ids.length
+      ? `This map change would remove something an open request still needs (${ids.join(", ")}). Finish or cancel that request first.`
+      : "This map change would remove something an open request still needs. Finish or cancel that request first."
+  }
+  if (error instanceof ApiError && error.code === "WORKSPACE_BUSY") {
+    return "AgentCanvas is already saving another map change. Try again in a moment."
+  }
+  return "AgentCanvas could not save that map change. Ask your agent to make the change instead."
+}
+
+function referencedIdsFromError(error: ApiError): string[] {
+  const details = error.details
+  if (!details || typeof details !== "object" || !("ids" in details)) return []
+  const ids = (details as { ids?: unknown }).ids
+  return Array.isArray(ids) ? ids.map((id) => String(id)).filter(Boolean) : []
+}
+
+function findCanvasV2Node(document: CanvasV2Document, flowId: string, nodeId: string): CanvasV2Node | null {
+  const flow = findCanvasV2Flow(document, flowId)
+  return flow?.nodes.find((node) => node.id === nodeId) ?? null
+}
+
+function findCanvasV2Flow(document: CanvasV2Document, flowId: string): CanvasV2Flow | null {
+  return document.flows.find((item) => item.id === flowId) ?? null
 }
 
 function emptyWorkspaceDetail(result: WorkspaceModelResult): string {
@@ -549,11 +1043,11 @@ function mappingNotice(mapping?: CanvasMapping): string | undefined {
 }
 
 function isStarterMap(mapping?: CanvasMapping): boolean {
-  return isHeuristicMap(mapping) && mapping?.primaryMode === "llm-assisted"
+  return isHeuristicMap(mapping) && mapping?.primaryMode === CanvasMappingMode.LlmAssisted
 }
 
 function isUnreadyMap(mapping?: CanvasMapping): boolean {
-  return Boolean(mapping?.empty || mapping?.source?.isEmpty || mapping?.mode === "empty" || isStarterMap(mapping))
+  return Boolean(mapping?.empty || mapping?.source?.isEmpty || mapping?.mode === CanvasMappingMode.Empty || isStarterMap(mapping))
 }
 
 function unreadyMapTitle(result: WorkspaceModelResult): string {
@@ -615,38 +1109,38 @@ function describeMapRefreshAction(
 ): MapRefreshAction | null {
   const workspace = context.workspace || appName || "this project"
 
-  if (source.kind === "stale-cache") {
+  if (source.kind === CanvasSourceKind.StaleCache) {
     return {
       title: "This saved map may be out of date",
       detail: "Refresh to check the project now, or ask your assistant to update the saved map.",
-      prompt: mapInstructionPrompt("refresh", workspace),
+      prompt: mapInstructionPrompt(MapInstructionKind.Refresh, workspace),
     }
   }
 
-  if (source.kind === "heuristic-projection") {
+  if (source.kind === CanvasSourceKind.HeuristicProjection) {
     return {
       title: "Starter map needs review",
       detail: "Refresh to check for a newer map, or ask your assistant to rewrite this in plain English.",
-      prompt: mapInstructionPrompt("starter", workspace),
+      prompt: mapInstructionPrompt(MapInstructionKind.Starter, workspace),
     }
   }
 
-  if (source.kind === "no-flow") {
+  if (source.kind === CanvasSourceKind.NoFlow) {
     return {
       title: "No plain-English map yet",
       detail: "Refresh to check again, or ask your assistant to make the first map.",
-      prompt: mapInstructionPrompt("author", workspace),
+      prompt: mapInstructionPrompt(MapInstructionKind.Author, workspace),
     }
   }
 
   return null
 }
 
-function mapInstructionPrompt(kind: "refresh" | "starter" | "author", workspace: string): string {
+function mapInstructionPrompt(kind: MapInstructionKind, workspace: string): string {
   const opening =
-    kind === "refresh"
+    kind === MapInstructionKind.Refresh
       ? `Please refresh the AgentCanvas map for ${workspace}.`
-      : kind === "starter"
+      : kind === MapInstructionKind.Starter
         ? `Please turn the AgentCanvas starter view for ${workspace} into a clear plain-English map.`
         : `Please make an AgentCanvas map for ${workspace}.`
 
@@ -669,121 +1163,143 @@ function canvasSignature(result: WorkspaceModelResult): string {
 function describeCanvasSource(
   context: AppContext,
   model: AppModel,
-  state: CanvasState
+  state: CanvasState,
+  health?: MapHealth | null
 ): CanvasSourceSummary {
   const mapping = state.mapping
   const source = mapping?.source
   const sourceKind = source?.kind || mapping?.mode
   const flowCount = source?.flowCount ?? mapping?.flowCount ?? model.journeys.length
 
-  if (sourceKind === "demo-fallback" || mapping?.demoFallback || context.demoFallback) {
+  if (sourceKind === CanvasSourceKind.DemoFallback || mapping?.demoFallback || context.demoFallback) {
     return {
-      kind: "demo-fallback",
+      kind: CanvasSourceKind.DemoFallback,
       label: "Example map",
       shortLabel: "Example",
       detail: "This is sample content because no project was connected yet.",
-      tone: "info",
+      tone: CanvasSourceTone.Info,
       flowCount,
     }
   }
 
-  if (model.isDemo || context.isDemo || context.isDemoContent || context.mode === "demo" || sourceKind === "demo") {
+  if (
+    model.isDemo ||
+    context.isDemo ||
+    context.isDemoContent ||
+    context.mode === AppContextMode.Demo ||
+    sourceKind === CanvasSourceKind.Demo
+  ) {
     return {
-      kind: "demo",
+      kind: CanvasSourceKind.Demo,
       label: "Example project",
       shortLabel: "Example",
       detail: "You are looking at sample flows, not your own project.",
-      tone: "info",
+      tone: CanvasSourceTone.Info,
       flowCount,
     }
   }
 
-  if (state.kind === "loading" || state.kind === "reindexing") {
+  if (state.kind === CanvasStateKind.Loading || state.kind === CanvasStateKind.Reindexing) {
     return {
-      kind: "loading",
-      label: state.kind === "reindexing" ? "Refreshing this project" : "Reading this project",
-      shortLabel: state.kind === "reindexing" ? "Refreshing" : "Reading",
+      kind: CanvasSourceKind.Loading,
+      label: state.kind === CanvasStateKind.Reindexing ? "Refreshing this project" : "Reading this project",
+      shortLabel: state.kind === CanvasStateKind.Reindexing ? "Refreshing" : "Reading",
       detail: "AgentCanvas is looking through the project and preparing the map.",
-      tone: "info",
+      tone: CanvasSourceTone.Info,
       flowCount,
     }
   }
 
-  if (state.kind === "error") {
+  if (state.kind === CanvasStateKind.Error) {
     return {
-      kind: "error",
+      kind: CanvasSourceKind.Error,
       label: "Map not available",
       shortLabel: "Needs attention",
       detail: "AgentCanvas could not open this project's map.",
-      tone: "error",
+      tone: CanvasSourceTone.Error,
       flowCount,
     }
   }
 
-  if (state.kind === "empty" || !model.journeys.length) {
+  if (state.kind === CanvasStateKind.Empty || !model.journeys.length) {
     return {
-      kind: "no-flow",
+      kind: CanvasSourceKind.NoFlow,
       label: "No map yet",
       shortLabel: "No map yet",
       detail: "AgentCanvas checked this project, but it does not have a clear plain-English map yet.",
-      tone: "warning",
+      tone: CanvasSourceTone.Warning,
+      flowCount,
+    }
+  }
+
+  if (isStaleHealth(health)) {
+    return {
+      kind: CanvasSourceKind.StaleCache,
+      label: "Saved map may be out of date",
+      shortLabel: "Saved copy",
+      detail: health?.freshness.reason || "The project changed after this map was saved. Ask your assistant to refresh it if the behavior changed.",
+      tone: CanvasSourceTone.Warning,
       flowCount,
     }
   }
 
   if (isStaleMap(mapping)) {
     return {
-      kind: "stale-cache",
+      kind: CanvasSourceKind.StaleCache,
       label: "Saved map may be out of date",
       shortLabel: "Saved copy",
       detail: "The project changed after this map was saved. Ask your assistant to refresh it if the behavior changed.",
-      tone: "warning",
+      tone: CanvasSourceTone.Warning,
       flowCount,
     }
   }
 
   if (isAgentAuthoredMap(mapping)) {
     return {
-      kind: "agent-authored",
+      kind: CanvasSourceKind.AgentAuthored,
       label: "Made by your assistant",
       shortLabel: "Assistant map",
       detail: "These flows come from a saved map your assistant wrote from the project.",
-      tone: "info",
+      tone: CanvasSourceTone.Info,
       flowCount,
     }
   }
 
   if (isHeuristicMap(mapping)) {
     return {
-      kind: "heuristic-projection",
+      kind: CanvasSourceKind.HeuristicProjection,
       label: "Rough first pass",
       shortLabel: "Starter map",
       detail: "AgentCanvas made a rough first pass from what it found. Treat it as a starting point until your assistant reviews it.",
-      tone: "warning",
+      tone: CanvasSourceTone.Warning,
       flowCount,
     }
   }
 
   return {
-    kind: "unknown",
+    kind: CanvasSourceKind.Unknown,
     label: source?.label || "Saved project map",
     shortLabel: "Saved map",
     detail: "These flows come from the current map saved for this project.",
-    tone: "default",
+    tone: CanvasSourceTone.Default,
     flowCount,
   }
 }
 
 function isAgentAuthoredMap(mapping?: CanvasMapping): boolean {
-  return mapping?.mode === "agent-authored" || mapping?.primaryMode === "agent-authored" || mapping?.source?.kind === "agent-authored"
+  return (
+    mapping?.mode === CanvasMappingMode.AgentAuthored ||
+    mapping?.primaryMode === CanvasMappingMode.AgentAuthored ||
+    mapping?.source?.kind === CanvasSourceKind.AgentAuthored
+  )
 }
 
 function isHeuristicMap(mapping?: CanvasMapping): boolean {
   return (
-    mapping?.mode === "heuristic" ||
-    mapping?.mode === "heuristic-projection" ||
-    mapping?.mode === "deterministic" ||
-    mapping?.source?.kind === "heuristic-projection"
+    mapping?.mode === CanvasMappingMode.Heuristic ||
+    mapping?.mode === CanvasMappingMode.HeuristicProjection ||
+    mapping?.mode === CanvasMappingMode.Deterministic ||
+    mapping?.source?.kind === CanvasSourceKind.HeuristicProjection
   )
 }
 
@@ -795,6 +1311,15 @@ function isStaleMap(mapping?: CanvasMapping): boolean {
       looksStale(mapping?.cacheStatus) ||
       looksStale(mapping?.source?.status) ||
       mapping?.warnings?.some((warning) => looksStale(warning) || /refreshed after|kept the canvas|behavior changed/i.test(warning))
+  )
+}
+
+function isStaleHealth(health?: MapHealth | null): boolean {
+  return Boolean(
+    health &&
+      (health.freshness.stale ||
+        health.freshness.status === MapFreshnessStatus.Stale ||
+        health.status === MapHealthStatus.StaleCanvasIr)
   )
 }
 
@@ -836,15 +1361,15 @@ function MapRefreshNotice({
   loading: boolean
   onRefresh: () => void
 }) {
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "manual">("idle")
+  const [copyState, setCopyState] = useState<CopyState>(CopyState.Idle)
 
   async function copyPrompt() {
     try {
       await navigator.clipboard.writeText(action.prompt)
-      setCopyState("copied")
-      window.setTimeout(() => setCopyState("idle"), 1600)
+      setCopyState(CopyState.Copied)
+      window.setTimeout(() => setCopyState(CopyState.Idle), 1600)
     } catch {
-      setCopyState("manual")
+      setCopyState(CopyState.Manual)
     }
   }
 
@@ -861,12 +1386,12 @@ function MapRefreshNotice({
             Refresh map
           </Button>
           <Button type="button" variant="outline" size="sm" onClick={copyPrompt}>
-            {copyState === "copied" ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
-            {copyState === "copied" ? "Copied" : "Copy note for assistant"}
+            {copyState === CopyState.Copied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
+            {copyState === CopyState.Copied ? "Copied" : "Copy note for assistant"}
           </Button>
         </div>
       </div>
-      {copyState === "manual" && (
+      {copyState === CopyState.Manual && (
         <div className="mx-auto mt-2 max-w-6xl">
           <Input
             readOnly
@@ -891,6 +1416,7 @@ function WorkspaceNotice({ message }: { message: string }) {
 
 function StepDetailsPanel({
   node,
+  nativeNode,
   className,
   onClose,
   onAction,
@@ -898,6 +1424,7 @@ function StepDetailsPanel({
   onCancelChange,
 }: {
   node: FlowNode
+  nativeNode?: CanvasV2Node | null
   className?: string
   onClose: () => void
   onAction: (action: FlowAction) => void
@@ -927,6 +1454,7 @@ function StepDetailsPanel({
       <div className="min-h-0 flex-1 overflow-auto">
         <Inspector
           node={node}
+          nativeNode={nativeNode}
           onAction={onAction}
           onModifyChange={onModifyChange}
           onCancelChange={onCancelChange}
@@ -968,7 +1496,7 @@ function Rail({
       <div className="flex flex-col gap-0.5">
         {journeys.map((j) => {
           const active = j.id === activeId
-          const state = activity.get(j.id) ?? "idle"
+          const state = activity.get(j.id) ?? JourneyActivity.Idle
           return (
             <button
               key={j.id}
@@ -989,10 +1517,8 @@ function Rail({
   )
 }
 
-type JourneyActivity = "idle" | "edited" | "working"
-
 function JourneyDot({ state, active }: { state: JourneyActivity; active: boolean }) {
-  if (state === "working") {
+  if (state === JourneyActivity.Working) {
     return <Loader2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
   }
   return (
@@ -1000,7 +1526,7 @@ function JourneyDot({ state, active }: { state: JourneyActivity; active: boolean
       aria-hidden="true"
       className={cn(
         "h-2.5 w-2.5 shrink-0 rounded-full",
-        state === "edited" ? "bg-when-accent" : "bg-muted-foreground/35",
+        state === JourneyActivity.Edited ? "bg-when-accent" : "bg-muted-foreground/35",
         active && "ring-4 ring-primary/10"
       )}
     />
@@ -1030,22 +1556,22 @@ function getJourneyActivity(
   journeys: Journey[],
   localChanges: ChangeEntry[],
   orderingChanges: ChangeEntry[],
-  phase: Phase,
+  phase: HandoffPhase,
   handoffItems: HandoffItem[]
 ) {
   const active = new Map<string, JourneyActivity>()
   for (const journey of journeys) {
     if (localChanges.some((change) => change.journeyId === journey.id)) {
-      active.set(journey.id, "edited")
+      active.set(journey.id, JourneyActivity.Edited)
     }
   }
 
-  if (phase === "sending" || phase === "working") {
+  if (phase === HandoffPhase.Sending || phase === HandoffPhase.Working) {
     const changesById = new Map(orderingChanges.map((change) => [change.id, change]))
     for (const item of handoffItems) {
-      if (item.status === "in_progress") {
+      if (item.status === HandoffItemStatus.InProgress || item.status === HandoffItemStatus.Implemented) {
         const change = changesById.get(item.changeId)
-        if (change) active.set(change.journeyId, "working")
+        if (change) active.set(change.journeyId, JourneyActivity.Working)
       }
     }
   }
@@ -1069,21 +1595,48 @@ function preserveLocalJourneyRecency(next: AppModel, current: AppModel) {
   }
 }
 
+function journeyFromCanvasV2Flow(flow: CanvasV2Flow): Journey {
+  const entryNode = flow.nodes.find((node) => node.id === flow.entryNode)
+  return {
+    id: flow.id,
+    title: flow.title,
+    summary: flow.summary,
+    entry: entryNode?.title || flow.title,
+    nodes: [],
+  }
+}
+
 function JourneyView({
   journey,
+  nativeFlow,
   selectedId,
   locked,
   onBack,
   onSelect,
+  onOpenFlow,
+  onOpenPendingRequest,
   onAction,
 }: {
   journey: Journey
+  nativeFlow?: CanvasV2Flow | null
   selectedId: string | null
   locked: boolean
   onBack: () => void
   onSelect: (id: string) => void
+  onOpenFlow: (flowId: string) => void
+  onOpenPendingRequest: (link: PendingRequestLink) => void
   onAction: (action: FlowAction, node: FlowNode) => void
 }) {
+  const displayNodeForNativeId = useMemo(
+    () => (nativeId: string) => {
+      const existing = findNodeByNativeId(journey.nodes, nativeId)
+      if (existing) return existing
+      const nativeNode = nativeFlow?.nodes.find((node) => node.id === nativeId)
+      return nativeFlow && nativeNode ? nativeNodeToDisplayNode(nativeFlow.id, nativeNode) : null
+    },
+    [journey.nodes, nativeFlow]
+  )
+
   return (
     <div className="mx-auto max-w-3xl px-6 py-7 pb-40">
       <button
@@ -1102,7 +1655,19 @@ function JourneyView({
         </p>
       </div>
       <div className={cn("transition-opacity", locked && "pointer-events-none opacity-60")}>
-        <FlowColumn nodes={journey.nodes} selectedId={selectedId} onSelect={onSelect} onAction={onAction} />
+        {nativeFlow ? (
+          <CanvasV2FlowCanvas
+            flow={nativeFlow}
+            selectedDisplayId={selectedId}
+            displayNodeForNativeId={displayNodeForNativeId}
+            onSelectDisplayNode={onSelect}
+            onOpenFlow={onOpenFlow}
+            onOpenPendingRequest={onOpenPendingRequest}
+            onAction={onAction}
+          />
+        ) : (
+          <FlowColumn nodes={journey.nodes} selectedId={selectedId} onSelect={onSelect} onAction={onAction} />
+        )}
       </div>
     </div>
   )

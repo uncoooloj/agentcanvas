@@ -509,7 +509,7 @@ def _path_evidence(paths: Iterable[Any]) -> List[Dict[str, str]]:
     evidence = []
     for path in paths:
         if isinstance(path, str) and path:
-            evidence.append({"path": PurePosixPath(path).as_posix()})
+            evidence.append({"path": PurePosixPath(path.replace("\\", "/")).as_posix()})
     return evidence
 
 

@@ -1,0 +1,34 @@
+{
+  "schema": "agentcanvas.dogfood_matrix.v1",
+  "agents": [
+    { "id": "claude-code", "name": "Claude Code", "public_claim": true },
+    { "id": "codex", "name": "Codex", "public_claim": true },
+    { "id": "cursor", "name": "Cursor", "public_claim": true },
+    { "id": "antigravity", "name": "Antigravity", "public_claim": true }
+  ],
+  "workspaces": [
+    { "id": "agentcanvas", "name": "AgentCanvas", "type": "agentcanvas", "gate": true },
+    { "id": "nextjs-vibe", "name": "Vibe-coded Next.js app", "type": "nextjs", "gate": true },
+    { "id": "fastapi-service", "name": "FastAPI service", "type": "fastapi", "gate": true },
+    { "id": "laravel-app", "name": "Laravel app", "type": "laravel", "gate": false },
+    { "id": "small-monorepo", "name": "Small monorepo", "type": "monorepo", "gate": false }
+  ],
+  "runs": [
+    {
+      "agent_id": "codex",
+      "workspace_id": "agentcanvas",
+      "attempt": 1,
+      "status": "clean",
+      "loop": "interim_narrow",
+      "runbook_id": "phase4-interim-narrow-v1",
+      "permission_prompt_count": 0,
+      "triage_class": "none",
+      "proof_manifest_path": "tests/fixtures/dogfood-proof/manifest.valid.json",
+      "recording": {
+        "redacted": true,
+        "notes": "Fixture proof validates shape without storing a screen recording."
+      },
+      "notes": "Local proof fixture. This is intentionally not a complete matrix."
+    }
+  ]
+}

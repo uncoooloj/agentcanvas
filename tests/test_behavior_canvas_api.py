@@ -144,6 +144,54 @@ class BehaviorCanvasApiTests(unittest.TestCase):
                 self.assertEqual("when", first["role"])
                 self.assertLessEqual(len(journey["nodes"]), 5)
 
+    def test_core_canvas_filters_fixture_routes_with_windows_separators(self):
+        workflow_ir = {
+            "schema": "agentcanvas.workflow_ir.v1",
+            "workspace": {"root": "C:\\repo\\agentcanvas", "name": "agentcanvas"},
+            "summary": {},
+            "package": {},
+            "git": {},
+            "focus": {},
+            "app_surfaces": [],
+            "components": [],
+            "nodes": [
+                {
+                    "id": "route:examples\\sample-js-app\\src\\routes\\checkout.js:POST:/checkout",
+                    "type": "route",
+                    "label": "/checkout",
+                    "path": "examples\\sample-js-app\\src\\routes\\checkout.js",
+                    "data": {
+                        "file": "examples\\sample-js-app\\src\\routes\\checkout.js",
+                        "path": "/checkout",
+                        "method": "POST",
+                    },
+                },
+                {
+                    "id": "file:agentcanvas\\cli.py",
+                    "type": "file",
+                    "label": "cli.py",
+                    "path": "agentcanvas\\cli.py",
+                    "data": {
+                        "kind": "source",
+                    },
+                },
+            ],
+            "edges": [],
+        }
+
+        wrapper = build_behavior_canvas(workflow_ir)
+        titles = [journey["title"] for journey in wrapper["canvas"]["journeys"]]
+
+        self.assertNotIn("POST /checkout", titles)
+        self.assertEqual(["Workspace overview"], titles)
+        refs = [
+            ref
+            for journey in wrapper["canvas"]["journeys"]
+            for node in journey["nodes"]
+            for ref in node.get("tech", {}).get("refs", [])
+        ]
+        self.assertFalse(any("examples/" in ref for ref in refs))
+
     def test_core_canvas_marks_empty_workspace_as_no_flows(self):
         with tempfile.TemporaryDirectory() as temp_root:
             root = Path(temp_root)

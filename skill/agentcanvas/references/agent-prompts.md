@@ -65,7 +65,9 @@ I need one decision before editing: <short plain-language question about the req
 agentcanvas status --workspace <workspace> <pending-id> --status needs_input --note "I need one decision before editing: <question>"
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
 agentcanvas index --workspace <workspace>
-agentcanvas status --workspace <workspace> <pending-id> --status done --note "Implemented and verified: <test or smoke check>."
+agentcanvas status --workspace <workspace> <pending-id> --status implemented --note "Implemented."
+agentcanvas status --workspace <workspace> <pending-id> --status verified --note "Verified." --evidence-check "<test or smoke check>" --evidence-result "passed" --evidence-actor "<agent name>"
+agentcanvas status --workspace <workspace> <pending-id> --status done --note "Done."
 ```
 
 ## Copy Fallback Template
@@ -91,11 +93,13 @@ If anything is unclear, risky, incomplete, or contradicted by the workspace, ask
 
 agentcanvas status --workspace <workspace> <pending-id> --status needs_input --note "I need one decision before editing: <question>"
 
-Once clear, mark the request in_progress, make the smallest change that satisfies the acceptance criteria, run the relevant test or smoke check, re-index with agentcanvas index --workspace <workspace> to refresh evidence, then mark the request done:
+Once clear, mark the request in_progress, make the smallest change that satisfies the acceptance criteria, run the relevant test or smoke check, re-index with agentcanvas index --workspace <workspace> to refresh evidence, then mark the request implemented, verified, and done:
 
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
 agentcanvas index --workspace <workspace>
-agentcanvas status --workspace <workspace> <pending-id> --status done --note "Implemented and verified: <test or smoke check>."
+agentcanvas status --workspace <workspace> <pending-id> --status implemented --note "Implemented."
+agentcanvas status --workspace <workspace> <pending-id> --status verified --note "Verified." --evidence-check "<test or smoke check>" --evidence-result "passed" --evidence-actor "<agent name>"
+agentcanvas status --workspace <workspace> <pending-id> --status done --note "Done."
 ```
 
 ## Copy Projection Template
@@ -123,9 +127,9 @@ agentcanvas apply-query --workspace <workspace> --query <canvas-query.json>
 Use AgentCanvas projection for this workspace:
 <workspace>
 
-Read .agentcanvas/workflow.ir.json, especially source_facts, projection_contract, and source_facts.repo.app_surfaces. If .agentcanvas/canvas.ir.json already exists, read it too so updates preserve the current display canvas.
+Read .agentcanvas/workflow.ir.json, especially source_facts, projection_contract, and source_facts.repo.app_surfaces. If .agentcanvas/canvas.ir.json already exists, read it too so updates preserve the current stored canvas and stable ids.
 
-Generate agentcanvas.canvas_query.v1 JSON in llm-assisted mode. Use source_facts and app_surfaces as the only evidence. Create plain-English, non-technical AgentCanvas journeys using When, Do, If, ElseIf, and Else. The visible map is for a non-technical project owner by default: use short 2-5 word titles, everyday verbs, and language that fits the workspace type. Use "project" when the type is unclear; use terms like site, store, game, lesson, workflow, or automation only when the evidence supports them. Use app_surfaces as lanes, participants, or drilldowns inside journeys. Cite fact_ids on every operation and include useful provenance in node or edge data. The query should materialize the display canvas in .agentcanvas/canvas.ir.json, not replace workflow facts.
+Generate agentcanvas.canvas_query.v1 JSON in llm-assisted mode. Use source_facts and app_surfaces as the only evidence. Create plain-English, non-technical AgentCanvas journeys using When, Do, If, ElseIf, and Else. The visible map is for a non-technical project owner by default: use short 2-5 word titles, everyday verbs, and language that fits the workspace type. Use "project" when the type is unclear; use terms like site, store, game, lesson, workflow, or automation only when the evidence supports them. Use app_surfaces as lanes, participants, or drilldowns inside journeys. Cite fact_ids on every operation and include useful provenance in node or edge data. The query should materialize the stored v2 canvas in .agentcanvas/canvas.ir.json through apply-query, not replace workflow facts.
 
 Do not create top-level journeys from a raw file inventory. Files, tests, services, packages, modules, tool names, API routes, schema terms, and implementation jargon should appear only as supporting details, refs, provenance, or supporting nodes, not as visible journey or step titles.
 
@@ -135,9 +139,9 @@ Validate first:
 
 agentcanvas apply-query --workspace <workspace> --query <canvas-query.json> --dry-run
 
-Apply only after validation passes and the user wants the display canvas written:
+Apply only after validation passes and the user wants the canvas written:
 
 agentcanvas apply-query --workspace <workspace> --query <canvas-query.json>
 
-This writes .agentcanvas/canvas.ir.json. It does not overwrite .agentcanvas/workflow.ir.json.
+This writes .agentcanvas/canvas.ir.json through the v2 apply pipeline. It does not overwrite .agentcanvas/workflow.ir.json.
 ```

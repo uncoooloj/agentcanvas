@@ -60,6 +60,21 @@ may link only to redacted/polished cuts.
 
 ## Commands
 
+Run one local full-loop proof attempt and write a replayable proof manifest:
+
+```bash
+python3.9 scripts/run_dogfood_attempt.py /path/to/workspace \
+  --proof-dir /path/to/private/proof-folder \
+  --session-id codex-agentcanvas-attempt-3 \
+  --change-id codex-agentcanvas-attempt-3
+```
+
+The runner starts AgentCanvas against the workspace, creates a pending request,
+uses the clarification loop, answers the question, marks the request verified
+with evidence, re-indexes, writes `proof.json` plus `verification.txt`, and then
+validates the proof manifest. Store the generated proof folder outside the
+public repo or under an ignored private path.
+
 Validate the public template shape:
 
 ```bash

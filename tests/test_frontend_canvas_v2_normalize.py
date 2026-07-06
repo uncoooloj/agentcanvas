@@ -295,7 +295,7 @@ def _node_script():
               ready: false,
               summary: ["Freshness: stale"],
             } }]]],
-            ["GET /api/canvas/history", [[200, { ok: true, current_revision: 2, current: { revision: 2, authored_by: "codex", updated_at: "now", path: "/canvas", size_bytes: 12, op_summary: { operation_count: 1 }, allow_rewrite_reason: null }, history: [{ revision: 1, authored_by: "agent", updated_at: "then", path: "/history/1", size_bytes: 10, op_summary: {}, allow_rewrite_reason: "cleanup" }] }]]],
+            ["GET /api/canvas/history", [[200, { ok: true, current_revision: 2, current: { revision: 2, authored_by: "codex", updated_at: "now", path: "/canvas", size_bytes: 12, op_summary: { operation_count: 1 }, allow_rewrite_reason: null, flow_summary: { count: 2, titles: ["Checkout", "Signup"], truncated: false } }, history: [{ revision: 1, authored_by: "agent", updated_at: "then", path: "/history/1", size_bytes: 10, op_summary: {}, allow_rewrite_reason: "cleanup", flow_summary: { count: 1, titles: ["Checkout"], truncated: true } }] }]]],
             ["POST /api/canvas/apply", [
               [200, { ok: true, auto_migrated: false, dry_run: false, revision: 3, base_revision: 2, path: "/canvas" }],
               [409, { ok: false, revision: 3, error: { code: "REVISION_CONFLICT", message: "base_revision does not match", details: { current_revision: 3 } } }],
@@ -326,7 +326,13 @@ def _node_script():
           checked.push("health");
 
           const history = await api.fetchCanvasHistory();
-          if (history.currentRevision !== 2 || history.history[0].allowRewriteReason !== "cleanup") {
+          if (
+            history.currentRevision !== 2 ||
+            history.current?.flowSummary?.titles[1] !== "Signup" ||
+            history.history[0].allowRewriteReason !== "cleanup" ||
+            history.history[0].flowSummary?.count !== 1 ||
+            history.history[0].flowSummary?.truncated !== true
+          ) {
             throw new Error("history client did not normalize history");
           }
           checked.push("history");

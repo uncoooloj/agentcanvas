@@ -4,6 +4,7 @@ import {
   Check,
   ChevronLeft,
   Clipboard,
+  History,
   Lightbulb,
   Moon,
   PanelLeftClose,
@@ -18,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { BrandMark } from "@/components/BrandMark"
+import { CanvasHistoryDialog } from "@/components/CanvasHistoryDialog"
 import { CanvasV2FlowCanvas } from "@/components/CanvasV2FlowCanvas"
 import { FlowColumn } from "@/components/FlowCanvas"
 import { Overview } from "@/components/Overview"
@@ -128,6 +130,7 @@ export default function App() {
   const [leftOpen, setLeftOpen] = useState(true)
   const [canvasState, setCanvasState] = useState<CanvasState>({ kind: CanvasStateKind.Loading })
   const [dark, setDark] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const mappingActive = canvasState.kind === CanvasStateKind.Loading || canvasState.kind === CanvasStateKind.Reindexing
   const [mappingStage, setMappingStage] = useState(0)
   const [mapHealth, setMapHealth] = useState<MapHealth | null>(null)
@@ -470,6 +473,13 @@ export default function App() {
       : null
   const readyMapRefreshAction = canvasState.kind === CanvasStateKind.Ready && !model.isDemo ? mapRefreshAction : null
   const headerStatus = mappingActive ? MAPPING_STAGES[mappingStage] : canvasSource.shortLabel
+  const canvasHistoryAvailable =
+    context.mode === AppContextMode.Workspace &&
+    canvasState.kind === CanvasStateKind.Ready &&
+    !model.isDemo &&
+    !context.isDemo &&
+    !loading
+  const canvasHistoryBlocked = !canvasHistoryAvailable || hasLocalPendingChanges
 
   if (landing) {
     return <LandingPage onEnterApp={appAvailable ? () => go("/") : undefined} />
@@ -517,6 +527,16 @@ export default function App() {
           <Button
             variant="ghost"
             size="icon"
+            onClick={() => setHistoryOpen(true)}
+            aria-label="Canvas history"
+            title={hasLocalPendingChanges ? "Finish or discard pending changes before restoring history" : "Canvas history"}
+            disabled={canvasHistoryBlocked}
+          >
+            <History className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => load({ refresh: true })}
             aria-label="Refresh"
             disabled={loading}
@@ -528,6 +548,12 @@ export default function App() {
           </Button>
         </div>
       </header>
+      <CanvasHistoryDialog
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        currentRevision={canvasRevisionRef.current ?? canvasV2?.revision ?? null}
+        onRestored={() => load()}
+      />
 
       <div className="relative flex min-h-0 flex-1">
         {(!inJourney || leftOpen) && (

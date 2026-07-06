@@ -366,6 +366,11 @@ export interface CanvasHistoryEntry {
   sizeBytes?: number
   opSummary?: Record<string, unknown>
   allowRewriteReason?: string | null
+  flowSummary?: {
+    count: number
+    titles: string[]
+    truncated: boolean
+  }
   document?: CanvasV2Document
 }
 

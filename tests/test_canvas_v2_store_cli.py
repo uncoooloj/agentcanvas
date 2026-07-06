@@ -986,6 +986,8 @@ class CanvasV2StoreCliTests(unittest.TestCase):
                 [entry["revision"] for entry in history["history"]],
                 [2, 1, 0],
             )
+            self.assertEqual(history["current"]["flow_summary"]["count"], 1)
+            self.assertEqual(history["current"]["flow_summary"]["titles"], ["Upload photo"])
 
             restored = restore_canvas_revision(
                 workspace,

@@ -1133,6 +1133,11 @@ def _history_entry(path: Path, document: Mapping[str, Any]) -> Dict[str, Any]:
     metadata = document.get("metadata") if isinstance(document.get("metadata"), Mapping) else {}
     allow_rewrite = metadata.get("last_allow_rewrite") if isinstance(metadata.get("last_allow_rewrite"), Mapping) else {}
     op_summary = metadata.get("last_operation_summary") if isinstance(metadata.get("last_operation_summary"), Mapping) else {}
+    flows = document.get("flows") if isinstance(document.get("flows"), list) else []
+    flow_titles = []
+    for flow in flows:
+        if isinstance(flow, Mapping) and isinstance(flow.get("title"), str) and flow.get("title"):
+            flow_titles.append(flow["title"])
     return {
         "revision": _revision(document),
         "authored_by": document.get("authored_by"),
@@ -1141,6 +1146,11 @@ def _history_entry(path: Path, document: Mapping[str, Any]) -> Dict[str, Any]:
         "size_bytes": size_bytes,
         "op_summary": dict(op_summary),
         "allow_rewrite_reason": allow_rewrite.get("reason") if isinstance(allow_rewrite.get("reason"), str) else None,
+        "flow_summary": {
+            "count": len(flows),
+            "titles": flow_titles[:8],
+            "truncated": len(flow_titles) > 8,
+        },
     }
 
 

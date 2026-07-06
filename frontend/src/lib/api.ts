@@ -580,7 +580,18 @@ function normalizeCanvasHistoryEntry(value: unknown): CanvasHistoryEntry | undef
     sizeBytes: numberValue(entry.size_bytes) ?? numberValue(entry.sizeBytes),
     opSummary: recordValue(entry.op_summary) || recordValue(entry.opSummary),
     allowRewriteReason: stringValue(entry.allow_rewrite_reason) || stringValue(entry.allowRewriteReason) || null,
+    flowSummary: normalizeCanvasHistoryFlowSummary(entry.flow_summary || entry.flowSummary),
     document: normalizeCanvasV2Document(entry.document),
+  }
+}
+
+function normalizeCanvasHistoryFlowSummary(value: unknown): CanvasHistoryEntry["flowSummary"] | undefined {
+  const summary = recordValue(value)
+  if (!summary) return undefined
+  return {
+    count: numberValue(summary.count) ?? 0,
+    titles: stringList(summary.titles),
+    truncated: booleanValue(summary.truncated),
   }
 }
 

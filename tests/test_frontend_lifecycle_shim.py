@@ -74,6 +74,28 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn('op: "upsert_node"', app)
         self.assertIn("REVISION_CONFLICT", app)
 
+    def test_canvas_history_dialog_restores_prior_revisions(self):
+        dialog = (PROJECT_ROOT / "frontend" / "src" / "components" / "CanvasHistoryDialog.tsx").read_text(encoding="utf-8")
+        app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+        api = (PROJECT_ROOT / "frontend" / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
+        types = (PROJECT_ROOT / "frontend" / "src" / "lib" / "types.ts").read_text(encoding="utf-8")
+
+        self.assertIn("CanvasHistoryDialog", dialog)
+        self.assertIn("fetchCanvasHistory", dialog)
+        self.assertIn("restoreCanvasRevision", dialog)
+        self.assertIn("baseRevision: activeRevision", dialog)
+        self.assertIn("CanvasHistoryErrorCode", dialog)
+        self.assertIn("RevisionConflict", dialog)
+        self.assertIn("Undo latest", dialog)
+        self.assertIn("Restore this version", dialog)
+        self.assertIn("flowSummary", dialog)
+        self.assertIn("CanvasHistoryDialog", app)
+        self.assertIn("historyOpen", app)
+        self.assertIn("Canvas history", app)
+        self.assertIn("hasLocalPendingChanges", app)
+        self.assertIn("flowSummary", types)
+        self.assertIn("normalizeCanvasHistoryFlowSummary", api)
+
 
 if __name__ == "__main__":
     unittest.main()

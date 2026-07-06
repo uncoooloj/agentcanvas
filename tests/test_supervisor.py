@@ -13,6 +13,7 @@ from agentcanvas.supervisor import (
     launch_record_path,
     launch_url,
     prepend_pythonpath,
+    pid_is_alive,
     stop_server,
     validate_loopback_host,
     validate_launch_record,
@@ -148,6 +149,13 @@ class SupervisorTests(unittest.TestCase):
         }
 
         self.assertIsNone(validate_launch_record(record))
+
+    def test_pid_is_alive_treats_windows_invalid_parameter_as_dead(self):
+        error = OSError("invalid parameter")
+        error.winerror = 87
+
+        with patch("agentcanvas.supervisor.os.kill", side_effect=error):
+            self.assertFalse(pid_is_alive(99999999))
 
     def test_validate_loopback_host_rejects_public_bind(self):
         validate_loopback_host("127.0.0.1")

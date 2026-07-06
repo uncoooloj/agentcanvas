@@ -39,6 +39,10 @@ def _json_strings(value):
         yield str(value)
 
 
+def _prompt_path(path: Path) -> str:
+    return str(path).replace("\\", "/")
+
+
 class AgentCanvasCliContractTests(unittest.TestCase):
     maxDiff = None
 
@@ -600,9 +604,9 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             )
             self.assertIn("Copy this to the AI coding agent", completed.stdout)
             self.assertIn("Calling agent: the calling coding agent.", completed.stdout)
-            self.assertIn(str(workspace.resolve()), completed.stdout)
+            self.assertIn(_prompt_path(workspace.resolve()), completed.stdout)
             self.assertIn(
-                str(workspace.resolve() / ".agentcanvas" / "canvas.ir.json"),
+                _prompt_path(workspace.resolve() / ".agentcanvas" / "canvas.ir.json"),
                 completed.stdout,
             )
             self.assertIn("`.agentcanvas/canvas.ir.json`", completed.stdout)
@@ -663,9 +667,9 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             )
 
             markdown = Path(pending["markdown_path"]).read_text(encoding="utf-8")
-            self.assertIn(str(workspace.resolve()), markdown)
+            self.assertIn(_prompt_path(workspace.resolve()), markdown)
             self.assertIn(
-                str(workspace.resolve() / ".agentcanvas" / "canvas.ir.json"),
+                _prompt_path(workspace.resolve() / ".agentcanvas" / "canvas.ir.json"),
                 markdown,
             )
             self.assertIn("`.agentcanvas/canvas.ir.json`", markdown)

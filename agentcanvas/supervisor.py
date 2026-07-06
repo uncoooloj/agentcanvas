@@ -336,7 +336,11 @@ def pid_is_alive(pid: int) -> bool:
     except PermissionError:
         return True
     except OSError as exc:
-        return getattr(exc, "errno", None) not in {errno.ESRCH, errno.EINVAL}
+        if getattr(exc, "errno", None) in {errno.ESRCH, errno.EINVAL}:
+            return False
+        if getattr(exc, "winerror", None) == 87:
+            return False
+        return True
     return True
 
 

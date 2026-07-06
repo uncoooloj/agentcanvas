@@ -47,6 +47,7 @@ import {
   type PendingConversationSummary,
   type PendingConversationTurn,
   type PendingItem,
+  type PendingRef,
   type PendingStatusHistoryEntry,
   type StepNode,
   type WorkspaceProgressStage,
@@ -341,6 +342,7 @@ export interface ChangeRequest {
   targetNativeNodeId?: string | null
   targetNativeKind?: string | null
   targetFlowId?: string | null
+  refs?: PendingRef[]
   action?: FlowAction
   text1?: string
   text2?: string

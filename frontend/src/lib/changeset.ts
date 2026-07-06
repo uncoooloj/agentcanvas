@@ -4,6 +4,7 @@ import {
   ChangeKind,
   FlowAction,
   FlowNodeKind,
+  PendingRefKind,
   PendingStatus,
   StepRole,
   type AppModel,
@@ -13,6 +14,7 @@ import {
   type PendingConversationSummary,
   type PendingConversationTurn,
   type PendingItem,
+  type PendingRef,
   type StepNode,
 } from "./types"
 export { ChangeKind } from "./types"
@@ -345,7 +347,7 @@ export const useChanges = create<ChangeStore>((set, get) => ({
   },
 }))
 
-function changeRequestFor(change: ChangeEntry): ChangeRequest {
+export function changeRequestFor(change: ChangeEntry): ChangeRequest {
   return {
     changeId: change.id,
     clientChangeId: change.id,
@@ -361,9 +363,44 @@ function changeRequestFor(change: ChangeEntry): ChangeRequest {
     targetNativeNodeId: change.targetNativeNodeId,
     targetNativeKind: change.targetNativeKind,
     targetFlowId: change.targetFlowId,
+    refs: refsForChange(change),
     text1: change.text1,
     text2: change.text2,
   }
+}
+
+export function refsForChange(change: ChangeEntry): PendingRef[] {
+  const refs: PendingRef[] = []
+  const flowId = change.targetFlowId || change.journeyId
+  if (flowId) {
+    refs.push({
+      kind: PendingRefKind.Flow,
+      id: flowId,
+      source: change.targetFlowId ? "change.targetFlowId" : "change.journeyId",
+    })
+  }
+  const nodeId = change.targetNativeNodeId || change.targetNodeId
+  if (nodeId) {
+    refs.push({
+      kind: PendingRefKind.Node,
+      id: nodeId,
+      flow: flowId,
+      source: change.targetNativeNodeId ? "change.targetNativeNodeId" : "change.targetNodeId",
+    })
+  }
+  return dedupeRefs(refs)
+}
+
+function dedupeRefs(refs: PendingRef[]): PendingRef[] {
+  const seen = new Set<string>()
+  const deduped: PendingRef[] = []
+  for (const ref of refs) {
+    const key = `${ref.kind}\u0000${ref.id}\u0000${ref.flow ?? ""}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(ref)
+  }
+  return deduped
 }
 
 function handoffItemFromPending(item: HandoffItem, pending: PendingItem): HandoffItem {

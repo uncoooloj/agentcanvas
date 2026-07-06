@@ -591,6 +591,18 @@ export enum ChangeKind {
   Removing = "removing",
 }
 
+export enum PendingRefKind {
+  Flow = "flow",
+  Node = "node",
+}
+
+export interface PendingRef {
+  kind: PendingRefKind
+  id: string
+  flow?: string
+  source?: string
+}
+
 export interface PendingStatusHistoryEntry {
   status: PendingStatus
   updatedAt?: string

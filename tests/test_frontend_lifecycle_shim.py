@@ -145,6 +145,19 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn('op: "delete_node"', app)
         self.assertIn("REVISION_CONFLICT", app)
 
+    def test_pending_change_payloads_include_typed_refs(self):
+        types = (PROJECT_ROOT / "frontend" / "src" / "lib" / "types.ts").read_text(encoding="utf-8")
+        api = (PROJECT_ROOT / "frontend" / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
+        changeset = (PROJECT_ROOT / "frontend" / "src" / "lib" / "changeset.ts").read_text(encoding="utf-8")
+
+        self.assertIn("export enum PendingRefKind", types)
+        self.assertIn("export interface PendingRef", types)
+        self.assertIn("refs?: PendingRef[]", api)
+        self.assertIn("export function refsForChange", changeset)
+        self.assertIn("refs: refsForChange(change)", changeset)
+        self.assertIn("PendingRefKind.Flow", changeset)
+        self.assertIn("PendingRefKind.Node", changeset)
+
     def test_canvas_history_dialog_restores_prior_revisions(self):
         dialog = (PROJECT_ROOT / "frontend" / "src" / "components" / "CanvasHistoryDialog.tsx").read_text(encoding="utf-8")
         app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")

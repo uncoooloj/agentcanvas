@@ -48,7 +48,7 @@ jobs:
         run: npm ci --prefix frontend
 
       - name: Run Python unit tests
-        run: python -m unittest discover -s tests
+        run: python -m unittest discover -s tests -v
 
   frontend:
     name: Frontend build / ${{ matrix.os }}

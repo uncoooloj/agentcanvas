@@ -306,9 +306,10 @@ class AgentCanvasBehaviorRegressionTests(unittest.TestCase):
             )
 
     def _project_to_behavior(self, graph: Mapping[str, Any]) -> Dict[str, Any]:
-        tsc = FRONTEND_ROOT / "node_modules" / ".bin" / "tsc"
+        bin_path = FRONTEND_ROOT / "node_modules" / ".bin"
+        tsc = shutil.which("tsc", path=str(bin_path))
         node = shutil.which("node")
-        if not tsc.is_file() or not node:
+        if not tsc or not node:
             self.skipTest("frontend TypeScript toolchain is not available")
 
         with tempfile.TemporaryDirectory() as temp_root:
@@ -317,7 +318,7 @@ class AgentCanvasBehaviorRegressionTests(unittest.TestCase):
             compiled.mkdir()
             completed = subprocess.run(
                 [
-                    str(tsc),
+                    tsc,
                     str(FRONTEND_ROOT / "src" / "lib" / "behavioral.ts"),
                     str(FRONTEND_ROOT / "src" / "lib" / "types.ts"),
                     "--outDir",

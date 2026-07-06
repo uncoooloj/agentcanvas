@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import errno
 import os
 import secrets
 import signal
@@ -334,8 +335,8 @@ def pid_is_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    except OSError:
-        return False
+    except OSError as exc:
+        return getattr(exc, "errno", None) not in {errno.ESRCH, errno.EINVAL}
     return True
 
 

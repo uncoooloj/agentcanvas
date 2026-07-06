@@ -268,7 +268,7 @@ def process_is_alive(pid: int) -> bool:
     except PermissionError:
         return True
     except OSError as exc:
-        return exc.errno != errno.ESRCH
+        return exc.errno not in {errno.ESRCH, errno.EINVAL}
     return True
 
 

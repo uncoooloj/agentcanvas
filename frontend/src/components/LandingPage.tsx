@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { BrandMark } from "@/components/BrandMark"
+import { LANDING_BOOTSTRAP_PROMPT } from "@/lib/landingBootstrapPrompt"
 import { cn } from "@/lib/utils"
 
 export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
@@ -537,14 +538,6 @@ function HeroRow({
 
 // ---- Agent prompt section ----
 
-const AGENT_PROMPT = `Use AgentCanvas to help me change this app.
-
-1. Start it: run \`agentcanvas up .\` (if it isn't installed, run \`pip install use-agentcanvas\` first). Open the local URL it prints so I can see and edit my app's flows in plain English.
-2. When I make a change there, AgentCanvas writes it to \`.agentcanvas/pending/\` as a plain-English request (a .md and a .json per change).
-3. For each pending request: read it, make the change in the code, run the relevant tests, then re-index with \`agentcanvas index --workspace .\` and tell me what changed.
-
-Keep checking \`.agentcanvas/pending/\` for new requests while we work.`
-
 function AgentPrompt() {
   return (
     <section id="agent" className="mx-auto max-w-3xl scroll-mt-20 px-6 py-24 text-center">
@@ -556,7 +549,7 @@ function AgentPrompt() {
         Paste this into your AI coding agent and it'll launch AgentCanvas and pick up the changes
         you make. No setup from you.
       </p>
-      <CopyBox text={AGENT_PROMPT} className="mt-8 text-left" />
+      <CopyBox text={LANDING_BOOTSTRAP_PROMPT} className="mt-8 text-left" />
     </section>
   )
 }

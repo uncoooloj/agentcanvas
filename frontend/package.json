@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "generate:bootstrap-prompt": "cd .. && python3 scripts/render_frontend_bootstrap_prompt.py",
+    "build": "npm run generate:bootstrap-prompt && tsc -b && vite build",
     "build:agentcanvas": "AGENTCANVAS_VITE_BASE=/agentcanvas/ AGENTCANVAS_VITE_OUT_DIR=../dist/cloudflare-agentcanvas npm run build",
     "lint": "eslint .",
     "preview": "vite preview"

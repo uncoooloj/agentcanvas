@@ -75,6 +75,28 @@ with evidence, re-indexes, writes `proof.json` plus `verification.txt`, and then
 validates the proof manifest. Store the generated proof folder outside the
 public repo or under an ignored private path.
 
+For a real external-agent run, render a token-safe handoff task instead of
+pasting a live launch URL into the prompt:
+
+```bash
+python3.9 scripts/render_external_dogfood_task.py \
+  --agent-id claude-code \
+  --agent-name "Claude Code" \
+  --workspace-id fastapi-service \
+  --attempt 1 \
+  --workspace /path/to/workspace \
+  --session-id claude-code-fastapi-1 \
+  --journey-id route:post--signup-app-main.py \
+  --target-node-id route:post--signup-app-main.py:1:do \
+  --proof-dir /path/to/private/proof-folder \
+  --private-note-path /path/to/private-note.md \
+  --output /path/to/private-task.md
+```
+
+The task uses `$AGENTCANVAS_BASE_URL` and `$AGENTCANVAS_TOKEN`. Pass those as
+local environment variables to the external agent process and instruct the
+agent to use the `X-AgentCanvas-Token` header, not a tokenized URL.
+
 Validate the public template shape:
 
 ```bash

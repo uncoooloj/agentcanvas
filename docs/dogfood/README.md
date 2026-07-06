@@ -23,6 +23,25 @@ Generate and validate one local proof attempt:
 python3.9 scripts/run_dogfood_attempt.py /path/to/workspace --proof-dir /path/to/private/proof-folder
 ```
 
+Generate a token-safe task for a real external agent run:
+
+```bash
+python3.9 scripts/render_external_dogfood_task.py \
+  --agent-id claude-code \
+  --agent-name "Claude Code" \
+  --workspace-id fastapi-service \
+  --attempt 1 \
+  --workspace /path/to/workspace \
+  --session-id claude-code-fastapi-1 \
+  --journey-id route:post--signup-app-main.py \
+  --target-node-id route:post--signup-app-main.py:1:do \
+  --proof-dir /path/to/private/proof-folder \
+  --private-note-path /path/to/private-note.md
+```
+
+The rendered task references `$AGENTCANVAS_BASE_URL` and
+`$AGENTCANVAS_TOKEN` instead of embedding live server tokens in prompts.
+
 Validate matrix shape without claiming release readiness:
 
 ```bash

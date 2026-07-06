@@ -653,6 +653,12 @@ class CanvasV2StoreCliTests(unittest.TestCase):
             self.assertEqual(migrated["schema"], CANVAS_V2_SCHEMA)
             self.assertEqual(migrated["authored_by"], "codex-migration-test")
             self.assertTrue((state_dir / "history" / "canvas.pre-v2.json").is_file())
+            self.assertTrue((state_dir / "history" / "canvas.0.json").is_file())
+            head = _read_json(state_dir / "history" / "canvas.head.json")
+            self.assertEqual(head["schema"], "agentcanvas.canvas_history_head.v1")
+            self.assertEqual(head["revision"], 1)
+            self.assertEqual(head["document"]["schema"], CANVAS_V2_SCHEMA)
+            self.assertEqual(head["document"]["authored_by"], "codex-migration-test")
 
             ops_path = Path(temp_root) / "ops.json"
             ops_path.write_text(

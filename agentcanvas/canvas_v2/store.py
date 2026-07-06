@@ -58,6 +58,7 @@ KNOWN_STATUSES = {"verified", "inferred", "proposed", "stale"}
 KNOWN_CONFIDENCE_LEVELS = {"low", "medium", "high"}
 HISTORY_DIR_NAME = "history"
 HISTORY_HEAD_FILENAME = "canvas.head.json"
+LEGACY_SNAPSHOT_FILENAME = "canvas.pre-v2.json"
 HISTORY_TXN_FILENAME = "canvas.txn.json"
 HISTORY_TXN_PREFIX = "canvas.txn."
 HISTORY_MAX_REVISIONS = 50
@@ -171,6 +172,48 @@ def apply_operation_batch(
             )
     except WorkspaceLockBusy as exc:
         raise _workspace_busy_error(exc)
+
+
+def write_migrated_canvas_document(
+    workspace: str | Path,
+    *,
+    legacy_payload: Mapping[str, Any],
+    migrated_document: Mapping[str, Any],
+    authored_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Persist a legacy->v2 migration through the normal atomic store path."""
+
+    if not isinstance(legacy_payload, Mapping):
+        raise CanvasStoreError("INVALID_CANVAS", "legacy canvas must be a JSON object")
+    if not isinstance(migrated_document, Mapping):
+        raise CanvasStoreError("INVALID_CANVAS", "migrated canvas must be a JSON object")
+
+    root = resolve_workspace(workspace)
+    writer = authored_by or _optional_string(migrated_document.get("authored_by")) or "agentcanvas-cli"
+    try:
+        with workspace_write_lock(root, writer=writer) as lock:
+            updated = _normalize_document(dict(migrated_document))
+            _validate_document(updated)
+            _refresh_evidence_if_available(root, updated)
+            _write_legacy_snapshot(root, dict(legacy_payload))
+            _write_revision(
+                root,
+                _empty_document(),
+                updated,
+                writer=writer,
+                broken_locks=_lock_breaks(lock),
+                expected_current=legacy_payload,
+            )
+    except WorkspaceLockBusy as exc:
+        raise _workspace_busy_error(exc)
+
+    return {
+        "ok": True,
+        "schema": CANVAS_V2_SCHEMA,
+        "revision": _revision(updated),
+        "path": str(canvas_ir_path(root)),
+        "history_path": str(root / STATE_DIR_NAME / HISTORY_DIR_NAME / LEGACY_SNAPSHOT_FILENAME),
+    }
 
 
 def _apply_operation_batch_locked(
@@ -1164,7 +1207,7 @@ def _write_legacy_snapshot(root: Path, payload: Dict[str, Any]) -> None:
     ensure_state_dirs(root)
     history_dir = root / STATE_DIR_NAME / HISTORY_DIR_NAME
     history_dir.mkdir(parents=True, exist_ok=True)
-    history_path = history_dir / "canvas.pre-v2.json"
+    history_path = history_dir / LEGACY_SNAPSHOT_FILENAME
     tmp_history = history_path.with_name(".%s.%s.tmp" % (history_path.name, uuid.uuid4().hex))
     try:
         tmp_history.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1198,7 +1241,7 @@ def _history_snapshot_paths(root: Path) -> List[Path]:
         return []
     paths = []
     for path in history_dir.glob("canvas.*.json"):
-        if path.name in {HISTORY_HEAD_FILENAME, "canvas.pre-v2.json"}:
+        if path.name in {HISTORY_HEAD_FILENAME, LEGACY_SNAPSHOT_FILENAME}:
             continue
         revision = _revision_from_history_path(path)
         if revision is not None:

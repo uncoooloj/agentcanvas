@@ -22,10 +22,8 @@ from .ir import (
     ConversationRole,
     ConversationTurnKind,
     append_pending_conversation,
-    atomic_write_json,
     build_bootstrap_prompt,
     canvas_ir_path,
-    ensure_state_dirs,
     format_map_health,
     list_pending,
     load_ir,
@@ -33,7 +31,6 @@ from .ir import (
     map_health,
     now_utc,
     resolve_workspace,
-    save_canvas_ir,
     state_paths,
     update_pending_status,
 )
@@ -48,6 +45,7 @@ from .canvas_v2 import (
     migrate_canvas_v1_to_v2,
     restore_canvas_revision,
     validate_canvas_v2,
+    write_migrated_canvas_document,
 )
 from .projection import ProjectionValidationError, materialize_canvas_model
 from .progress import ProgressError, write_progress, progress_status
@@ -798,13 +796,14 @@ def cmd_canvas_migrate(args: argparse.Namespace) -> int:
     }
 
     if args.apply:
-        state_dir, _ir_path, _pending_dir = ensure_state_dirs(workspace)
-        history_dir = state_dir / "history"
-        history_dir.mkdir(parents=True, exist_ok=True)
-        history_path = history_dir / "canvas.pre-v2.json"
-        atomic_write_json(history_path, current)
-        save_canvas_ir(workspace, migrated)
-        result["history_path"] = str(history_path)
+        store_result = write_migrated_canvas_document(
+            workspace,
+            legacy_payload=current,
+            migrated_document=migrated,
+            authored_by=getattr(args, "authored_by", None) or "agentcanvas-cli",
+        )
+        result["revision"] = store_result["revision"]
+        result["history_path"] = store_result["history_path"]
 
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

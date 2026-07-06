@@ -9,6 +9,7 @@ from .store import (
     list_canvas_history,
     load_canvas_document,
     restore_canvas_revision,
+    write_migrated_canvas_document,
 )
 from .validation import validate_canvas_v2
 
@@ -23,4 +24,5 @@ __all__ = [
     "migrate_canvas_v1_to_v2",
     "restore_canvas_revision",
     "validate_canvas_v2",
+    "write_migrated_canvas_document",
 ]

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import type { WorkspaceProgressStatus } from "@/lib/types"
 
 export enum AppContextMode {
   Landing = "landing",
@@ -21,6 +22,7 @@ export type AppContext = {
   demoFixture?: string | null
   source?: RuntimeSource
   sessionId?: string | null
+  progress?: WorkspaceProgressStatus
 }
 
 export type ProductLanguage = {

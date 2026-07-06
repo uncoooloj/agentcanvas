@@ -238,6 +238,32 @@ export enum MappingStageStatus {
   Error = "error",
 }
 
+export enum WorkspaceProgressStage {
+  Indexing = "indexing",
+  Surveying = "surveying",
+  MappingFlows = "mapping_flows",
+  Done = "done",
+}
+
+export interface WorkspaceProgressPayload {
+  schema: "agentcanvas.progress.v1"
+  stage: WorkspaceProgressStage
+  message: string
+  updated_at?: string
+  current?: number
+  total?: number
+}
+
+export interface WorkspaceProgressStatus extends Partial<WorkspaceProgressPayload> {
+  exists: boolean
+  readable: boolean
+  path?: string
+  relativePath?: string
+  progress?: WorkspaceProgressPayload | null
+  notice?: string
+  error?: unknown
+}
+
 export enum CanvasStateKind {
   Idle = "idle",
   Ready = "ready",

@@ -3,7 +3,14 @@ import { AlertCircle, Check, Circle, Clipboard, Loader2, RefreshCw, Search, Spar
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
-import { CanvasSourceTone, CanvasStateKind, CopyState, type CanvasSourceSummary } from "@/lib/types"
+import {
+  CanvasSourceTone,
+  CanvasStateKind,
+  CopyState,
+  WorkspaceProgressStage,
+  type CanvasSourceSummary,
+  type WorkspaceProgressStatus,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const MAPPING_STAGES = [
@@ -21,6 +28,7 @@ interface Props {
   detail?: string
   nextSteps?: string[]
   fallbackPrompt?: string
+  progress?: WorkspaceProgressStatus | null
   source?: CanvasSourceSummary
   onRetry: () => void
 }
@@ -33,12 +41,17 @@ export function WorkspaceMappingState({
   detail,
   nextSteps,
   fallbackPrompt,
+  progress: workspaceProgress,
   source,
   onRetry,
 }: Props) {
   const active = kind === CanvasStateKind.Loading || kind === CanvasStateKind.Reindexing
-  const clampedStage = Math.min(Math.max(stageIndex, 0), MAPPING_STAGES.length - 1)
-  const progress = active ? ((clampedStage + 1) / MAPPING_STAGES.length) * 100 : kind === CanvasStateKind.Empty ? 100 : 0
+  const liveProgress = active && workspaceProgress?.readable ? workspaceProgress : null
+  const liveStage = liveProgress?.stage
+  const clampedStage = liveStage
+    ? stageIndexForProgress(liveStage)
+    : Math.min(Math.max(stageIndex, 0), MAPPING_STAGES.length - 1)
+  const progressPercent = progressValue(liveProgress, clampedStage, active, kind)
   const Icon = kind === CanvasStateKind.Error ? AlertCircle : kind === CanvasStateKind.Empty ? Search : Sparkles
   const title =
     message ||
@@ -51,6 +64,7 @@ export function WorkspaceMappingState({
           : "Couldn't open the project map")
   const body =
     detail ||
+    liveProgress?.message ||
     (active
       ? MAPPING_STAGES[clampedStage]
       : source?.detail ||
@@ -94,7 +108,17 @@ export function WorkspaceMappingState({
 
         {active ? (
           <div className="mt-6">
-            <Progress value={progress} className="h-2" />
+            <Progress value={progressPercent} className="h-2" />
+            {liveProgress && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span>{stageLabel(liveProgress.stage)}</span>
+                {typeof liveProgress.current === "number" && typeof liveProgress.total === "number" && (
+                  <span>
+                    {liveProgress.current} of {liveProgress.total}
+                  </span>
+                )}
+              </div>
+            )}
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {MAPPING_STAGES.map((stage, index) => {
                 const done = index < clampedStage
@@ -189,4 +213,44 @@ function CopyMapPrompt({ prompt }: { prompt: string }) {
       )}
     </div>
   )
+}
+
+function stageIndexForProgress(stage: WorkspaceProgressStage): number {
+  switch (stage) {
+    case WorkspaceProgressStage.Indexing:
+      return 0
+    case WorkspaceProgressStage.Surveying:
+      return 1
+    case WorkspaceProgressStage.MappingFlows:
+      return 2
+    case WorkspaceProgressStage.Done:
+      return 3
+  }
+}
+
+function stageLabel(stage?: WorkspaceProgressStage): string {
+  switch (stage) {
+    case WorkspaceProgressStage.Indexing:
+      return "Reading project"
+    case WorkspaceProgressStage.Surveying:
+      return "Finding where work starts"
+    case WorkspaceProgressStage.MappingFlows:
+      return "Naming the flows"
+    case WorkspaceProgressStage.Done:
+      return "Preparing the map"
+    default:
+      return "Mapping project"
+  }
+}
+
+function progressValue(
+  progress: WorkspaceProgressStatus | null,
+  clampedStage: number,
+  active: boolean,
+  kind: Props["kind"],
+): number {
+  if (progress && typeof progress.current === "number" && typeof progress.total === "number" && progress.total > 0) {
+    return Math.min(100, Math.max(0, (progress.current / progress.total) * 100))
+  }
+  return active ? ((clampedStage + 1) / MAPPING_STAGES.length) * 100 : kind === CanvasStateKind.Empty ? 100 : 0
 }

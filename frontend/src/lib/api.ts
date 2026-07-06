@@ -48,6 +48,9 @@ import {
   type PendingItem,
   type PendingStatusHistoryEntry,
   type StepNode,
+  type WorkspaceProgressStage,
+  type WorkspaceProgressPayload,
+  type WorkspaceProgressStatus,
 } from "./types"
 
 export class ApiError extends Error {
@@ -171,6 +174,11 @@ export async function answerPendingRequest(id: string, answer: string): Promise<
 export async function fetchMapHealth(): Promise<MapHealth> {
   const data = await getJson<{ ok: boolean; health: unknown }>("/api/health")
   return normalizeMapHealth(data.health)
+}
+
+export async function fetchProgress(): Promise<WorkspaceProgressStatus> {
+  const data = await getJson<{ ok: boolean; progress: unknown }>("/api/progress")
+  return normalizeWorkspaceProgress(data.progress)
 }
 
 export async function fetchCanvasHistory(): Promise<CanvasHistoryResponse> {
@@ -561,6 +569,47 @@ function normalizeCanvasV2Edge(value: unknown): CanvasV2Edge | null {
   }
 }
 
+export function normalizeWorkspaceProgress(value: unknown): WorkspaceProgressStatus {
+  const progress = recordValue(value)
+  const payload = normalizeWorkspaceProgressPayload(progress?.progress || progress)
+  return {
+    exists: Boolean(progress?.exists),
+    readable: Boolean(progress?.readable),
+    path: stringValue(progress?.path),
+    relativePath: stringValue(progress?.relativePath || progress?.relative_path),
+    progress: payload,
+    schema: payload?.schema,
+    stage: payload?.stage,
+    message: payload?.message,
+    updated_at: payload?.updated_at,
+    current: payload?.current,
+    total: payload?.total,
+    notice: stringValue(progress?.notice),
+    error: progress?.error,
+  }
+}
+
+function normalizeWorkspaceProgressPayload(value: unknown): WorkspaceProgressPayload | null {
+  const payload = recordValue(value)
+  if (!payload) return null
+  const stage = normalizeWorkspaceProgressStage(payload.stage)
+  const message = stringValue(payload.message)
+  if (!stage || !message) return null
+  return {
+    schema: "agentcanvas.progress.v1",
+    stage,
+    message,
+    updated_at: stringValue(payload.updated_at || payload.updatedAt),
+    current: numberValue(payload.current),
+    total: numberValue(payload.total),
+  }
+}
+
+function normalizeWorkspaceProgressStage(value: unknown): WorkspaceProgressStage | null {
+  const stage = stringValue(value)
+  return stage && WORKSPACE_PROGRESS_STAGES.has(stage) ? (stage as WorkspaceProgressStage) : null
+}
+
 function normalizeMapHealthFile(value: unknown): MapHealthFileRef {
   const file = recordValue(value)
   return {
@@ -639,6 +688,7 @@ const CANVAS_SOURCE_KINDS = new Set<string>(Object.values(CanvasSourceKind))
 const CANVAS_SOURCE_STATUSES = new Set<string>(Object.values(CanvasSourceStatus))
 const CANVAS_SOURCE_REASONS = new Set<string>(Object.values(CanvasSourceReason))
 const MAP_FRESHNESS_STATUSES = new Set<string>(Object.values(MapFreshnessStatus))
+const WORKSPACE_PROGRESS_STAGES = new Set<string>(["indexing", "surveying", "mapping_flows", "done"])
 const MAP_HEALTH_STATUSES = new Set<string>(Object.values(MapHealthStatus))
 const MAP_HEALTH_REASONS = new Set<string>(Object.values(MapHealthReason))
 const CONVERSATION_ROLES = new Set<string>(Object.values(ConversationRole))

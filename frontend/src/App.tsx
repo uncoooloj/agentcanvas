@@ -39,7 +39,7 @@ import {
   type ChangeEntry,
   type HandoffItem,
 } from "@/lib/changeset"
-import { ApiError, applyCanvasBatch, fetchCanvas, fetchMapHealth, isApiAuthExpired, reindexCanvas } from "@/lib/api"
+import { ApiError, applyCanvasBatch, fetchCanvas, fetchMapHealth, fetchProgress, isApiAuthExpired, reindexCanvas } from "@/lib/api"
 import { AppContextMode, useAppContext, type AppContext } from "@/lib/appcontext"
 import { EditDelivery, type EditRequest, type StagedEdit } from "@/lib/edits"
 import { CANVAS_POLL_INTERVAL_MS, documentIsVisible, HEALTH_POLL_INTERVAL_MS } from "@/lib/polling"
@@ -64,6 +64,7 @@ import {
   type FlowNode,
   type Journey,
   type MapHealth,
+  type WorkspaceProgressStatus,
 } from "@/lib/types"
 
 const HOME = "__home__"
@@ -136,6 +137,7 @@ export default function App() {
   const [activityOpen, setActivityOpen] = useState(false)
   const mappingActive = canvasState.kind === CanvasStateKind.Loading || canvasState.kind === CanvasStateKind.Reindexing
   const [mappingStage, setMappingStage] = useState(0)
+  const [mappingProgress, setMappingProgress] = useState<WorkspaceProgressStatus | null>(null)
   const [mapHealth, setMapHealth] = useState<MapHealth | null>(null)
   const [canvasV2, setCanvasV2] = useState<CanvasV2Document | null>(null)
   const [authNotice, setAuthNotice] = useState<string | null>(null)
@@ -175,6 +177,10 @@ export default function App() {
   useEffect(() => {
     pollBlockedRef.current = hasLocalPendingChanges
   }, [hasLocalPendingChanges])
+
+  useEffect(() => {
+    setMappingProgress(context.progress ?? null)
+  }, [context.progress])
 
   // Switching flows (or returning to All Flows) clears any in-progress step
   // edit, so the composer never lingers on a page where it has no context.
@@ -241,6 +247,7 @@ export default function App() {
     }
 
     setMappingStage(0)
+    setMappingProgress(context.progress ?? null)
     setMapHealth(null)
     setCanvasState({ kind: refresh ? CanvasStateKind.Reindexing : CanvasStateKind.Loading })
     try {
@@ -308,6 +315,36 @@ export default function App() {
       window.clearInterval(timer)
     }
   }, [contextLoading, context.mode, context.workspace, onWelcome])
+
+  useEffect(() => {
+    if (contextLoading || context.mode !== AppContextMode.Workspace || !mappingActive || onWelcome) return
+
+    let cancelled = false
+    let inFlight = false
+
+    async function pollProgress() {
+      if (inFlight || !documentIsVisible()) return
+      inFlight = true
+      try {
+        const progress = await fetchProgress()
+        if (!cancelled) {
+          setMappingProgress(progress)
+          setAuthNotice(null)
+        }
+      } catch (error) {
+        if (!cancelled && isApiAuthExpired(error)) setAuthNotice(AUTH_EXPIRED_NOTICE)
+      } finally {
+        inFlight = false
+      }
+    }
+
+    void pollProgress()
+    const timer = window.setInterval(pollProgress, HEALTH_POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [contextLoading, context.mode, context.workspace, mappingActive, onWelcome])
 
   useEffect(() => {
     if (contextLoading || context.mode !== AppContextMode.Workspace || onWelcome) return
@@ -620,6 +657,7 @@ export default function App() {
               detail={workspaceState.detail}
               nextSteps={workspaceState.nextSteps}
               fallbackPrompt={workspaceState.fallbackPrompt}
+              progress={mappingProgress}
               source={canvasSource}
               onRetry={() => load({ refresh: true })}
             />

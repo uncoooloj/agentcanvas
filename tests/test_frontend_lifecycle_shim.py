@@ -147,6 +147,22 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("activityOpen", app)
         self.assertIn("aria-label=\"Activity\"", app)
 
+    def test_workspace_mapping_state_uses_durable_progress(self):
+        app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+        api = (PROJECT_ROOT / "frontend" / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
+        types = (PROJECT_ROOT / "frontend" / "src" / "lib" / "types.ts").read_text(encoding="utf-8")
+        state = (PROJECT_ROOT / "frontend" / "src" / "components" / "WorkspaceMappingState.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("export enum WorkspaceProgressStage", types)
+        self.assertIn("export async function fetchProgress", api)
+        self.assertIn("normalizeWorkspaceProgress", api)
+        self.assertIn("fetchProgress()", app)
+        self.assertIn("setMappingProgress(progress)", app)
+        self.assertIn("progress={mappingProgress}", app)
+        self.assertIn("WorkspaceProgressStage.MappingFlows", state)
+        self.assertIn("liveProgress?.message", state)
+        self.assertIn("progress.current / progress.total", state)
+
 
 if __name__ == "__main__":
     unittest.main()

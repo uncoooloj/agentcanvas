@@ -30,12 +30,11 @@ export function canSaveToMapAction(action: FlowAction): boolean {
     case FlowAction.Change:
     case FlowAction.ChangeCondition:
     case FlowAction.AddAfter:
-    case FlowAction.Remove:
-      return true
     case FlowAction.AddRule:
     case FlowAction.AddThen:
     case FlowAction.AddElse:
-      return false
+    case FlowAction.Remove:
+      return true
   }
 }
 

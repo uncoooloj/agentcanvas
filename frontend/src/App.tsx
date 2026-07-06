@@ -42,6 +42,7 @@ import {
 import { ApiError, applyCanvasBatch, fetchCanvas, fetchMapHealth, fetchProgress, isApiAuthExpired, reindexCanvas } from "@/lib/api"
 import { AppContextMode, useAppContext, type AppContext } from "@/lib/appcontext"
 import { EditDelivery, type EditRequest, type StagedEdit } from "@/lib/edits"
+import { buildMapEditOperations } from "@/lib/canvasMapOps"
 import { CANVAS_POLL_INTERVAL_MS, documentIsVisible, HEALTH_POLL_INTERVAL_MS, PENDING_ACTIVITY_POLL_INTERVAL_MS } from "@/lib/polling"
 import {
   CanvasStateKind,
@@ -56,21 +57,14 @@ import {
   findNode,
   type AppModel,
   type CanvasMapping,
-  type CanvasApplyOperation,
   type CanvasSourceSummary,
   type CanvasV2Document,
-  type CanvasV2Edge,
-  type CanvasV2EdgeOperationPayload,
   type CanvasV2Flow,
   type CanvasV2Node,
-  type CanvasV2NodeOperationPayload,
   type FlowNode,
   type Journey,
   type MapHealth,
   type WorkspaceProgressStatus,
-  CanvasV2EdgeKind,
-  CanvasV2NodeKind,
-  CanvasV2Status,
 } from "@/lib/types"
 import { findNativeDisplayNodeByDisplayId, findNodeByNativeId, nativeNodeToDisplayNode } from "@/lib/nativeDisplay"
 
@@ -882,210 +876,11 @@ async function applyCanvasMapEdit(
   const node = flow.nodes.find((item) => item.id === nodeId) ?? null
   if (!node) throw new Error("That canvas step moved or no longer exists.")
 
-  if (edit.action === FlowAction.Change || edit.action === FlowAction.ChangeCondition) {
-    const title = edit.text1?.trim()
-    if (!title) throw new Error("This map change needs new text.")
-    await applyCanvasBatch({
-      base_revision: document.revision,
-      authored_by: "agentcanvas-web",
-      operations: [
-        {
-          op: "upsert_node",
-          flow: flowId,
-          node: canvasNodePayload({
-            ...node,
-            title,
-          }),
-        },
-      ],
-    })
-    return
-  }
-
-  if (edit.action === FlowAction.AddAfter) {
-    const title = edit.text1?.trim()
-    if (!title) throw new Error("This map change needs the new step text.")
-    await applyCanvasBatch({
-      base_revision: document.revision,
-      authored_by: "agentcanvas-web",
-      operations: buildAddAfterOperations(flow, node, title),
-    })
-    return
-  }
-
-  if (edit.action === FlowAction.Remove) {
-    await applyCanvasBatch({
-      base_revision: document.revision,
-      authored_by: "agentcanvas-web",
-      operations: buildRemoveNodeOperations(flow, node),
-    })
-    return
-  }
-
-  throw new Error("That action cannot be saved directly to the canvas map yet.")
-}
-
-function buildAddAfterOperations(flow: CanvasV2Flow, node: CanvasV2Node, title: string): CanvasApplyOperation[] {
-  const outgoing = flow.edges.filter((edge) => edge.source === node.id)
-  const newNodeId = uniqueCanvasId(
-    `node:${node.id}:after:${slugId(title) || "step"}`,
-    flow.nodes.map((item) => item.id)
-  )
-  const operations: CanvasApplyOperation[] = outgoing.map((edge) => ({
-    op: "delete_edge",
-    flow: flow.id,
-    target: edge.id,
-  }))
-  operations.push({
-    op: "upsert_node",
-    flow: flow.id,
-    node: {
-      id: newNodeId,
-      kind: CanvasV2NodeKind.Do,
-      title,
-      evidence_refs: [],
-      status: CanvasV2Status.Proposed,
-    },
+  await applyCanvasBatch({
+    base_revision: document.revision,
+    authored_by: "agentcanvas-web",
+    operations: buildMapEditOperations(flow, node, edit.action, edit.text1, edit.text2),
   })
-  const usedEdgeIds = flow.edges.map((edge) => edge.id)
-  const insertedEdgeId = uniqueCanvasId(`edge:${node.id}:${newNodeId}`, usedEdgeIds)
-  usedEdgeIds.push(insertedEdgeId)
-  operations.push({
-    op: "upsert_edge",
-    flow: flow.id,
-    edge: {
-      id: insertedEdgeId,
-      kind: CanvasV2EdgeKind.Normal,
-      source: node.id,
-      target: newNodeId,
-    },
-  })
-  for (const edge of outgoing) {
-    const edgeId = uniqueCanvasId(`edge:${newNodeId}:${edge.target}:${edge.kind}`, usedEdgeIds)
-    usedEdgeIds.push(edgeId)
-    operations.push({
-      op: "upsert_edge",
-      flow: flow.id,
-      edge: canvasEdgePayload({
-        id: edgeId,
-        kind: edge.kind,
-        source: newNodeId,
-        target: edge.target,
-        label: edge.label,
-        is_default: edge.isDefault,
-        evidence: edge.evidence,
-        evidence_refs: edge.evidenceRefs,
-        confidence: edge.confidence,
-        metadata: edge.metadata,
-      }),
-    })
-  }
-  return operations
-}
-
-function buildRemoveNodeOperations(flow: CanvasV2Flow, node: CanvasV2Node): CanvasApplyOperation[] {
-  if (flow.entryNode === node.id) {
-    throw new Error("The first step in a flow cannot be removed directly from the map yet.")
-  }
-  const incoming = flow.edges.filter((edge) => edge.target === node.id)
-  const outgoing = flow.edges.filter((edge) => edge.source === node.id)
-  const removedEdgeIds = new Set([...incoming, ...outgoing].map((edge) => edge.id))
-  const existingEdgeKeys = new Set(
-    flow.edges
-      .filter((edge) => !removedEdgeIds.has(edge.id))
-      .map((edge) => edgeKey(edge.source, edge.target, edge.kind, edge.label))
-  )
-  const operations: CanvasApplyOperation[] = [...incoming, ...outgoing].map((edge) => ({
-    op: "delete_edge",
-    flow: flow.id,
-    target: edge.id,
-  }))
-  const usedEdgeIds = flow.edges.map((edge) => edge.id)
-  for (const sourceEdge of incoming) {
-    for (const targetEdge of outgoing) {
-      if (sourceEdge.source === targetEdge.target) continue
-      const template = reconnectEdgeTemplate(sourceEdge, targetEdge)
-      const key = edgeKey(sourceEdge.source, targetEdge.target, template.kind, template.label)
-      if (existingEdgeKeys.has(key)) continue
-      existingEdgeKeys.add(key)
-      const edgeId = uniqueCanvasId(`edge:${sourceEdge.source}:${targetEdge.target}:${template.kind}`, usedEdgeIds)
-      usedEdgeIds.push(edgeId)
-      operations.push({
-        op: "upsert_edge",
-        flow: flow.id,
-        edge: canvasEdgePayload({
-          id: edgeId,
-          kind: template.kind,
-          source: sourceEdge.source,
-          target: targetEdge.target,
-          label: template.label,
-          is_default: template.isDefault,
-          evidence: template.evidence,
-          evidence_refs: template.evidenceRefs,
-          confidence: template.confidence,
-          metadata: template.metadata,
-        }),
-      })
-    }
-  }
-  operations.push({
-    op: "delete_node",
-    flow: flow.id,
-    target: node.id,
-  })
-  return operations
-}
-
-function reconnectEdgeTemplate(sourceEdge: CanvasV2Edge, targetEdge: CanvasV2Edge): CanvasV2Edge {
-  const sourceCarriesPathMeaning =
-    sourceEdge.kind !== CanvasV2EdgeKind.Normal || Boolean(sourceEdge.label) || sourceEdge.isDefault !== undefined
-  return sourceCarriesPathMeaning ? sourceEdge : targetEdge
-}
-
-function canvasNodePayload(node: CanvasV2Node): CanvasV2NodeOperationPayload {
-  return stripUndefined({
-    id: node.id,
-    kind: node.kind,
-    title: node.title,
-    summary: node.summary,
-    evidence: node.evidence,
-    evidence_refs: node.evidenceRefs,
-    confidence: node.confidence,
-    status: node.status,
-    flow_ref: node.flowRef,
-    metadata: node.metadata,
-  })
-}
-
-function canvasEdgePayload(edge: CanvasV2EdgeOperationPayload): CanvasV2EdgeOperationPayload {
-  return stripUndefined(edge)
-}
-
-function stripUndefined<T extends object>(value: T): T {
-  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T
-}
-
-function edgeKey(source: string, target: string, kind: CanvasV2EdgeKind, label?: string): string {
-  return `${source}\u0000${target}\u0000${kind}\u0000${label ?? ""}`
-}
-
-function uniqueCanvasId(base: string, existing: string[]): string {
-  const used = new Set(existing)
-  let candidate = base
-  let suffix = 2
-  while (used.has(candidate)) {
-    candidate = `${base}-${suffix}`
-    suffix += 1
-  }
-  return candidate
-}
-
-function slugId(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48)
 }
 
 function findCanvasV2Node(document: CanvasV2Document, flowId: string, nodeId: string): CanvasV2Node | null {

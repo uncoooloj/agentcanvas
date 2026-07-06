@@ -72,11 +72,14 @@ def _node_script():
         vm.createContext(context);
         vm.runInContext(compiled, context, { filename: process.argv[2] });
 
-        const { layoutFlow } = localModule.exports;
+        const { ELK_LAYOUT_OPTIONS, flowToElkGraph, layoutFlow, layoutFlowFromElk } = localModule.exports;
         const fixtures = JSON.parse(fs.readFileSync(0, "utf8"));
         const checked = [];
         const nodeKinds = new Set();
         const edgeKinds = new Set();
+
+        if (ELK_LAYOUT_OPTIONS["elk.algorithm"] !== "layered") throw new Error("ELK algorithm is not pinned");
+        if (ELK_LAYOUT_OPTIONS["elk.direction"] !== "DOWN") throw new Error("ELK direction is not pinned");
 
         for (const fixture of fixtures) {
           checked.push(fixture.name);
@@ -102,6 +105,34 @@ def _node_script():
               if (!laidOutEdges.has(edge.id)) {
                 throw new Error(`${fixture.name}/${flow.id}: missing edge ${edge.id}`);
               }
+            }
+            const graph = flowToElkGraph(flow);
+            if (graph.layoutOptions["elk.algorithm"] !== "layered") {
+              throw new Error(`${fixture.name}/${flow.id}: ELK graph options missing`);
+            }
+            if (graph.children.length !== flow.nodes.length) {
+              throw new Error(`${fixture.name}/${flow.id}: ELK graph children mismatch`);
+            }
+            const elkResult = {
+              ...graph,
+              width: 900,
+              height: 700,
+              children: graph.children.map((node, index) => ({
+                ...node,
+                x: index * 10,
+                y: index * 20,
+              })),
+              edges: graph.edges.map((edge) => ({
+                ...edge,
+                sections: [{ startPoint: { x: 1, y: 2 }, bendPoints: [{ x: 3, y: 4 }], endPoint: { x: 5, y: 6 } }],
+              })),
+            };
+            const elkLayout = layoutFlowFromElk(flow, elkResult);
+            if (elkLayout.width !== 900 || elkLayout.height !== 700) {
+              throw new Error(`${fixture.name}/${flow.id}: ELK graph size was not used`);
+            }
+            if (elkLayout.edges.length && elkLayout.edges[0].points.length !== 3) {
+              throw new Error(`${fixture.name}/${flow.id}: ELK edge sections were not used`);
             }
           }
         }

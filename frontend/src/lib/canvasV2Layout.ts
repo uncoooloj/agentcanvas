@@ -31,6 +31,51 @@ const Y_GAP = 82
 const PAD_X = 36
 const PAD_Y = 28
 
+export const ELK_LAYOUT_OPTIONS: Record<string, string> = {
+  "elk.algorithm": "layered",
+  "elk.direction": "DOWN",
+  "elk.edgeRouting": "ORTHOGONAL",
+  "elk.layered.spacing.nodeNodeBetweenLayers": String(Y_GAP),
+  "elk.spacing.nodeNode": String(X_GAP),
+  "elk.padding": `[top=${PAD_Y},left=${PAD_X},bottom=${PAD_Y},right=${PAD_X}]`,
+}
+
+interface ElkPoint {
+  x?: number
+  y?: number
+}
+
+interface ElkSection {
+  startPoint?: ElkPoint
+  bendPoints?: ElkPoint[]
+  endPoint?: ElkPoint
+}
+
+interface ElkNode {
+  id: string
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+}
+
+interface ElkEdge {
+  id: string
+  sources?: string[]
+  targets?: string[]
+  labels?: Array<{ text: string; width: number; height: number }>
+  sections?: ElkSection[]
+}
+
+export interface ElkWorkerGraph {
+  id: string
+  width?: number
+  height?: number
+  children?: ElkNode[]
+  edges?: ElkEdge[]
+  layoutOptions?: Record<string, string>
+}
+
 export function layoutFlow(flow: CanvasV2Flow): CanvasV2Layout {
   const nodes = [...flow.nodes].sort((a, b) => a.id.localeCompare(b.id))
   const nodeIds = new Set(nodes.map((node) => node.id))
@@ -80,6 +125,60 @@ export function layoutFlow(flow: CanvasV2Flow): CanvasV2Layout {
   }
 }
 
+export function flowToElkGraph(flow: CanvasV2Flow): ElkWorkerGraph {
+  const nodeIds = new Set(flow.nodes.map((node) => node.id))
+  return {
+    id: flow.id,
+    layoutOptions: ELK_LAYOUT_OPTIONS,
+    children: [...flow.nodes]
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((node) => ({
+        id: node.id,
+        width: NODE_W,
+        height: NODE_H,
+      })),
+    edges: [...flow.edges]
+      .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((edge) => ({
+        id: edge.id,
+        sources: [edge.source],
+        targets: [edge.target],
+        labels: edge.label ? [{ text: edge.label, width: 88, height: 28 }] : undefined,
+      })),
+  }
+}
+
+export function layoutFlowFromElk(flow: CanvasV2Flow, graph: ElkWorkerGraph): CanvasV2Layout {
+  const fallback = layoutFlow(flow)
+  const elkNodes = new Map((graph.children || []).map((node) => [node.id, node]))
+  if (!elkNodes.size) return fallback
+
+  const layoutNodes = fallback.nodes.map((fallbackNode) => {
+    const node = elkNodes.get(fallbackNode.id)
+    return {
+      id: fallbackNode.id,
+      x: numberOrFallback(node?.x, fallbackNode.x),
+      y: numberOrFallback(node?.y, fallbackNode.y),
+      w: numberOrFallback(node?.width, fallbackNode.w),
+      h: numberOrFallback(node?.height, fallbackNode.h),
+    }
+  })
+  const elkEdges = new Map((graph.edges || []).map((edge) => [edge.id, edge]))
+  const edges = fallback.edges.map((fallbackEdge) => {
+    const sections = elkEdges.get(fallbackEdge.id)?.sections || []
+    const points = pointsFromElkSections(sections)
+    return points.length ? { ...fallbackEdge, points } : fallbackEdge
+  })
+
+  return {
+    width: Math.ceil(numberOrFallback(graph.width, fallback.width)),
+    height: Math.ceil(numberOrFallback(graph.height, fallback.height)),
+    nodes: layoutNodes.sort((a, b) => a.id.localeCompare(b.id)),
+    edges,
+  }
+}
+
 function assignLevels(entryNode: string | undefined, nodeIds: string[], edges: CanvasV2Edge[]): Map<string, number> {
   const levels = new Map<string, number>()
   const start = entryNode && nodeIds.includes(entryNode) ? entryNode : nodeIds[0]
@@ -105,6 +204,27 @@ function assignLevels(entryNode: string | undefined, nodeIds: string[], edges: C
   }
 
   return levels
+}
+
+function pointsFromElkSections(sections: ElkSection[]): Array<{ x: number; y: number }> {
+  const points: Array<{ x: number; y: number }> = []
+  for (const section of sections) {
+    pushPoint(points, section.startPoint)
+    for (const bend of section.bendPoints || []) pushPoint(points, bend)
+    pushPoint(points, section.endPoint)
+  }
+  return points
+}
+
+function pushPoint(points: Array<{ x: number; y: number }>, point: ElkPoint | undefined) {
+  if (typeof point?.x !== "number" || typeof point.y !== "number") return
+  const next = { x: point.x, y: point.y }
+  const previous = points[points.length - 1]
+  if (!previous || previous.x !== next.x || previous.y !== next.y) points.push(next)
+}
+
+function numberOrFallback(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback
 }
 
 function layoutEdge(edge: CanvasV2Edge, positions: Map<string, CanvasV2LayoutNode>, width: number): CanvasV2LayoutEdge {

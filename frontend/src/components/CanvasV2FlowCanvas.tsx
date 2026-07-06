@@ -1,4 +1,4 @@
-import { useMemo, type ComponentType, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react"
 import {
   CircleStop,
   Clock,
@@ -14,7 +14,7 @@ import {
   Workflow,
 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { layoutFlow } from "@/lib/canvasV2Layout"
+import { layoutFlow, type CanvasV2Layout, type CanvasV2LayoutEdge } from "@/lib/canvasV2Layout"
 import { cn } from "@/lib/utils"
 import {
   CanvasV2EdgeKind,
@@ -41,8 +41,24 @@ export function CanvasV2FlowCanvas({
   onSelectDisplayNode,
   onAction,
 }: Props) {
-  const layout = useMemo(() => layoutFlow(flow), [flow])
+  const fallbackLayout = useMemo(() => layoutFlow(flow), [flow])
+  const [layout, setLayout] = useState<CanvasV2Layout>(fallbackLayout)
+  const layoutRequestRef = useRef(0)
   const nodes = useMemo(() => new Map(flow.nodes.map((node) => [node.id, node])), [flow.nodes])
+
+  useEffect(() => {
+    setLayout(fallbackLayout)
+    if (typeof Worker === "undefined") return
+
+    const requestId = layoutRequestRef.current + 1
+    layoutRequestRef.current = requestId
+    const worker = new Worker(new URL("../lib/canvasV2LayoutWorker.ts", import.meta.url), { type: "module" })
+    worker.onmessage = (event: MessageEvent<{ id: number; layout: CanvasV2Layout }>) => {
+      if (event.data.id === layoutRequestRef.current) setLayout(event.data.layout)
+    }
+    worker.postMessage({ id: requestId, flow })
+    return () => worker.terminate()
+  }, [fallbackLayout, flow])
 
   return (
     <div className="overflow-x-auto pb-4">
@@ -202,7 +218,7 @@ function NodeAction({
   )
 }
 
-function EdgeLabel({ edge }: { edge: ReturnType<typeof layoutFlow>["edges"][number] }) {
+function EdgeLabel({ edge }: { edge: CanvasV2LayoutEdge }) {
   const point = edge.points[Math.floor(edge.points.length / 2)]
   return (
     <foreignObject x={point.x - 44} y={point.y - 14} width="88" height="28">

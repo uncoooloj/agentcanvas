@@ -95,6 +95,22 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("PENDING_ACTIVITY_POLL_INTERVAL_MS", progress_section)
         self.assertNotIn("HEALTH_POLL_INTERVAL_MS", progress_section)
 
+    def test_canvas_v2_renderer_uses_elk_worker_with_sync_fallback(self):
+        canvas = (PROJECT_ROOT / "frontend" / "src" / "components" / "CanvasV2FlowCanvas.tsx").read_text(encoding="utf-8")
+        layout = (PROJECT_ROOT / "frontend" / "src" / "lib" / "canvasV2Layout.ts").read_text(encoding="utf-8")
+        worker = (PROJECT_ROOT / "frontend" / "src" / "lib" / "canvasV2LayoutWorker.ts").read_text(encoding="utf-8")
+        package = (PROJECT_ROOT / "frontend" / "package.json").read_text(encoding="utf-8")
+
+        self.assertIn('"elkjs"', package)
+        self.assertIn("ELK_LAYOUT_OPTIONS", layout)
+        self.assertIn('"elk.algorithm": "layered"', layout)
+        self.assertIn("flowToElkGraph", layout)
+        self.assertIn("layoutFlowFromElk", layout)
+        self.assertIn("new Worker(new URL(\"../lib/canvasV2LayoutWorker.ts\", import.meta.url)", canvas)
+        self.assertIn("setLayout(fallbackLayout)", canvas)
+        self.assertIn('import ELK from "elkjs/lib/elk.bundled.js"', worker)
+        self.assertIn("await elk.layout(flowToElkGraph(flow))", worker)
+
     def test_direct_canvas_map_edits_include_add_and_remove(self):
         edits = (PROJECT_ROOT / "frontend" / "src" / "lib" / "edits.ts").read_text(encoding="utf-8")
         composer = (PROJECT_ROOT / "frontend" / "src" / "components" / "StepComposer.tsx").read_text(encoding="utf-8")

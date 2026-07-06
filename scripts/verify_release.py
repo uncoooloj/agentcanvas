@@ -2,6 +2,7 @@
 """Run AgentCanvas checks before GitHub, PyPI, or Cloudflare publishing."""
 
 import argparse
+import json
 import os
 import shlex
 import shutil
@@ -13,6 +14,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
+PACKAGED_WEB_DIR = PROJECT_ROOT / "agentcanvas" / "web"
+WRANGLER_CONFIG = PROJECT_ROOT / "wrangler.jsonc"
+WRANGLER_AGENTCANVAS_CONFIG = PROJECT_ROOT / "wrangler.agentcanvas.jsonc"
 MIN_PYTHON = (3, 9)
 
 
@@ -117,6 +121,98 @@ def frontend_env(output_dir, base=None):
     return env
 
 
+def load_jsonc(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise VerificationError(f"{path.relative_to(PROJECT_ROOT)} is not valid JSON/JSONC: {error}")
+
+
+def verify_cloudflare_config():
+    print("\n== Cloudflare config contract ==", flush=True)
+    primary = load_jsonc(WRANGLER_CONFIG)
+    alternate = load_jsonc(WRANGLER_AGENTCANVAS_CONFIG)
+    if primary != alternate:
+        raise VerificationError(
+            "wrangler.jsonc and wrangler.agentcanvas.jsonc drifted. "
+            "Keep them identical or remove the duplicate config."
+        )
+
+    main = primary.get("main")
+    assets = primary.get("assets") or {}
+    build = primary.get("build") or {}
+    routes = primary.get("routes") or []
+    package = load_jsonc(FRONTEND_DIR / "package.json")
+    scripts = package.get("scripts") or {}
+    build_agentcanvas = scripts.get("build:agentcanvas", "")
+
+    if main != "deploy/cloudflare/agentcanvas-worker.js":
+        raise VerificationError("wrangler main must stay deploy/cloudflare/agentcanvas-worker.js.")
+    if not (PROJECT_ROOT / main).is_file():
+        raise VerificationError(f"wrangler main file does not exist: {main}")
+    if assets.get("binding") != "ASSETS":
+        raise VerificationError("wrangler assets.binding must stay ASSETS.")
+    if assets.get("directory") != "./dist/cloudflare-agentcanvas":
+        raise VerificationError("wrangler assets.directory must stay ./dist/cloudflare-agentcanvas.")
+    if build.get("cwd") != "frontend":
+        raise VerificationError("wrangler build.cwd must stay frontend.")
+    if build.get("command") != "npm ci && npm run build:agentcanvas":
+        raise VerificationError("wrangler build.command must stay npm ci && npm run build:agentcanvas.")
+    if "AGENTCANVAS_VITE_BASE=/agentcanvas/" not in build_agentcanvas:
+        raise VerificationError("frontend build:agentcanvas must set AGENTCANVAS_VITE_BASE=/agentcanvas/.")
+    if "AGENTCANVAS_VITE_OUT_DIR=../dist/cloudflare-agentcanvas" not in build_agentcanvas:
+        raise VerificationError("frontend build:agentcanvas must write ../dist/cloudflare-agentcanvas.")
+    if not any(route.get("pattern") == "uncooloj.com/agentcanvas*" for route in routes if isinstance(route, dict)):
+        raise VerificationError("wrangler routes must include uncooloj.com/agentcanvas*.")
+
+    print("Cloudflare config matches the frontend /agentcanvas/ build contract.", flush=True)
+
+
+def normalized_asset_bytes(path):
+    data = path.read_bytes()
+    if path.suffix.lower() not in {".css", ".html", ".js", ".json", ".svg", ".txt", ".webmanifest"}:
+        return data
+    text = data.decode("utf-8")
+    lines = [line.rstrip(" \t") for line in text.splitlines()]
+    return ("\n".join(lines).rstrip("\n") + "\n").encode("utf-8")
+
+
+def relative_files(root):
+    return sorted(path.relative_to(root) for path in root.rglob("*") if path.is_file())
+
+
+def verify_packaged_web_assets(build_output):
+    print("\n== Packaged web asset freshness ==", flush=True)
+    if not PACKAGED_WEB_DIR.is_dir():
+        raise VerificationError("agentcanvas/web is missing; package assets cannot be verified.")
+
+    expected = relative_files(build_output)
+    actual = relative_files(PACKAGED_WEB_DIR)
+    if expected != actual:
+        missing = [str(path) for path in expected if path not in actual]
+        stale = [str(path) for path in actual if path not in expected]
+        detail = []
+        if missing:
+            detail.append(f"missing committed assets: {', '.join(missing[:5])}")
+        if stale:
+            detail.append(f"stale committed assets: {', '.join(stale[:5])}")
+        raise VerificationError(
+            "Committed agentcanvas/web assets do not match a fresh frontend build"
+            + (f" ({'; '.join(detail)})." if detail else ".")
+        )
+
+    for relative in expected:
+        built = build_output / relative
+        committed = PACKAGED_WEB_DIR / relative
+        if normalized_asset_bytes(built) != normalized_asset_bytes(committed):
+            raise VerificationError(
+                "Committed agentcanvas/web assets are stale. "
+                f"First mismatch: {relative}. Run `npm run build --prefix frontend` and commit the generated assets."
+            )
+
+    print("Committed agentcanvas/web assets match a fresh frontend build.", flush=True)
+
+
 def run_frontend_builds():
     npm = require_frontend_build_tools()
     if not npm:
@@ -139,6 +235,7 @@ def run_frontend_builds():
             env=frontend_env(temp_root_path / "web"),
             timeout=300,
         )
+        verify_packaged_web_assets(temp_root_path / "web")
         run_step(
             "Frontend build for Cloudflare /agentcanvas/ path",
             [npm, "run", "build"],
@@ -227,6 +324,7 @@ def main(argv=None):
 
     try:
         require_supported_python()
+        verify_cloudflare_config()
         run_python_checks(skip_runtime_smoke=args.skip_runtime_smoke)
         if args.skip_frontend:
             print("\n== Frontend build ==", flush=True)

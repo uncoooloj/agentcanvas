@@ -90,6 +90,49 @@ class ReleaseVerifierTests(unittest.TestCase):
         self.assertEqual(package["engines"]["node"], ">=22.13.0 <23")
         self.assertEqual(lockfile["packages"][""]["engines"]["node"], ">=22.13.0 <23")
 
+    def test_cloudflare_config_matches_frontend_agentcanvas_contract(self):
+        verifier = load_verifier()
+
+        with redirect_stdout(StringIO()):
+            verifier.verify_cloudflare_config()
+
+    def test_packaged_web_asset_freshness_allows_generated_whitespace_only(self):
+        verifier = load_verifier()
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            build = root / "build"
+            packaged = root / "packaged"
+            (build / "assets").mkdir(parents=True)
+            (packaged / "assets").mkdir(parents=True)
+            (build / "index.html").write_text("<script></script>   \n\n", encoding="utf-8")
+            (packaged / "index.html").write_text("<script></script>\n", encoding="utf-8")
+            (build / "assets" / "app.js").write_text("console.log('ok')  \n", encoding="utf-8")
+            (packaged / "assets" / "app.js").write_text("console.log('ok')\n", encoding="utf-8")
+            (build / "favicon.ico").write_bytes(b"icon")
+            (packaged / "favicon.ico").write_bytes(b"icon")
+
+            with patch.object(verifier, "PACKAGED_WEB_DIR", packaged), redirect_stdout(StringIO()):
+                verifier.verify_packaged_web_assets(build)
+
+    def test_packaged_web_asset_freshness_rejects_stale_committed_assets(self):
+        verifier = load_verifier()
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            build = root / "build"
+            packaged = root / "packaged"
+            build.mkdir()
+            packaged.mkdir()
+            (build / "index.html").write_text("fresh\n", encoding="utf-8")
+            (packaged / "index.html").write_text("stale\n", encoding="utf-8")
+
+            with patch.object(verifier, "PACKAGED_WEB_DIR", packaged), redirect_stdout(StringIO()):
+                with self.assertRaises(verifier.VerificationError) as raised:
+                    verifier.verify_packaged_web_assets(build)
+
+        self.assertIn("assets are stale", str(raised.exception))
+
     def test_run_step_reports_missing_commands_in_plain_language(self):
         verifier = load_verifier()
 

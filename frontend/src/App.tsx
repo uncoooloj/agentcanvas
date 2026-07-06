@@ -42,7 +42,7 @@ import {
 import { ApiError, applyCanvasBatch, fetchCanvas, fetchMapHealth, fetchProgress, isApiAuthExpired, reindexCanvas } from "@/lib/api"
 import { AppContextMode, useAppContext, type AppContext } from "@/lib/appcontext"
 import { EditDelivery, type EditRequest, type StagedEdit } from "@/lib/edits"
-import { CANVAS_POLL_INTERVAL_MS, documentIsVisible, HEALTH_POLL_INTERVAL_MS } from "@/lib/polling"
+import { CANVAS_POLL_INTERVAL_MS, documentIsVisible, HEALTH_POLL_INTERVAL_MS, PENDING_ACTIVITY_POLL_INTERVAL_MS } from "@/lib/polling"
 import {
   CanvasStateKind,
   CanvasMappingMode,
@@ -156,6 +156,7 @@ export default function App() {
 
   const phase = useChanges((s) => s.handoff.phase)
   const handoffItems = useChanges((s) => s.handoff.items)
+  const refreshHandoff = useChanges((s) => s.refreshHandoff)
   const stagedChanges = useChanges((s) => s.changes)
   const queuedNext = useChanges((s) => s.queuedNext)
   const orderingChanges = useMemo(() => [...stagedChanges, ...queuedNext], [queuedNext, stagedChanges])
@@ -324,6 +325,42 @@ export default function App() {
       window.clearInterval(timer)
     }
   }, [contextLoading, context.mode, context.workspace, onWelcome])
+
+  useEffect(() => {
+    if (
+      contextLoading ||
+      context.mode !== AppContextMode.Workspace ||
+      onWelcome ||
+      phase === HandoffPhase.Composing ||
+      phase === HandoffPhase.Done ||
+      phase === HandoffPhase.Stopped
+    ) {
+      return
+    }
+
+    let cancelled = false
+    let inFlight = false
+
+    async function pollPendingActivity() {
+      if (inFlight || !documentIsVisible()) return
+      inFlight = true
+      try {
+        await refreshHandoff()
+        if (!cancelled) setAuthNotice(null)
+      } catch (error) {
+        if (!cancelled && isApiAuthExpired(error)) setAuthNotice(AUTH_EXPIRED_NOTICE)
+      } finally {
+        inFlight = false
+      }
+    }
+
+    void pollPendingActivity()
+    const timer = window.setInterval(pollPendingActivity, PENDING_ACTIVITY_POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [contextLoading, context.mode, context.workspace, onWelcome, phase, refreshHandoff])
 
   useEffect(() => {
     if (contextLoading || context.mode !== AppContextMode.Workspace || !mappingActive || onWelcome) return

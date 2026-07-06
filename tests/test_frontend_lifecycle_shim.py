@@ -72,6 +72,20 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("needsInputItems.map", overlay)
         self.assertIn("onAnswer(item.pendingId, answer)", overlay)
 
+    def test_pending_activity_polling_is_app_level_and_visibility_aware(self):
+        app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+        overlay = (PROJECT_ROOT / "frontend" / "src" / "components" / "HandoffOverlay.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("PENDING_ACTIVITY_POLL_INTERVAL_MS", app)
+        self.assertIn("async function pollPendingActivity()", app)
+        self.assertIn("await refreshHandoff()", app)
+        self.assertIn("!documentIsVisible()", app)
+        self.assertIn("phase === HandoffPhase.Composing", app)
+        self.assertIn("phase === HandoffPhase.Done", app)
+        self.assertIn("phase === HandoffPhase.Stopped", app)
+        self.assertNotIn("setInterval", overlay)
+        self.assertNotIn("PENDING_ACTIVITY_POLL_INTERVAL_MS", overlay)
+
     def test_direct_canvas_map_edits_include_add_and_remove(self):
         edits = (PROJECT_ROOT / "frontend" / "src" / "lib" / "edits.ts").read_text(encoding="utf-8")
         composer = (PROJECT_ROOT / "frontend" / "src" / "components" / "StepComposer.tsx").read_text(encoding="utf-8")

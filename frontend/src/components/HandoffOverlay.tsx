@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { AlertCircle, Check, CircleCheck, Clipboard, Clock, Loader2, RefreshCw, Send } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { HandoffItemStatus, HandoffPhase, useChanges, type HandoffItem } from "@/lib/changeset"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
-import { documentIsVisible, PENDING_ACTIVITY_POLL_INTERVAL_MS } from "@/lib/polling"
 import { CanvasSourceTone, ConversationRole, ConversationTurnKind, CopyState } from "@/lib/types"
 
 interface Props {
@@ -16,15 +15,6 @@ interface Props {
 export function HandoffOverlay({ onAcknowledge, onDismiss }: Props) {
   const { handoff, assistantName, refreshHandoff, answerHandoffQuestion } = useChanges()
   const { phase, items, summary, question, prompt, error } = handoff
-
-  useEffect(() => {
-    if (phase === HandoffPhase.Composing || phase === HandoffPhase.Done) return
-    const id = window.setInterval(() => {
-      if (!documentIsVisible()) return
-      refreshHandoff()
-    }, PENDING_ACTIVITY_POLL_INTERVAL_MS)
-    return () => window.clearInterval(id)
-  }, [phase, refreshHandoff])
 
   if (phase === HandoffPhase.Composing) return null
 

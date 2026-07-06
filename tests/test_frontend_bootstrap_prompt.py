@@ -1,9 +1,14 @@
 import json
 import re
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
-from agentcanvas.bootstrap import build_bootstrap_permission_prompts, build_landing_bootstrap_prompt
+from agentcanvas.bootstrap import (
+    LANDING_AGENT_LABEL,
+    build_bootstrap_permission_prompts,
+    build_landing_bootstrap_prompt,
+    render_bootstrap_prompt,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +29,19 @@ class FrontendBootstrapPromptTests(unittest.TestCase):
             'LANDING_BOOTSTRAP_PROMPT_SOURCE = "agentcanvas/templates/bootstrap_prompt.md"',
             source,
         )
+
+    def test_bootstrap_prompt_normalizes_windows_paths_for_shared_output(self):
+        prompt = render_bootstrap_prompt(
+            workspace=PureWindowsPath("your-project"),
+            agent_label=LANDING_AGENT_LABEL,
+            workflow_relative_path=".agentcanvas/workflow.ir.json",
+            canvas_relative_path=".agentcanvas/canvas.ir.json",
+            canvas_path=PureWindowsPath("your-project/.agentcanvas/canvas.ir.json"),
+        )
+
+        self.assertNotIn("\\", prompt)
+        self.assertIn("agentcanvas up --workspace your-project --agent auto --json", prompt)
+        self.assertIn("your-project/.agentcanvas/canvas.ir.json", prompt)
 
     def test_landing_permission_prompt_metadata_matches_shared_budget(self):
         source = FRONTEND_PROMPT.read_text(encoding="utf-8")

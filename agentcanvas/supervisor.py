@@ -19,6 +19,7 @@ from urllib.parse import urlencode
 
 from . import __version__
 from .ir import ensure_state_dirs, now_utc, resolve_workspace
+from .server import server_heartbeat_path, token_hint
 
 
 LAUNCH_RECORD_FILENAME = "launch.json"
@@ -26,6 +27,9 @@ SERVER_LOG_FILENAME = "server.log"
 SUPERVISED_ENV = "AGENTCANVAS_SUPERVISED"
 TOKEN_ENV = "AGENTCANVAS_SERVER_TOKEN"
 READY_TIMEOUT_SECONDS = 15.0
+HEARTBEAT_REUSE_MAX_AGE_SECONDS = 45.0
+STOP_TIMEOUT_SECONDS = 5.0
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost"}
 
 
 class SupervisorError(RuntimeError):
@@ -66,9 +70,10 @@ def ensure_server_up(
     session_id: Optional[str] = None,
     open_browser: bool = False,
 ) -> Dict[str, Any]:
+    validate_loopback_host(host)
     root = resolve_workspace(workspace)
     record = read_launch_record(root)
-    live = validate_launch_record(record) if record else None
+    live = validate_launch_record(record, workspace=root) if record else None
     if live:
         result = {
             **live,
@@ -104,10 +109,11 @@ def ensure_server_up(
         "version": __version__,
         "session_id": session_id,
         "agent": agent,
+        "workspace": str(root),
     }
 
     try:
-        wait_until_ready(record, timeout_seconds=READY_TIMEOUT_SECONDS)
+        wait_until_ready(record, workspace=root, timeout_seconds=READY_TIMEOUT_SECONDS)
     except SupervisorError as exc:
         terminate_pid(child.pid)
         raise SupervisorError(
@@ -136,9 +142,12 @@ def stop_server(workspace: str | Path) -> Dict[str, Any]:
     if not record:
         return {"ok": True, "stopped": False, "reason": "not_running"}
     pid = int(record.get("pid") or 0)
-    stopped = terminate_pid(pid) if pid else False
-    remove_launch_record(root)
-    return {"ok": True, "stopped": stopped, "pid": pid}
+    stopped = terminate_pid(pid, wait_seconds=STOP_TIMEOUT_SECONDS) if pid else False
+    if stopped:
+        remove_launch_record(root)
+        remove_server_heartbeat(root)
+        return {"ok": True, "stopped": True, "pid": pid}
+    return {"ok": False, "stopped": False, "pid": pid, "reason": "still_running"}
 
 
 def read_launch_record(workspace: str | Path) -> Optional[Dict[str, Any]]:
@@ -184,7 +193,19 @@ def remove_launch_record(workspace: str | Path) -> None:
         pass
 
 
-def validate_launch_record(record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def remove_server_heartbeat(workspace: str | Path) -> None:
+    path = server_heartbeat_path(workspace)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def validate_launch_record(
+    record: Optional[Dict[str, Any]],
+    *,
+    workspace: str | Path | None = None,
+) -> Optional[Dict[str, Any]]:
     if not record:
         return None
     pid = int(record.get("pid") or 0)
@@ -193,7 +214,11 @@ def validate_launch_record(record: Optional[Dict[str, Any]]) -> Optional[Dict[st
     host = str(record.get("host") or "127.0.0.1")
     if not pid or not port or not isinstance(token, str) or not token:
         return None
+    if not is_loopback_host(host):
+        return None
     if not pid_is_alive(pid):
+        return None
+    if workspace is not None and not heartbeat_is_fresh(workspace, record):
         return None
     url = str(record.get("url") or launch_url(host, port, token, session_id=record.get("session_id")))
     health_url = api_url(host, port, "/api/health", token, session_id=record.get("session_id"))
@@ -216,14 +241,14 @@ def validate_launch_record(record: Optional[Dict[str, Any]]) -> Optional[Dict[st
     }
 
 
-def wait_until_ready(record: Dict[str, Any], *, timeout_seconds: float) -> None:
+def wait_until_ready(record: Dict[str, Any], *, workspace: str | Path, timeout_seconds: float) -> None:
     deadline = time.time() + timeout_seconds
     last_error = "server did not respond"
     while time.time() < deadline:
-        live = validate_launch_record(record)
+        live = validate_launch_record(record, workspace=workspace)
         if live:
             return
-        last_error = "health check did not pass yet"
+        last_error = "health check or heartbeat did not pass yet"
         time.sleep(0.2)
     raise SupervisorError("READY_TIMEOUT", "AgentCanvas server did not become ready in time", details={"last_error": last_error})
 
@@ -276,6 +301,7 @@ def spawn_server(
 
 
 def choose_port(host: str, start: int, end: int) -> int:
+    validate_loopback_host(host)
     if start == 0:
         return free_port(host)
     for port in range(int(start), int(end) + 1):
@@ -313,12 +339,72 @@ def pid_is_alive(pid: int) -> bool:
     return True
 
 
-def terminate_pid(pid: int) -> bool:
+def terminate_pid(pid: int, *, wait_seconds: float = 0) -> bool:
     if not pid_is_alive(pid):
-        return False
+        return True
     try:
         os.kill(pid, signal.SIGTERM)
     except OSError:
+        return False
+    deadline = time.time() + max(0.0, wait_seconds)
+    while time.time() < deadline:
+        if not pid_is_alive(pid):
+            return True
+        time.sleep(0.1)
+    if wait_seconds <= 0:
+        return True
+    return not pid_is_alive(pid)
+
+
+def is_loopback_host(host: str) -> bool:
+    return host.strip().lower() in LOOPBACK_HOSTS
+
+
+def validate_loopback_host(host: str) -> None:
+    if is_loopback_host(host):
+        return
+    raise SupervisorError(
+        "NON_LOOPBACK_HOST",
+        "agentcanvas up only binds to loopback hosts",
+        details={"host": host, "allowed_hosts": sorted(LOOPBACK_HOSTS)},
+    )
+
+
+def heartbeat_is_fresh(
+    workspace: str | Path,
+    record: Dict[str, Any],
+    *,
+    max_age_seconds: float = HEARTBEAT_REUSE_MAX_AGE_SECONDS,
+) -> bool:
+    path = server_heartbeat_path(workspace)
+    if not path.is_file():
+        return False
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        age_seconds = max(0.0, time.time() - path.stat().st_mtime)
+    except (OSError, ValueError):
+        return False
+    if age_seconds > max_age_seconds:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    expected = {
+        "schema": "agentcanvas.server_heartbeat.v1",
+        "pid": int(record.get("pid") or 0),
+        "port": int(record.get("port") or 0),
+        "workspace": str(resolve_workspace(workspace)),
+        "token_hint": token_hint(str(record.get("token") or "")),
+    }
+    if str(payload.get("schema")) != expected["schema"]:
+        return False
+    if int(payload.get("pid") or 0) != expected["pid"]:
+        return False
+    if int(payload.get("port") or 0) != expected["port"]:
+        return False
+    if str(payload.get("workspace") or "") != expected["workspace"]:
+        return False
+    if str(payload.get("token_hint") or "") != expected["token_hint"]:
         return False
     return True
 

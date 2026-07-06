@@ -72,7 +72,7 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("needsInputItems.map", overlay)
         self.assertIn("onAnswer(item.pendingId, answer)", overlay)
 
-    def test_text_edits_default_to_silent_canvas_map_apply(self):
+    def test_direct_canvas_map_edits_include_add_and_remove(self):
         edits = (PROJECT_ROOT / "frontend" / "src" / "lib" / "edits.ts").read_text(encoding="utf-8")
         composer = (PROJECT_ROOT / "frontend" / "src" / "components" / "StepComposer.tsx").read_text(encoding="utf-8")
         app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
@@ -80,6 +80,9 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("export enum EditDelivery", edits)
         self.assertIn('CanvasMap = "canvas_map"', edits)
         self.assertIn('ImplementationRequest = "implementation_request"', edits)
+        self.assertIn("canSaveToMapAction", edits)
+        self.assertIn("case FlowAction.AddAfter:", edits)
+        self.assertIn("case FlowAction.Remove:", edits)
         self.assertIn("canSaveToMap", composer)
         self.assertIn("Fix map", composer)
         self.assertIn("Change app", composer)
@@ -87,8 +90,13 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("Ask agent", composer)
         self.assertIn("EditDelivery.CanvasMap", composer)
         self.assertIn("applyCanvasBatch", app)
-        self.assertIn("applyCanvasMapTextEdit", app)
+        self.assertIn("applyCanvasMapEdit", app)
+        self.assertIn("buildAddAfterOperations", app)
+        self.assertIn("buildRemoveNodeOperations", app)
         self.assertIn('op: "upsert_node"', app)
+        self.assertIn('op: "upsert_edge"', app)
+        self.assertIn('op: "delete_edge"', app)
+        self.assertIn('op: "delete_node"', app)
         self.assertIn("REVISION_CONFLICT", app)
 
     def test_canvas_history_dialog_restores_prior_revisions(self):

@@ -25,6 +25,20 @@ export interface StagedEdit {
   text2?: string
 }
 
+export function canSaveToMapAction(action: FlowAction): boolean {
+  switch (action) {
+    case FlowAction.Change:
+    case FlowAction.ChangeCondition:
+    case FlowAction.AddAfter:
+    case FlowAction.Remove:
+      return true
+    case FlowAction.AddRule:
+    case FlowAction.AddThen:
+    case FlowAction.AddElse:
+      return false
+  }
+}
+
 export function nodeLabel(node: FlowNode): string {
   return node.kind === FlowNodeKind.Branch ? `If ${node.condition}` : node.text
 }

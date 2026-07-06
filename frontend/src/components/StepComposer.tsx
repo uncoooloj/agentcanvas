@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
   buildSummary,
+  canSaveToMapAction,
   EDIT_META,
   EditDelivery,
   FieldKind,
@@ -13,7 +14,6 @@ import {
   type EditRequest,
   type StagedEdit,
 } from "@/lib/edits"
-import { FlowAction } from "@/lib/types"
 
 interface Props {
   request: EditRequest
@@ -28,18 +28,13 @@ export function StepComposer({ request, onSubmit, onCancel }: Props) {
   const [second, setSecond] = useState(request.initialText2 ?? "")
   const [delivery, setDelivery] = useState(EditDelivery.CanvasMap)
   const firstRef = useRef<HTMLInputElement>(null)
-  const canSaveToMap =
-    !request.changeId &&
-    (request.action === FlowAction.Change || request.action === FlowAction.ChangeCondition) &&
-    Boolean(request.node.native?.nodeId)
+  const canSaveToMap = !request.changeId && canSaveToMapAction(request.action) && Boolean(request.node.native?.nodeId)
 
   useEffect(() => {
     setFirst(request.initialText1 ?? "")
     setSecond(request.initialText2 ?? "")
     setDelivery(
-      !request.changeId &&
-        (request.action === FlowAction.Change || request.action === FlowAction.ChangeCondition) &&
-        request.node.native?.nodeId
+      !request.changeId && canSaveToMapAction(request.action) && request.node.native?.nodeId
         ? EditDelivery.CanvasMap
         : EditDelivery.ImplementationRequest
     )

@@ -12,7 +12,7 @@ from agentcanvas.ir import (
     update_pending_status,
     write_pending_change,
 )
-from agentcanvas.lifecycle import IN_PROGRESS, NEEDS_INPUT
+from agentcanvas.lifecycle import IN_PROGRESS, NEEDS_INPUT, VERIFIED
 from agentcanvas.server import make_handler
 
 
@@ -152,6 +152,113 @@ class ServerPendingApiTests(unittest.TestCase):
             markdown = Path(answered["markdown_path"]).read_text(encoding="utf-8")
             self.assertIn("## Conversation", markdown)
             self.assertIn("SMS only for now.", markdown)
+
+    def test_pending_routes_are_scoped_to_session_id(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            first = write_pending_change(
+                workspace,
+                {
+                    "changeId": "client-change-session-1",
+                    "title": "Session one change",
+                    "summary": "Change copy for session one.",
+                },
+                workflow_ir=None,
+                session_id="session-1",
+            )
+            second = write_pending_change(
+                workspace,
+                {
+                    "changeId": "client-change-session-2",
+                    "title": "Session two change",
+                    "summary": "Change copy for session two.",
+                },
+                workflow_ir=None,
+                session_id="session-2",
+            )
+            handler_cls = self._handler_cls(workspace)
+
+            listing = _FakeHandler(handler_cls)
+            handler_cls.handle_api_get(listing, urlparse("/api/pending?token=token&sessionId=session-1"))
+
+            self.assertEqual(listing.response["status"], 200)
+            self.assertEqual([item["id"] for item in listing.response["payload"]["pending"]], [first["id"]])
+
+            wrong_detail = _FakeHandler(handler_cls)
+            handler_cls.handle_api_get(
+                wrong_detail,
+                urlparse(f"/api/pending/{second['id']}?token=token&sessionId=session-1"),
+            )
+
+            self.assertEqual(wrong_detail.response["status"], 404)
+
+            wrong_status = _FakeHandler(
+                handler_cls,
+                {"id": second["id"], "status": IN_PROGRESS, "sessionId": "session-1"},
+            )
+            handler_cls.handle_api_post(wrong_status, urlparse("/api/status?token=token"))
+
+            self.assertEqual(wrong_status.response["status"], 400)
+            self.assertIn("not found for session", wrong_status.response["payload"]["error"])
+
+    def test_status_route_marks_verified_with_evidence(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            pending = write_pending_change(
+                workspace,
+                {
+                    "changeId": "client-change-verified",
+                    "title": "Verify delivery copy",
+                    "summary": "Make sure the change was tested.",
+                },
+                workflow_ir=None,
+                session_id="session-1",
+            )
+            handler_cls = self._handler_cls(workspace)
+            evidence = {
+                "actor": "codex",
+                "at": "2026-06-19T00:00:00Z",
+                "check": "python3.9 -m unittest tests.test_server_pending_api",
+                "result": "passed",
+            }
+            fake = _FakeHandler(
+                handler_cls,
+                {
+                    "id": pending["id"],
+                    "status": VERIFIED,
+                    "note": "Verified in the API test.",
+                    "evidence": evidence,
+                    "sessionId": "session-1",
+                },
+            )
+
+            handler_cls.handle_api_post(fake, urlparse("/api/status?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            updated = fake.response["payload"]["pending"]
+            self.assertEqual(updated["status"], VERIFIED)
+            self.assertEqual(updated["verification"], evidence)
+            self.assertEqual(updated["history"][-1]["evidence"], evidence)
+
+    def test_status_route_rejects_verified_without_evidence(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            pending = write_pending_change(
+                workspace,
+                {
+                    "changeId": "client-change-no-evidence",
+                    "title": "Verify without evidence",
+                    "summary": "This should fail.",
+                },
+                workflow_ir=None,
+            )
+            handler_cls = self._handler_cls(workspace)
+            fake = _FakeHandler(handler_cls, {"id": pending["id"], "status": VERIFIED})
+
+            handler_cls.handle_api_post(fake, urlparse("/api/status?token=token"))
+
+            self.assertEqual(fake.response["status"], 400)
+            self.assertIn("verified status requires evidence", fake.response["payload"]["error"])
 
 
 if __name__ == "__main__":

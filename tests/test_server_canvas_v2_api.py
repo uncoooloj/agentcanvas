@@ -272,6 +272,41 @@ class ServerCanvasV2ApiTests(unittest.TestCase):
             self.assertEqual(payload["error"]["code"], "UNREACHABLE_NODE")
             self.assertIn("repair_hint", payload["error"])
 
+    def test_canvas_validate_returns_structured_error_without_v2_canvas(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            (workspace / ".agentcanvas").mkdir()
+            (workspace / ".agentcanvas" / "canvas.ir.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "agentcanvas.behavior_canvas.wrapper.v1",
+                        "canvas": {
+                            "appName": "Legacy app",
+                            "journeys": [],
+                        },
+                        "mapping": {
+                            "status": "agent_authored",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeGetHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/canvas/validate?token=token"))
+
+            self.assertEqual(fake.response["status"], 400)
+            payload = fake.response["payload"]
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["error"]["code"], "CANVAS_V2_NOT_AVAILABLE")
+            self.assertIn("suggested_command", payload["error"]["details"])
+
     def test_canvas_restore_restores_snapshot_as_new_revision(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = self._workspace(temp_root)

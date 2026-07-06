@@ -847,14 +847,38 @@ def make_handler(
                 mode = parse_qs(parsed.query).get("mode", ["authoring"])[0]
                 try:
                     canvas = load_or_build_canvas(workspace, demo_mode=demo_mode)
-                    result = validate_canvas_v2(canvas["canvas_v2"], mode=mode)
+                    canvas_v2 = canvas.get("canvas_v2")
+                    if not isinstance(canvas_v2, dict):
+                        self.write_json(
+                            CanvasStoreError(
+                                "CANVAS_V2_NOT_AVAILABLE",
+                                "canvas validation requires a native v2 canvas document",
+                                details={
+                                    "suggested_command": (
+                                        "agentcanvas canvas migrate --workspace <workspace> --apply"
+                                    )
+                                },
+                            ).to_dict(),
+                            status=HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    result = validate_canvas_v2(canvas_v2, mode=mode)
                     self.write_json({"ok": True, "revision": canvas.get("revision"), **result})
                 except CanvasStoreError as exc:
                     self.write_json(exc.to_dict(), status=canvas_store_error_status(exc))
                 return
 
             if parsed.path == "/api/pending":
-                self.write_json({"ok": True, "pending": list_pending(workspace, summary=True)})
+                self.write_json(
+                    {
+                        "ok": True,
+                        "pending": list_pending(
+                            workspace,
+                            summary=True,
+                            session_id=self.request_session_id(parsed),
+                        ),
+                    }
+                )
                 return
 
             pending_id = AgentCanvasHandler.pending_request_id(self, parsed.path)
@@ -864,6 +888,7 @@ def make_handler(
                         workspace,
                         pending_id,
                         since=parse_qs(parsed.query).get("since", [None])[0],
+                        session_id=self.request_session_id(parsed),
                     )
                 except FileNotFoundError as exc:
                     self.write_json(
@@ -1094,12 +1119,25 @@ def make_handler(
                         status=HTTPStatus.BAD_REQUEST,
                     )
                     return
+                evidence = payload.get("evidence")
+                if evidence is None:
+                    evidence = payload.get("verification")
+                if evidence is not None and not isinstance(evidence, dict):
+                    self.write_json(
+                        {"ok": False, "error": "evidence must be a JSON object"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                actor = payload.get("actor")
                 try:
                     pending = update_pending_status(
                         workspace,
                         pending_id,
                         status,
                         note=note if isinstance(note, str) else None,
+                        actor=actor.strip() if isinstance(actor, str) and actor.strip() else assistant_id,
+                        evidence=evidence,
+                        session_id=self.request_session_id(parsed, payload),
                     )
                 except (FileNotFoundError, ValueError) as exc:
                     self.write_json(

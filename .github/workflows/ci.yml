@@ -104,13 +104,7 @@ jobs:
         run: npm ci --prefix frontend
 
       - name: Run release verifier
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            python scripts/verify_release.py
-          else
-            python scripts/verify_release.py --skip-runtime-smoke
-          fi
+        run: python scripts/verify_release.py
 
   audits:
     name: Warning-only audits

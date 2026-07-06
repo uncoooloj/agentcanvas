@@ -50,6 +50,7 @@ from .canvas_v2 import (
     validate_canvas_v2,
 )
 from .projection import ProjectionValidationError, materialize_canvas_model
+from .progress import ProgressError, write_progress, progress_status
 from .server import run_server
 from .supervisor import SupervisorError, ensure_server_up, stop_server
 
@@ -119,6 +120,22 @@ def build_parser() -> argparse.ArgumentParser:
     health_parser.add_argument("path", nargs="?", help="workspace path to inspect")
     health_parser.add_argument("--workspace", help="workspace path to inspect")
     health_parser.set_defaults(func=cmd_health)
+
+    progress_parser = subparsers.add_parser(
+        "progress",
+        help="write durable workspace mapping progress",
+    )
+    progress_parser.add_argument("path", nargs="?", help="workspace path to update")
+    progress_parser.add_argument("--workspace", help="workspace path to update")
+    progress_parser.add_argument(
+        "--stage",
+        required=True,
+        help="progress stage",
+    )
+    progress_parser.add_argument("--message", required=True, help="short progress message")
+    progress_parser.add_argument("--current", help="current progress count")
+    progress_parser.add_argument("--total", help="total progress count")
+    progress_parser.set_defaults(func=cmd_progress)
 
     mcp_parser = subparsers.add_parser("mcp", help="run the AgentCanvas MCP server over stdio")
     mcp_parser.add_argument("path", nargs="?", help="default workspace path for MCP tools")
@@ -349,6 +366,25 @@ def cmd_pending(args: argparse.Namespace) -> int:
 def cmd_health(args: argparse.Namespace) -> int:
     workspace = resolve_workspace(selected_workspace(args))
     print(format_map_health(map_health(workspace)))
+    return 0
+
+
+def cmd_progress(args: argparse.Namespace) -> int:
+    workspace = resolve_workspace(selected_workspace(args))
+    try:
+        write_progress(
+            workspace,
+            stage=args.stage,
+            message=args.message,
+            current=getattr(args, "current", None),
+            total=getattr(args, "total", None),
+        )
+        result = progress_status(workspace)
+    except ProgressError as exc:
+        print(json.dumps(exc.to_dict(), indent=2, sort_keys=True), file=sys.stderr)
+        return 1
+
+    print(json.dumps({"ok": True, "progress": result}, indent=2, sort_keys=True))
     return 0
 
 

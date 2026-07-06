@@ -55,6 +55,7 @@ from .core.behavior_canvas import (
     canvas_source_metadata,
 )
 from .core.workspace_profile import infer_workspace_profile
+from .progress import ProgressError, progress_status, safe_progress_status
 
 
 # Known coding-agent platforms that may launch AgentCanvas, with human labels.
@@ -862,6 +863,13 @@ def make_handler(
                 self.write_json({"ok": True, "health": map_health(workspace)})
                 return
 
+            if parsed.path == "/api/progress":
+                try:
+                    self.write_json({"ok": True, "progress": progress_status(workspace)})
+                except ProgressError as exc:
+                    self.write_json(exc.to_dict(), status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
             if parsed.path == "/api/context":
                 request_session_id = self.request_session_id(parsed)
                 request_demo_mode = self.request_demo_mode(parsed)
@@ -909,6 +917,7 @@ def make_handler(
                             "demoFixture": source["demoFixture"],
                             "source": source,
                             "sessionId": request_session_id,
+                            "progress": safe_progress_status(workspace),
                             "handoff": {
                                 "schema": "agentcanvas.handoff.v1",
                                 "canvasMap": canvas_handoff,

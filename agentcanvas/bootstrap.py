@@ -7,11 +7,26 @@ import shlex
 from importlib import resources
 from pathlib import Path
 from string import Template
+from typing import Dict, List
 
 
 DEFAULT_AGENT_LABEL = "the calling coding agent"
 LANDING_AGENT_LABEL = "your AI coding agent"
 LANDING_WORKSPACE = Path("./your-project")
+BOOTSTRAP_PERMISSION_PROMPTS = [
+    {
+        "label": "Install",
+        "reason": "Only if AgentCanvas is not already available.",
+    },
+    {
+        "label": "Run",
+        "reason": "Starts the localhost AgentCanvas server for this workspace.",
+    },
+    {
+        "label": "Connect",
+        "reason": "Only when your agent uses the optional MCP bridge.",
+    },
+]
 SUPPORTED_SETUP_AGENTS = {"claude-code", "codex", "cursor", "antigravity", "generic", "auto"}
 
 
@@ -48,6 +63,12 @@ def build_landing_bootstrap_prompt() -> str:
         canvas_relative_path=".agentcanvas/canvas.ir.json",
         canvas_path=LANDING_WORKSPACE / ".agentcanvas" / "canvas.ir.json",
     )
+
+
+def build_bootstrap_permission_prompts() -> List[Dict[str, str]]:
+    """Return the expected first-run permission prompts for website narration."""
+
+    return [dict(item) for item in BOOTSTRAP_PERMISSION_PROMPTS]
 
 
 def _clean_agent_label(agent_label: str | None) -> str:

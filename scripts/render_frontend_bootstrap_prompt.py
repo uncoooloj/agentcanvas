@@ -12,7 +12,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from agentcanvas.bootstrap import build_landing_bootstrap_prompt  # noqa: E402
+from agentcanvas.bootstrap import build_bootstrap_permission_prompts, build_landing_bootstrap_prompt  # noqa: E402
 
 DEFAULT_OUTPUT = PROJECT_ROOT / "frontend" / "src" / "lib" / "landingBootstrapPrompt.ts"
 SOURCE_TEMPLATE = "agentcanvas/templates/bootstrap_prompt.md"
@@ -24,6 +24,8 @@ def render_typescript(prompt: str) -> str:
         "// Do not edit by hand; update agentcanvas/templates/bootstrap_prompt.md instead.\n\n"
         f"export const LANDING_BOOTSTRAP_PROMPT_SOURCE = {json.dumps(SOURCE_TEMPLATE)}\n"
         f"export const LANDING_BOOTSTRAP_PROMPT = {json.dumps(prompt, ensure_ascii=True)}\n"
+        "export const LANDING_BOOTSTRAP_PERMISSION_PROMPTS = "
+        f"{json.dumps(build_bootstrap_permission_prompts(), ensure_ascii=True)}\n"
     )
 
 

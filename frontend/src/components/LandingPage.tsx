@@ -17,7 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { BrandMark } from "@/components/BrandMark"
-import { LANDING_BOOTSTRAP_PROMPT } from "@/lib/landingBootstrapPrompt"
+import { LANDING_BOOTSTRAP_PERMISSION_PROMPTS, LANDING_BOOTSTRAP_PROMPT } from "@/lib/landingBootstrapPrompt"
 import { cn } from "@/lib/utils"
 
 export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
@@ -549,6 +549,14 @@ function AgentPrompt() {
         Paste this into your AI coding agent and it'll launch AgentCanvas and pick up the changes
         you make. No setup from you.
       </p>
+      <div className="mx-auto mt-5 grid max-w-2xl gap-2 text-left sm:grid-cols-3">
+        {LANDING_BOOTSTRAP_PERMISSION_PROMPTS.map((prompt) => (
+          <div key={prompt.label} className="rounded-lg border bg-card px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-clay">{prompt.label}</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{prompt.reason}</p>
+          </div>
+        ))}
+      </div>
       <CopyBox text={LANDING_BOOTSTRAP_PROMPT} className="mt-8 text-left" />
     </section>
   )

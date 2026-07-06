@@ -3,7 +3,7 @@ import re
 import unittest
 from pathlib import Path
 
-from agentcanvas.bootstrap import build_landing_bootstrap_prompt
+from agentcanvas.bootstrap import build_bootstrap_permission_prompts, build_landing_bootstrap_prompt
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -25,10 +25,22 @@ class FrontendBootstrapPromptTests(unittest.TestCase):
             source,
         )
 
+    def test_landing_permission_prompt_metadata_matches_shared_budget(self):
+        source = FRONTEND_PROMPT.read_text(encoding="utf-8")
+
+        prompts_match = re.search(r"LANDING_BOOTSTRAP_PERMISSION_PROMPTS = (\[.*\])", source)
+        self.assertIsNotNone(prompts_match)
+        prompts = json.loads(prompts_match.group(1))
+
+        self.assertEqual(build_bootstrap_permission_prompts(), prompts)
+        self.assertLessEqual(len(prompts), 3)
+        self.assertEqual(["Install", "Run", "Connect"], [prompt["label"] for prompt in prompts])
+
     def test_landing_page_does_not_inline_a_stale_agent_prompt(self):
         landing = LANDING_PAGE.read_text(encoding="utf-8")
 
         self.assertIn("LANDING_BOOTSTRAP_PROMPT", landing)
+        self.assertIn("LANDING_BOOTSTRAP_PERMISSION_PROMPTS.map", landing)
         self.assertNotIn("const AGENT_PROMPT", landing)
         self.assertNotIn("agentcanvas start --workspace", landing)
 

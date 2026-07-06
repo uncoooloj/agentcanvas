@@ -10,13 +10,15 @@ The stable file contract is:
 <workspace>/.agentcanvas/canvas.ir.json
 <workspace>/.agentcanvas/pending/*.md
 <workspace>/.agentcanvas/pending/*.json
+<workspace>/.agentcanvas/pending/*.conversation.jsonl
 ```
 
 `workflow.ir.json` is raw repo evidence. `canvas.ir.json` is the stored
 revisioned browser canvas. Agents should update it through
 `agentcanvas canvas apply` so revision checks, validation, history, pending
 refs, and automatic legacy migration run before the browser reads it. Pending
-files are for explicit source-code implementation requests.
+Markdown and JSON files are for explicit source-code implementation requests.
+Conversation JSONL files store questions, answers, and notes for those requests.
 
 An adapter should do two small jobs:
 
@@ -70,6 +72,7 @@ Current endpoints:
 
 - `GET /api/context`
 - `GET /api/graph`
+- `GET /api/canvas/validate?mode=authoring|strict`
 - `GET /api/pending`
 - `POST /api/changes`
 - `POST /api/status`

@@ -35,6 +35,9 @@ For an implementation request:
 6. Re-index the workspace.
 7. Mark the request `done` only after the change is verified.
 
+Clarifying questions, answers, and agent notes are stored beside the request in
+`.agentcanvas/pending/*.conversation.jsonl`.
+
 ## Before Publishing
 
 Run the release verifier before publishing to GitHub, PyPI, or Cloudflare:

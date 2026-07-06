@@ -229,6 +229,7 @@ AgentCanvas writes all local state under the selected repo:
 <workspace>/.agentcanvas/canvas.ir.json
 <workspace>/.agentcanvas/pending/*.md
 <workspace>/.agentcanvas/pending/*.json
+<workspace>/.agentcanvas/pending/*.conversation.jsonl
 ```
 
 `workflow.ir.json` is the raw index and evidence grounding file.
@@ -236,7 +237,8 @@ AgentCanvas writes all local state under the selected repo:
 through `agentcanvas canvas apply` so revision checks, validation, history,
 pending references, and automatic legacy migration run before the browser reads
 it. Pending Markdown and JSON files are for implementation requests, not normal
-canvas-only edits.
+canvas-only edits. Conversation JSONL files store clarifying questions, user
+answers, and agent notes for those pending requests.
 
 The invoking agent authors the display canvas. In plain English:
 

@@ -64,6 +64,20 @@ class ReleaseVerifierTests(unittest.TestCase):
         self.assertIn("MCP tools can read and update AgentCanvas state", readme)
         self.assertNotIn("**MCP**: planned", readme)
 
+    def test_public_docs_describe_pending_conversation_logs(self):
+        paths = [
+            PROJECT_ROOT / "README.md",
+            PROJECT_ROOT / "docs" / "adapters.md",
+            PROJECT_ROOT / "docs" / "publishing.md",
+        ]
+
+        for path in paths:
+            with self.subTest(path=path.name):
+                self.assertIn(
+                    ".agentcanvas/pending/*.conversation.jsonl",
+                    path.read_text(encoding="utf-8"),
+                )
+
     def test_phase5_issue_templates_exist(self):
         template_dir = PROJECT_ROOT / ".github" / "ISSUE_TEMPLATE"
 

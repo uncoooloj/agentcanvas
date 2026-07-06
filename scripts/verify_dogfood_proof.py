@@ -15,6 +15,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "agentcanvas.dogfood_proof.v1"
 CHECKLIST_STATUSES = {"passed", "failed", "blocked", "not_applicable"}
 PENDING_STATUSES = {"verified", "done"}
+HASH_SKIP_DIRS = {
+    ".agentcanvas",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".turbo",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "target",
+}
+HASH_SKIP_SUFFIXES = {".pyc", ".pyo"}
 
 
 class DogfoodProofError(ValueError):
@@ -26,7 +45,9 @@ def stable_directory_sha256(root: Path) -> str:
         raise DogfoodProofError(f"workspace fixture path does not exist or is not a directory: {root}")
     digest = hashlib.sha256()
     for path in sorted(item for item in root.rglob("*") if item.is_file()):
-        if ".agentcanvas" in path.parts:
+        if HASH_SKIP_DIRS.intersection(path.relative_to(root).parts):
+            continue
+        if path.suffix in HASH_SKIP_SUFFIXES:
             continue
         relative = path.relative_to(root).as_posix()
         digest.update(relative.encode("utf-8"))

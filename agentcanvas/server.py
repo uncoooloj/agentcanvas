@@ -360,6 +360,11 @@ def load_or_build_canvas(
     return with_workspace_profile(workspace, canvas)
 
 
+def include_reindex_graph(parsed) -> bool:
+    values = parse_qs(parsed.query).get("includeGraph", [])
+    return any(str(value).lower() in {"1", "true", "yes"} for value in values)
+
+
 def is_canvas_v2_document(canvas: Dict[str, Any]) -> bool:
     return canvas.get("schema") == CANVAS_V2_SCHEMA
 
@@ -1014,15 +1019,14 @@ def make_handler(
                         demo_fallback=source["demoFallback"],
                     )
                     save_canvas_ir(workspace, canvas)
-                self.write_json(
-                    {
-                        "ok": True,
-                        "graph": graph,
-                        "canvas": canvas.get("canvas"),
-                        "mapping": canvas.get("mapping"),
-                        "summary": graph["summary"],
-                    }
-                )
+                payload = {
+                    "ok": True,
+                    **with_workspace_profile(workspace, canvas),
+                    "summary": graph["summary"],
+                }
+                if include_reindex_graph(parsed):
+                    payload["graph"] = graph
+                self.write_json(payload)
                 return
 
             if parsed.path == "/api/progress":

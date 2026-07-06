@@ -1,19 +1,30 @@
 import { useMemo, useState, type ComponentType } from "react"
-import { ChevronDown, CornerDownRight, Pencil, Plus, Split, Trash2, X } from "lucide-react"
+import { ChevronDown, CornerDownRight, FileText, Pencil, Plus, ShieldCheck, Split, Trash2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ROLE, RuleRole } from "@/lib/roles"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ChangeKind, useChanges, type ChangeEntry } from "@/lib/changeset"
-import { CanvasV2NodeKind, FlowAction, FlowNodeKind, StepRole, type FlowNode } from "@/lib/types"
+import {
+  CanvasV2ConfidenceLevel,
+  CanvasV2NodeKind,
+  CanvasV2Status,
+  FlowAction,
+  FlowNodeKind,
+  StepRole,
+  type CanvasV2Node,
+  type FlowNode,
+} from "@/lib/types"
 
 interface Props {
   node: FlowNode | null
+  nativeNode?: CanvasV2Node | null
   onAction: (action: FlowAction) => void
   onModifyChange: (change: ChangeEntry) => void
   onCancelChange: (id: string) => void
 }
 
-export function Inspector({ node, onAction, onModifyChange, onCancelChange }: Props) {
+export function Inspector({ node, nativeNode, onAction, onModifyChange, onCancelChange }: Props) {
   const [showTech, setShowTech] = useState(false)
   const changes = useChanges((s) => s.changes)
   const queuedNext = useChanges((s) => s.queuedNext)
@@ -34,6 +45,12 @@ export function Inspector({ node, onAction, onModifyChange, onCancelChange }: Pr
   const canAddAfter = canAddAfterNative(nativeKind)
   const canAddRule = canAddRuleNative(nativeKind)
   const hasTech = Boolean(node.tech?.refs?.length || node.native)
+  const hasEvidence = Boolean(
+    nativeNode?.evidenceRefs.length ||
+      nativeNode?.status ||
+      nativeNode?.confidence?.level ||
+      nativeNode?.confidence?.reason
+  )
 
   return (
     <div className="flex h-full flex-col">
@@ -64,6 +81,8 @@ export function Inspector({ node, onAction, onModifyChange, onCancelChange }: Pr
           </p>
         )}
       </div>
+
+      {hasEvidence && nativeNode && <EvidencePanel node={nativeNode} />}
 
       <div className="flex flex-col gap-2 px-5 py-4">
         <p className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -144,6 +163,72 @@ export function Inspector({ node, onAction, onModifyChange, onCancelChange }: Pr
       ) : null}
     </div>
   )
+}
+
+function EvidencePanel({ node }: { node: CanvasV2Node }) {
+  return (
+    <div className="border-b bg-secondary/25 px-5 py-4">
+      <div className="flex items-center gap-2">
+        <ShieldCheck className="size-3.5 text-muted-foreground" />
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Why this is here
+        </p>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {node.status && (
+          <Badge variant={node.status === CanvasV2Status.Stale ? "outline" : "secondary"}>
+            {statusLabel(node.status)}
+          </Badge>
+        )}
+        {node.confidence?.level && (
+          <Badge variant="outline">{confidenceLabel(node.confidence.level)}</Badge>
+        )}
+      </div>
+      {node.confidence?.reason && (
+        <p className="mt-2 text-sm leading-snug text-muted-foreground">{node.confidence.reason}</p>
+      )}
+      {node.evidenceRefs.length > 0 ? (
+        <div className="mt-3 flex flex-col gap-1.5">
+          <p className="text-xs text-muted-foreground">Project references AgentCanvas used:</p>
+          {node.evidenceRefs.map((ref) => (
+            <div
+              key={ref}
+              className="flex min-w-0 items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs text-muted-foreground"
+            >
+              <FileText className="size-3.5 shrink-0" />
+              <span className="truncate font-mono">{ref}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-sm text-muted-foreground">No project citation was saved for this step yet.</p>
+      )}
+    </div>
+  )
+}
+
+function statusLabel(status: CanvasV2Status): string {
+  switch (status) {
+    case CanvasV2Status.Verified:
+      return "Verified from the project"
+    case CanvasV2Status.Inferred:
+      return "Inferred"
+    case CanvasV2Status.Proposed:
+      return "Not built yet"
+    case CanvasV2Status.Stale:
+      return "May be out of date"
+  }
+}
+
+function confidenceLabel(level: CanvasV2ConfidenceLevel): string {
+  switch (level) {
+    case CanvasV2ConfidenceLevel.High:
+      return "High confidence"
+    case CanvasV2ConfidenceLevel.Medium:
+      return "Medium confidence"
+    case CanvasV2ConfidenceLevel.Low:
+      return "Low confidence"
+  }
 }
 
 function InspectorAction({

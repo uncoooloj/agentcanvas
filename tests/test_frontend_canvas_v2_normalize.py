@@ -201,6 +201,17 @@ def _node_script():
                 Error: "error",
                 Async: "async",
               },
+              CanvasV2Status: {
+                Verified: "verified",
+                Inferred: "inferred",
+                Proposed: "proposed",
+                Stale: "stale",
+              },
+              CanvasV2ConfidenceLevel: {
+                Low: "low",
+                Medium: "medium",
+                High: "high",
+              },
               FlowNodeKind: {
                 Step: "step",
                 Branch: "branch",
@@ -449,6 +460,43 @@ def _node_script():
             checked.push(item.name);
           }
           checked.sort();
+          const evidenceResponse = normalizeCanvasResponse({
+            ok: true,
+            revision: 7,
+            canvas: {
+              app: { name: "Evidence app" },
+              journeys: [{ id: "flow:evidence", title: "Evidence flow", nodes: [{ kind: "step", id: "display-node", role: "do", text: "Mapped step" }] }],
+            },
+            canvas_v2: {
+              schema: "agentcanvas.canvas.v2",
+              revision: 7,
+              app: { name: "Evidence app", summary: "", is_demo: false },
+              flows: [{
+                id: "flow:evidence",
+                title: "Evidence flow",
+                summary: "",
+                nodes: [{
+                  id: "n:evidence:step",
+                  kind: "Do",
+                  title: "Mapped step",
+                  evidence_refs: ["src/evidence.ts:12"],
+                  status: "verified",
+                  confidence: { level: "high", reason: "Found in the route handler." },
+                }],
+                edges: [],
+                evidence_refs: [],
+              }],
+            },
+          });
+          const evidenceNode = evidenceResponse.canvasV2.flows[0].nodes[0];
+          if (
+            evidenceNode.status !== "verified" ||
+            evidenceNode.confidence?.level !== "high" ||
+            evidenceNode.confidence?.reason !== "Found in the route handler." ||
+            evidenceNode.evidenceRefs[0] !== "src/evidence.ts:12"
+          ) {
+            throw new Error("v2 evidence status/confidence was not preserved");
+          }
           const clients = await runClientChecks(localModule.exports, context);
           process.stdout.write(JSON.stringify({ checked, clients }));
         })().catch((error) => {

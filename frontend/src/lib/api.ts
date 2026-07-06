@@ -4,9 +4,11 @@ import {
   CanvasSourceReason,
   CanvasSourceStatus,
   CanvasStepKind,
+  CanvasV2ConfidenceLevel,
   CanvasV2EdgeKind,
   CanvasV2NodeKind,
   CanvasV2Schema,
+  CanvasV2Status,
   ConversationRole,
   ConversationTurnKind,
   FlowNodeKind,
@@ -26,6 +28,7 @@ import {
   type CanvasMapping,
   type CanvasRestoreRequest,
   type CanvasRestoreResult,
+  type CanvasV2Confidence,
   type CanvasSourceMetadata,
   type CanvasV2Document,
   type CanvasV2Edge,
@@ -519,6 +522,7 @@ function normalizeCanvasV2Flow(value: unknown): CanvasV2Flow | null {
       ? flow.edges.map(normalizeCanvasV2Edge).filter((edge): edge is CanvasV2Edge => Boolean(edge))
       : [],
     evidenceRefs: stringList(flow.evidence_refs || flow.evidenceRefs),
+    confidence: normalizeCanvasV2Confidence(flow.confidence),
     metadata: recordValue(flow.metadata),
   }
 }
@@ -533,6 +537,8 @@ function normalizeCanvasV2Node(value: unknown): CanvasV2Node | null {
     title: stringValue(node.title) || stringValue(node.label) || id,
     summary: stringValue(node.summary),
     evidenceRefs: stringList(node.evidence_refs || node.evidenceRefs),
+    confidence: normalizeCanvasV2Confidence(node.confidence),
+    status: normalizeCanvasV2Status(node.status),
     flowRef: stringValue(node.flow_ref) || stringValue(node.flowRef),
     metadata: recordValue(node.metadata),
   }
@@ -597,6 +603,8 @@ function normalizeCanvasHistoryFlowSummary(value: unknown): CanvasHistoryEntry["
 
 const CANVAS_V2_NODE_KINDS = new Set<string>(Object.values(CanvasV2NodeKind))
 const CANVAS_V2_EDGE_KINDS = new Set<string>(Object.values(CanvasV2EdgeKind))
+const CANVAS_V2_STATUSES = new Set<string>(Object.values(CanvasV2Status))
+const CANVAS_V2_CONFIDENCE_LEVELS = new Set<string>(Object.values(CanvasV2ConfidenceLevel))
 
 function normalizeCanvasV2NodeKind(value: unknown): CanvasV2NodeKind {
   const kind = String(value || CanvasV2NodeKind.Do)
@@ -606,6 +614,24 @@ function normalizeCanvasV2NodeKind(value: unknown): CanvasV2NodeKind {
 function normalizeCanvasV2EdgeKind(value: unknown): CanvasV2EdgeKind {
   const kind = String(value || CanvasV2EdgeKind.Normal)
   return CANVAS_V2_EDGE_KINDS.has(kind) ? (kind as CanvasV2EdgeKind) : CanvasV2EdgeKind.Normal
+}
+
+function normalizeCanvasV2Status(value: unknown): CanvasV2Status | undefined {
+  const status = stringValue(value)
+  return status && CANVAS_V2_STATUSES.has(status) ? (status as CanvasV2Status) : undefined
+}
+
+function normalizeCanvasV2Confidence(value: unknown): CanvasV2Confidence | undefined {
+  const confidence = recordValue(value)
+  if (!confidence) return undefined
+  const level = stringValue(confidence.level)
+  const normalized: CanvasV2Confidence = {}
+  if (level && CANVAS_V2_CONFIDENCE_LEVELS.has(level)) {
+    normalized.level = level as CanvasV2ConfidenceLevel
+  }
+  const reason = stringValue(confidence.reason)
+  if (reason) normalized.reason = reason
+  return normalized.level || normalized.reason ? normalized : undefined
 }
 
 const CANVAS_MAPPING_MODES = new Set<string>(Object.values(CanvasMappingMode))

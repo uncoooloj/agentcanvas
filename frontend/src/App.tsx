@@ -352,6 +352,12 @@ export default function App() {
     () => (activeJourney && selectedId ? findNode(activeJourney.nodes, selectedId) : null),
     [activeJourney, selectedId]
   )
+  const selectedNativeNode: CanvasV2Node | null = useMemo(() => {
+    if (!canvasV2 || !selectedNode?.native) return null
+    const flowId = selectedNode.native.flowId || activeJourney?.id
+    if (!flowId) return null
+    return findCanvasV2Node(canvasV2, flowId, selectedNode.native.nodeId)
+  }, [activeJourney?.id, canvasV2, selectedNode])
 
   function openAction(action: FlowAction, node: FlowNode) {
     if (!activeJourney || locked) return
@@ -627,6 +633,7 @@ export default function App() {
         {inJourney && selectedNode && (
           <StepDetailsPanel
             node={selectedNode}
+            nativeNode={selectedNativeNode}
             className="absolute bottom-24 right-4 top-4 z-30 hidden w-[340px] lg:flex"
             onClose={() => setSelectedId(null)}
             onAction={(a) => selectedNode && openAction(a, selectedNode)}
@@ -640,6 +647,7 @@ export default function App() {
           {inJourney && selectedNode && (
             <StepDetailsPanel
               node={selectedNode}
+              nativeNode={selectedNativeNode}
               className="flex max-h-[52vh] w-full lg:hidden"
               onClose={() => setSelectedId(null)}
               onAction={(a) => selectedNode && openAction(a, selectedNode)}
@@ -1101,6 +1109,7 @@ function WorkspaceNotice({ message }: { message: string }) {
 
 function StepDetailsPanel({
   node,
+  nativeNode,
   className,
   onClose,
   onAction,
@@ -1108,6 +1117,7 @@ function StepDetailsPanel({
   onCancelChange,
 }: {
   node: FlowNode
+  nativeNode?: CanvasV2Node | null
   className?: string
   onClose: () => void
   onAction: (action: FlowAction) => void
@@ -1137,6 +1147,7 @@ function StepDetailsPanel({
       <div className="min-h-0 flex-1 overflow-auto">
         <Inspector
           node={node}
+          nativeNode={nativeNode}
           onAction={onAction}
           onModifyChange={onModifyChange}
           onCancelChange={onCancelChange}

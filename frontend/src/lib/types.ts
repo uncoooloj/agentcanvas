@@ -146,12 +146,32 @@ export enum CanvasV2EdgeKind {
   Async = "async",
 }
 
+export enum CanvasV2Status {
+  Verified = "verified",
+  Inferred = "inferred",
+  Proposed = "proposed",
+  Stale = "stale",
+}
+
+export enum CanvasV2ConfidenceLevel {
+  Low = "low",
+  Medium = "medium",
+  High = "high",
+}
+
+export interface CanvasV2Confidence {
+  level?: CanvasV2ConfidenceLevel
+  reason?: string
+}
+
 export interface CanvasV2Node {
   id: string
   kind: CanvasV2NodeKind
   title: string
   summary?: string
   evidenceRefs: string[]
+  confidence?: CanvasV2Confidence
+  status?: CanvasV2Status
   flowRef?: string
   metadata?: Record<string, unknown>
 }
@@ -175,6 +195,7 @@ export interface CanvasV2Flow {
   nodes: CanvasV2Node[]
   edges: CanvasV2Edge[]
   evidenceRefs: string[]
+  confidence?: CanvasV2Confidence
   metadata?: Record<string, unknown>
 }
 

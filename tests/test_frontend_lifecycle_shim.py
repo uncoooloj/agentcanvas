@@ -96,6 +96,25 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("flowSummary", types)
         self.assertIn("normalizeCanvasHistoryFlowSummary", api)
 
+    def test_inspector_shows_native_v2_evidence_citations(self):
+        inspector = (PROJECT_ROOT / "frontend" / "src" / "components" / "Inspector.tsx").read_text(encoding="utf-8")
+        app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+        api = (PROJECT_ROOT / "frontend" / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
+        types = (PROJECT_ROOT / "frontend" / "src" / "lib" / "types.ts").read_text(encoding="utf-8")
+
+        self.assertIn("export enum CanvasV2Status", types)
+        self.assertIn("export enum CanvasV2ConfidenceLevel", types)
+        self.assertIn("normalizeCanvasV2Status", api)
+        self.assertIn("normalizeCanvasV2Confidence", api)
+        self.assertIn("selectedNativeNode", app)
+        self.assertIn("findCanvasV2Node", app)
+        self.assertIn("nativeNode={selectedNativeNode}", app)
+        self.assertIn("Why this is here", inspector)
+        self.assertIn("nativeNode?.evidenceRefs", inspector)
+        self.assertIn("statusLabel", inspector)
+        self.assertIn("confidenceLabel", inspector)
+        self.assertIn("Project references AgentCanvas used", inspector)
+
 
 if __name__ == "__main__":
     unittest.main()

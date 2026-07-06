@@ -55,6 +55,25 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("needsInputItems.map", overlay)
         self.assertIn("onAnswer(item.pendingId, answer)", overlay)
 
+    def test_text_edits_default_to_silent_canvas_map_apply(self):
+        edits = (PROJECT_ROOT / "frontend" / "src" / "lib" / "edits.ts").read_text(encoding="utf-8")
+        composer = (PROJECT_ROOT / "frontend" / "src" / "components" / "StepComposer.tsx").read_text(encoding="utf-8")
+        app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("export enum EditDelivery", edits)
+        self.assertIn('CanvasMap = "canvas_map"', edits)
+        self.assertIn('ImplementationRequest = "implementation_request"', edits)
+        self.assertIn("canSaveToMap", composer)
+        self.assertIn("Fix map", composer)
+        self.assertIn("Change app", composer)
+        self.assertIn("Save to map", composer)
+        self.assertIn("Ask agent", composer)
+        self.assertIn("EditDelivery.CanvasMap", composer)
+        self.assertIn("applyCanvasBatch", app)
+        self.assertIn("applyCanvasMapTextEdit", app)
+        self.assertIn('op: "upsert_node"', app)
+        self.assertIn("REVISION_CONFLICT", app)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -35,9 +35,9 @@ import {
   type ChangeEntry,
   type HandoffItem,
 } from "@/lib/changeset"
-import { ApiError, fetchCanvas, fetchMapHealth, isApiAuthExpired, reindexCanvas } from "@/lib/api"
+import { ApiError, applyCanvasBatch, fetchCanvas, fetchMapHealth, isApiAuthExpired, reindexCanvas } from "@/lib/api"
 import { AppContextMode, useAppContext, type AppContext } from "@/lib/appcontext"
-import type { EditRequest, StagedEdit } from "@/lib/edits"
+import { EditDelivery, type EditRequest, type StagedEdit } from "@/lib/edits"
 import { CANVAS_POLL_INTERVAL_MS, documentIsVisible, HEALTH_POLL_INTERVAL_MS } from "@/lib/polling"
 import {
   CanvasStateKind,
@@ -56,6 +56,7 @@ import {
   type CanvasSourceSummary,
   type CanvasV2Document,
   type CanvasV2Flow,
+  type CanvasV2Node,
   type FlowNode,
   type Journey,
   type MapHealth,
@@ -355,8 +356,29 @@ export default function App() {
     setSelectedId(null) // the action moves to the bottom composer; let the popover go
   }
 
-  function stageEdit(edit: StagedEdit) {
+  async function stageEdit(edit: StagedEdit) {
     if (!activeJourney) return
+    if (edit.delivery === EditDelivery.CanvasMap) {
+      setEditRequest(null)
+      try {
+        await applyCanvasMapTextEdit(edit, canvasV2, activeJourney.id)
+        await load()
+      } catch (error) {
+        if (error instanceof ApiError && error.code === "REVISION_CONFLICT") {
+          try {
+            const latest = await fetchCanvas()
+            await applyCanvasMapTextEdit(edit, latest.canvasV2 ?? null, activeJourney.id)
+            await load()
+            return
+          } catch {
+            setAuthNotice("The map changed before that edit could be saved. Refresh and try again.")
+            return
+          }
+        }
+        setAuthNotice("AgentCanvas could not save that map wording. Ask your agent to make the change instead.")
+      }
+      return
+    }
     const input = {
       action: edit.action,
       summary: edit.summary,
@@ -625,6 +647,43 @@ async function loadWorkspaceModel(refresh: boolean): Promise<WorkspaceModelResul
     revision: result.revision,
     canvasV2: result.canvasV2,
   }
+}
+
+async function applyCanvasMapTextEdit(
+  edit: StagedEdit,
+  document: CanvasV2Document | null,
+  fallbackFlowId: string
+) {
+  if (!document) throw new Error("No native canvas is available.")
+  if (edit.action !== FlowAction.Change && edit.action !== FlowAction.ChangeCondition) {
+    throw new Error("Only text edits can be saved directly to the canvas map.")
+  }
+  const flowId = edit.node.native?.flowId || fallbackFlowId
+  const nodeId = edit.node.native?.nodeId
+  const title = edit.text1?.trim()
+  if (!flowId || !nodeId || !title) throw new Error("This canvas step is missing a native node reference.")
+
+  const node = findCanvasV2Node(document, flowId, nodeId)
+  if (!node) throw new Error("That canvas step moved or no longer exists.")
+  await applyCanvasBatch({
+    base_revision: document.revision,
+    authored_by: "agentcanvas-web",
+    operations: [
+      {
+        op: "upsert_node",
+        flow: flowId,
+        node: {
+          ...node,
+          title,
+        },
+      },
+    ],
+  })
+}
+
+function findCanvasV2Node(document: CanvasV2Document, flowId: string, nodeId: string): CanvasV2Node | null {
+  const flow = document.flows.find((item) => item.id === flowId)
+  return flow?.nodes.find((node) => node.id === nodeId) ?? null
 }
 
 function emptyWorkspaceDetail(result: WorkspaceModelResult): string {

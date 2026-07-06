@@ -1,5 +1,10 @@
 import { FlowAction, FlowNodeKind, type FlowNode } from "./types"
 
+export enum EditDelivery {
+  CanvasMap = "canvas_map",
+  ImplementationRequest = "implementation_request",
+}
+
 export interface EditRequest {
   action: FlowAction
   node: FlowNode
@@ -15,6 +20,7 @@ export interface StagedEdit {
   journeyTitle: string
   summary: string
   changeId?: string
+  delivery?: EditDelivery
   text1?: string
   text2?: string
 }

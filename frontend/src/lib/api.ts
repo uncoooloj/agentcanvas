@@ -1,9 +1,14 @@
 import {
+  CanvasMappingMode,
+  CanvasSourceKind,
+  CanvasSourceReason,
+  CanvasSourceStatus,
   CanvasStepKind,
   CanvasV2EdgeKind,
   CanvasV2NodeKind,
   CanvasV2Schema,
   FlowNodeKind,
+  LegacyPendingStatus,
   MappingStageStatus,
   PendingStatus,
   StepRole,
@@ -16,7 +21,9 @@ import {
   type CanvasV2Flow,
   type CanvasV2NativeRef,
   type CanvasV2Node,
+  type ChangeKind,
   type CodeGraph,
+  type FlowAction,
   type FlowNode,
   type Journey,
   type MappingStage,
@@ -146,7 +153,7 @@ export function describeApiError(error: unknown): string {
 export interface ChangeRequest {
   changeId: string
   clientChangeId: string
-  kind: string
+  kind: ChangeKind
   title: string
   summary: string // the plain-language instruction, in the user's words
   journey?: string
@@ -158,7 +165,7 @@ export interface ChangeRequest {
   targetNativeNodeId?: string | null
   targetNativeKind?: string | null
   targetFlowId?: string | null
-  action?: string
+  action?: FlowAction
   text1?: string
   text2?: string
 }
@@ -242,10 +249,10 @@ function normalizeCanvasMapping(value: Record<string, unknown> | undefined): Can
   if (!value) return undefined
   return {
     schema: stringValue(value.schema),
-    status: stringValue(value.status),
-    mode: stringValue(value.mode),
-    primaryMode: stringValue(value.primaryMode) || stringValue(value.primary_mode),
-    fallbackMode: stringValue(value.fallbackMode) || stringValue(value.fallback_mode),
+    status: normalizeCanvasSourceStatus(value.status),
+    mode: normalizeCanvasMappingMode(value.mode),
+    primaryMode: normalizeCanvasMappingMode(value.primaryMode || value.primary_mode),
+    fallbackMode: normalizeCanvasMappingMode(value.fallbackMode || value.fallback_mode),
     flowCount: typeof value.flowCount === "number" ? value.flowCount : undefined,
     displayFlowCount: typeof value.displayFlowCount === "number" ? value.displayFlowCount : undefined,
     stale:
@@ -257,7 +264,7 @@ function normalizeCanvasMapping(value: Record<string, unknown> | undefined): Can
       stringLooksStale(value.cache_status),
     empty: booleanValue(value.empty),
     demoFallback: booleanValue(value.demoFallback) || booleanValue(value.demo_fallback),
-    cacheStatus: stringValue(value.cacheStatus) || stringValue(value.cache_status),
+    cacheStatus: normalizeCanvasSourceStatus(value.cacheStatus || value.cache_status),
     source: normalizeCanvasSource(value.source) || sourceFromLegacyFields(value),
     warnings: Array.isArray(value.warnings) ? value.warnings.map((item) => String(item)).filter(Boolean) : undefined,
     stages: Array.isArray(value.stages)
@@ -355,14 +362,39 @@ function normalizeCanvasV2EdgeKind(value: unknown): CanvasV2EdgeKind {
   return CANVAS_V2_EDGE_KINDS.has(kind) ? (kind as CanvasV2EdgeKind) : CanvasV2EdgeKind.Normal
 }
 
+const CANVAS_MAPPING_MODES = new Set<string>(Object.values(CanvasMappingMode))
+const CANVAS_SOURCE_KINDS = new Set<string>(Object.values(CanvasSourceKind))
+const CANVAS_SOURCE_STATUSES = new Set<string>(Object.values(CanvasSourceStatus))
+const CANVAS_SOURCE_REASONS = new Set<string>(Object.values(CanvasSourceReason))
+
+function normalizeCanvasMappingMode(value: unknown): CanvasMappingMode | undefined {
+  const mode = stringValue(value)
+  return mode && CANVAS_MAPPING_MODES.has(mode) ? (mode as CanvasMappingMode) : undefined
+}
+
+function normalizeCanvasSourceKind(value: unknown): CanvasSourceKind | undefined {
+  const kind = stringValue(value)
+  return kind && CANVAS_SOURCE_KINDS.has(kind) ? (kind as CanvasSourceKind) : undefined
+}
+
+function normalizeCanvasSourceStatus(value: unknown): CanvasSourceStatus | undefined {
+  const status = stringValue(value)
+  return status && CANVAS_SOURCE_STATUSES.has(status) ? (status as CanvasSourceStatus) : undefined
+}
+
+function normalizeCanvasSourceReason(value: unknown): CanvasSourceReason | undefined {
+  const reason = stringValue(value)
+  return reason && CANVAS_SOURCE_REASONS.has(reason) ? (reason as CanvasSourceReason) : undefined
+}
+
 function normalizeCanvasSource(value: unknown): CanvasSourceMetadata | undefined {
   const source = recordValue(value)
   if (!source) return undefined
   return {
-    kind: stringValue(source.kind),
-    status: stringValue(source.status),
+    kind: normalizeCanvasSourceKind(source.kind),
+    status: normalizeCanvasSourceStatus(source.status),
     label: stringValue(source.label),
-    reason: stringValue(source.reason),
+    reason: normalizeCanvasSourceReason(source.reason),
     flowCount: typeof source.flowCount === "number" ? source.flowCount : undefined,
     isDemoContent: booleanValue(source.isDemoContent) || booleanValue(source.is_demo_content),
     isFallback: booleanValue(source.isFallback) || booleanValue(source.is_fallback),
@@ -695,7 +727,7 @@ const PENDING_STATUSES = new Set<string>(Object.values(PendingStatus))
 function normalizePendingStatus(status: unknown): PendingStatus {
   const value = String(status || PendingStatus.Pending)
   if (PENDING_STATUSES.has(value)) return value as PendingStatus
-  return value === "queued" ? PendingStatus.Pending : PendingStatus.Rejected
+  return value === LegacyPendingStatus.Queued ? PendingStatus.Pending : PendingStatus.Rejected
 }
 
 function normalizeStatusHistory(value: unknown): PendingStatusHistoryEntry[] | undefined {

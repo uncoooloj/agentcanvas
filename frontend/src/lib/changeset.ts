@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { fetchPending, postChange, type ChangeRequest } from "./api"
 import {
+  ChangeKind,
   FlowAction,
   FlowNodeKind,
   PendingStatus,
@@ -12,14 +13,9 @@ import {
   type PendingItem,
   type StepNode,
 } from "./types"
+export { ChangeKind } from "./types"
 
 // ---- Change-set model ----
-
-export enum ChangeKind {
-  New = "new",
-  Edited = "edited",
-  Removing = "removing",
-}
 
 export interface ChangeEntry {
   id: string

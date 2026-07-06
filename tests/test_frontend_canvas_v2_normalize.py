@@ -75,6 +75,41 @@ def _node_script():
         const localRequire = (id) => {
           if (id === "./types") {
             return {
+              CanvasMappingMode: {
+                AgentAuthored: "agent-authored",
+                Deterministic: "deterministic",
+                Empty: "empty",
+                Heuristic: "heuristic",
+                HeuristicProjection: "heuristic-projection",
+                LlmAssisted: "llm-assisted",
+                V2Compat: "v2-compat",
+              },
+              CanvasSourceKind: {
+                AgentAuthored: "agent-authored",
+                HeuristicProjection: "heuristic-projection",
+                Demo: "demo",
+                DemoFallback: "demo-fallback",
+                Empty: "empty",
+                Workspace: "workspace",
+                StaleCache: "stale-cache",
+                NoFlow: "no-flow",
+                Loading: "loading",
+                Error: "error",
+                Unknown: "unknown",
+              },
+              CanvasSourceStatus: {
+                Ready: "ready",
+                Demo: "demo",
+                DemoFallback: "demo_fallback",
+                Empty: "empty",
+                StaleCache: "stale_cache",
+                Workspace: "workspace",
+              },
+              CanvasSourceReason: {
+                DemoWorkspace: "demo_workspace",
+                LaunchPageWithoutWorkspace: "launch_page_without_workspace",
+                RequestedDemoWorkspace: "requested_demo_workspace",
+              },
               CanvasStepKind: {
                 When: "when",
                 Do: "do",
@@ -132,6 +167,9 @@ def _node_script():
                 Done: "done",
                 Cancelled: "cancelled",
                 Rejected: "rejected",
+              },
+              LegacyPendingStatus: {
+                Queued: "queued",
               },
             };
           }

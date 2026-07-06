@@ -234,26 +234,26 @@ export enum JourneyActivity {
 
 export interface CanvasMapping {
   schema?: string
-  status?: string
-  mode?: string
-  primaryMode?: string
-  fallbackMode?: string
+  status?: CanvasSourceStatus
+  mode?: CanvasMappingMode
+  primaryMode?: CanvasMappingMode
+  fallbackMode?: CanvasMappingMode
   flowCount?: number
   displayFlowCount?: number
   stale?: boolean
   empty?: boolean
   demoFallback?: boolean
-  cacheStatus?: string
+  cacheStatus?: CanvasSourceStatus
   source?: CanvasSourceMetadata
   warnings?: string[]
   stages?: MappingStage[]
 }
 
 export interface CanvasSourceMetadata {
-  kind?: string
-  status?: string
+  kind?: CanvasSourceKind
+  status?: CanvasSourceStatus
   label?: string
-  reason?: string
+  reason?: CanvasSourceReason
   flowCount?: number
   isDemoContent?: boolean
   isFallback?: boolean
@@ -267,11 +267,27 @@ export enum CanvasSourceKind {
   Demo = "demo",
   DemoFallback = "demo-fallback",
   Empty = "empty",
+  Workspace = "workspace",
   StaleCache = "stale-cache",
   NoFlow = "no-flow",
   Loading = "loading",
   Error = "error",
   Unknown = "unknown",
+}
+
+export enum CanvasSourceStatus {
+  Ready = "ready",
+  Demo = "demo",
+  DemoFallback = "demo_fallback",
+  Empty = "empty",
+  StaleCache = "stale_cache",
+  Workspace = "workspace",
+}
+
+export enum CanvasSourceReason {
+  DemoWorkspace = "demo_workspace",
+  LaunchPageWithoutWorkspace = "launch_page_without_workspace",
+  RequestedDemoWorkspace = "requested_demo_workspace",
 }
 
 export enum CanvasMappingMode {
@@ -317,6 +333,16 @@ export enum PendingStatus {
   Done = "done",
   Cancelled = "cancelled",
   Rejected = "rejected",
+}
+
+export enum LegacyPendingStatus {
+  Queued = "queued",
+}
+
+export enum ChangeKind {
+  New = "new",
+  Edited = "edited",
+  Removing = "removing",
 }
 
 export interface PendingStatusHistoryEntry {

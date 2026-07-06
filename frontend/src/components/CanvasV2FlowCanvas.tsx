@@ -3,6 +3,7 @@ import {
   CircleStop,
   Clock,
   ExternalLink,
+  GitPullRequestArrow,
   GitBranch,
   GitMerge,
   Pencil,
@@ -40,7 +41,13 @@ interface Props {
   displayNodeForNativeId: (nativeId: string) => FlowNode | null
   onSelectDisplayNode: (id: string) => void
   onOpenFlow?: (flowId: string) => void
+  onOpenPendingRequest?: (link: PendingRequestLink) => void
   onAction: (action: FlowAction, node: FlowNode) => void
+}
+
+export interface PendingRequestLink {
+  pendingRequestId?: string
+  clientChangeId?: string
 }
 
 export function CanvasV2FlowCanvas({
@@ -49,6 +56,7 @@ export function CanvasV2FlowCanvas({
   displayNodeForNativeId,
   onSelectDisplayNode,
   onOpenFlow,
+  onOpenPendingRequest,
   onAction,
 }: Props) {
   const fallbackLayout = useMemo(() => layoutFlow(flow), [flow])
@@ -133,6 +141,11 @@ export function CanvasV2FlowCanvas({
                 displayNode={displayNode}
                 tabIndex={displayNode ? (selected || (!selectedDisplayId && layoutOrder[0] === node.id) ? 0 : -1) : undefined}
                 onSelect={() => {
+                  const pendingLink = pendingRequestLinkForNode(node)
+                  if (node.status === CanvasV2Status.Proposed && pendingLink && onOpenPendingRequest) {
+                    onOpenPendingRequest(pendingLink)
+                    return
+                  }
                   if (node.kind === CanvasV2NodeKind.SubFlow && node.flowRef && onOpenFlow) {
                     onOpenFlow(node.flowRef)
                     return
@@ -140,6 +153,7 @@ export function CanvasV2FlowCanvas({
                   if (displayNode) onSelectDisplayNode(displayNode.id)
                 }}
                 onNavigate={(direction) => moveSelectionFrom(node.id, direction)}
+                onOpenPendingRequest={onOpenPendingRequest}
                 onAction={onAction}
               />
             </div>
@@ -157,6 +171,7 @@ function NativeNodeCard({
   tabIndex,
   onSelect,
   onNavigate,
+  onOpenPendingRequest,
   onAction,
 }: {
   node: CanvasV2Node
@@ -165,10 +180,12 @@ function NativeNodeCard({
   tabIndex?: number
   onSelect: () => void
   onNavigate: (direction: CanvasV2KeyboardDirection) => void
+  onOpenPendingRequest?: (link: PendingRequestLink) => void
   onAction: (action: FlowAction, node: FlowNode) => void
 }) {
   const Icon = iconForKind(node.kind)
   const canEdit = Boolean(displayNode)
+  const pendingLink = pendingRequestLinkForNode(node)
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     const direction = keyboardDirectionFromKey(event.key)
     if (!direction) return
@@ -219,6 +236,11 @@ function NativeNodeCard({
       </button>
       {canEdit && displayNode && (
         <div className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded-lg border bg-card/95 p-1 opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+          {pendingLink && onOpenPendingRequest && (
+            <NodeAction label="View request" onClick={() => onOpenPendingRequest(pendingLink)}>
+              <GitPullRequestArrow className="size-3.5" />
+            </NodeAction>
+          )}
           <NodeAction label="Change" onClick={() => onAction(changeActionFor(displayNode), displayNode)}>
             <Pencil className="size-3.5" />
           </NodeAction>
@@ -239,6 +261,20 @@ function NativeNodeCard({
       )}
     </div>
   )
+}
+
+export function pendingRequestLinkForNode(node: CanvasV2Node): PendingRequestLink | null {
+  const pendingRequestId = metadataString(node.metadata?.pending_request_id)
+  const clientChangeId = metadataString(node.metadata?.client_change_id)
+  if (!pendingRequestId && !clientChangeId) return null
+  return {
+    ...(pendingRequestId ? { pendingRequestId } : {}),
+    ...(clientChangeId ? { clientChangeId } : {}),
+  }
+}
+
+function metadataString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null
 }
 
 export function keyboardDirectionFromKey(key: string): CanvasV2KeyboardDirection | null {

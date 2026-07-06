@@ -26,6 +26,7 @@ import { CanvasV2FlowCanvas } from "@/components/CanvasV2FlowCanvas"
 import { FlowColumn } from "@/components/FlowCanvas"
 import { Overview } from "@/components/Overview"
 import { Inspector } from "@/components/Inspector"
+import { PendingRequestDialog } from "@/components/PendingRequestDialog"
 import { Provenance } from "@/components/Provenance"
 import { BottomDock } from "@/components/BottomDock"
 import { LandingPage } from "@/components/LandingPage"
@@ -76,6 +77,7 @@ import {
   type WorkspaceProgressStatus,
 } from "@/lib/types"
 import { findNativeDisplayNodeByDisplayId, findNodeByNativeId, nativeNodeToDisplayNode } from "@/lib/nativeDisplay"
+import type { PendingRequestLink } from "@/components/CanvasV2FlowCanvas"
 
 const HOME = "__home__"
 const AUTH_EXPIRED_NOTICE = "This AgentCanvas link cannot sync anymore. Reopen AgentCanvas from your agent to keep this map live."
@@ -146,6 +148,7 @@ export default function App() {
   const [dark, setDark] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
+  const [pendingRequestLink, setPendingRequestLink] = useState<PendingRequestLink | null>(null)
   const mappingActive = canvasState.kind === CanvasStateKind.Loading || canvasState.kind === CanvasStateKind.Reindexing
   const [mappingStage, setMappingStage] = useState(0)
   const [mappingProgress, setMappingProgress] = useState<WorkspaceProgressStatus | null>(null)
@@ -709,6 +712,12 @@ export default function App() {
         onRestored={() => load()}
       />
       <ActivityDialog open={activityOpen} onOpenChange={setActivityOpen} />
+      <PendingRequestDialog
+        link={pendingRequestLink}
+        onOpenChange={(open) => {
+          if (!open) setPendingRequestLink(null)
+        }}
+      />
 
       <div className="relative flex min-h-0 flex-1">
         {(!inJourney || leftOpen) && (
@@ -771,6 +780,7 @@ export default function App() {
                 go(`/flows/${encodeURIComponent(flowId)}`)
                 setSelectedId(null)
               }}
+              onOpenPendingRequest={(link) => setPendingRequestLink(link)}
               onAction={openAction}
             />
           ) : (
@@ -1604,6 +1614,7 @@ function JourneyView({
   onBack,
   onSelect,
   onOpenFlow,
+  onOpenPendingRequest,
   onAction,
 }: {
   journey: Journey
@@ -1613,6 +1624,7 @@ function JourneyView({
   onBack: () => void
   onSelect: (id: string) => void
   onOpenFlow: (flowId: string) => void
+  onOpenPendingRequest: (link: PendingRequestLink) => void
   onAction: (action: FlowAction, node: FlowNode) => void
 }) {
   const displayNodeForNativeId = useMemo(
@@ -1650,6 +1662,7 @@ function JourneyView({
             displayNodeForNativeId={displayNodeForNativeId}
             onSelectDisplayNode={onSelect}
             onOpenFlow={onOpenFlow}
+            onOpenPendingRequest={onOpenPendingRequest}
             onAction={onAction}
           />
         ) : (

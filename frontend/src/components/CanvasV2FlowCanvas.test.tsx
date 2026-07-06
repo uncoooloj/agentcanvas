@@ -5,6 +5,7 @@ import {
   CanvasV2KeyboardDirection,
   keyboardDirectionFromKey,
   keyboardTargetForNode,
+  pendingRequestLinkForNode,
 } from "./CanvasV2FlowCanvas"
 import { TooltipProvider } from "./ui/tooltip"
 import { nativeNodeToDisplayNode } from "@/lib/nativeDisplay"
@@ -33,6 +34,9 @@ describe("CanvasV2FlowCanvas", () => {
         evidence: [],
         evidenceRefs: [],
         status: CanvasV2Status.Proposed,
+        metadata: {
+          pending_request_id: "pending-123",
+        },
       },
       {
         id: "n:receipt",
@@ -74,6 +78,7 @@ describe("CanvasV2FlowCanvas", () => {
             return node ? nativeNodeToDisplayNode(flow.id, node) : null
           }}
           onSelectDisplayNode={() => undefined}
+          onOpenPendingRequest={() => undefined}
           onAction={() => undefined}
         />
       </TooltipProvider>
@@ -81,6 +86,7 @@ describe("CanvasV2FlowCanvas", () => {
 
     expect(html).toContain("Take payment")
     expect(html).toContain("Not built yet")
+    expect(html).toContain('aria-label="View request"')
     expect(html).toContain("Send receipt")
     expect(html).toContain("Opens receipt")
     expect(html).toContain('data-canvas-v2-node-id="n:start"')
@@ -104,5 +110,18 @@ describe("CanvasV2FlowCanvas", () => {
     expect(keyboardTargetForNode(flow, layoutNodes, "n:receipt", CanvasV2KeyboardDirection.Previous)).toBe("n:pay")
     expect(keyboardTargetForNode(flow, layoutNodes, "n:pay", CanvasV2KeyboardDirection.First)).toBe("n:start")
     expect(keyboardTargetForNode(flow, layoutNodes, "n:pay", CanvasV2KeyboardDirection.Last)).toBe("n:receipt")
+  })
+
+  it("reads pending request links from proposed node metadata", () => {
+    expect(pendingRequestLinkForNode(flow.nodes[1])).toEqual({
+      pendingRequestId: "pending-123",
+    })
+    expect(
+      pendingRequestLinkForNode({
+        ...flow.nodes[1],
+        metadata: { client_change_id: "client-456" },
+      })
+    ).toEqual({ clientChangeId: "client-456" })
+    expect(pendingRequestLinkForNode(flow.nodes[0])).toBeNull()
   })
 })

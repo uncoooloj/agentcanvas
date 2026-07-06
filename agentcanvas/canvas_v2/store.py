@@ -54,6 +54,8 @@ KNOWN_EDGE_KINDS = {
     "error",
     "async",
 }
+KNOWN_STATUSES = {"verified", "inferred", "proposed", "stale"}
+KNOWN_CONFIDENCE_LEVELS = {"low", "medium", "high"}
 HISTORY_DIR_NAME = "history"
 HISTORY_HEAD_FILENAME = "canvas.head.json"
 HISTORY_TXN_FILENAME = "canvas.txn.json"
@@ -503,6 +505,8 @@ def _validate_flow(flow: Mapping[str, Any], flow_ids: Set[str]) -> None:
         raise CanvasStoreError("INVALID_FLOW", "flow.nodes must be a list", details={"flow": flow_id})
     if not isinstance(edges, list):
         raise CanvasStoreError("INVALID_FLOW", "flow.edges must be a list", details={"flow": flow_id})
+    _validate_evidence_refs(flow, "flow", flow_id=flow_id)
+    _validate_confidence(flow, "flow", flow_id=flow_id)
 
     node_ids: Set[str] = set()
     for node in nodes:
@@ -518,6 +522,9 @@ def _validate_flow(flow: Mapping[str, Any], flow_ids: Set[str]) -> None:
             raise CanvasStoreError("UNKNOWN_NODE_KIND", "node.kind is not supported", details={"flow": flow_id, "node": node_id, "kind": node.get("kind")})
         if not _non_empty(node.get("title")):
             raise CanvasStoreError("INVALID_NODE", "node.title must be a non-empty string", details={"flow": flow_id, "node": node_id})
+        _validate_status(node, flow_id=flow_id, node_id=node_id)
+        _validate_evidence_refs(node, "node", flow_id=flow_id, node_id=node_id)
+        _validate_confidence(node, "node", flow_id=flow_id, node_id=node_id)
         if node.get("kind") == "SubFlow" and node.get("flow_ref") not in flow_ids:
             raise CanvasStoreError("DANGLING_FLOW_REF", "SubFlow.flow_ref must point at an existing flow", details={"flow": flow_id, "node": node_id, "flow_ref": node.get("flow_ref")})
 
@@ -537,6 +544,8 @@ def _validate_flow(flow: Mapping[str, Any], flow_ids: Set[str]) -> None:
         edge_ids.add(edge_id)
         if edge.get("kind") not in KNOWN_EDGE_KINDS:
             raise CanvasStoreError("UNKNOWN_EDGE_KIND", "edge.kind is not supported", details={"flow": flow_id, "edge": edge_id, "kind": edge.get("kind")})
+        _validate_evidence_refs(edge, "edge", flow_id=flow_id, edge_id=edge_id)
+        _validate_confidence(edge, "edge", flow_id=flow_id, edge_id=edge_id)
         source = edge.get("source")
         target = edge.get("target")
         if source not in node_ids or target not in node_ids:
@@ -545,6 +554,97 @@ def _validate_flow(flow: Mapping[str, Any], flow_ids: Set[str]) -> None:
                 "edge endpoints must point at active nodes in the same flow",
                 details={"flow": flow_id, "edge": edge_id, "source": source, "target": target},
             )
+
+
+def _validate_status(node: Mapping[str, Any], *, flow_id: str, node_id: str) -> None:
+    status = node.get("status")
+    if status is not None and status not in KNOWN_STATUSES:
+        raise CanvasStoreError(
+            "UNKNOWN_STATUS",
+            "node.status is not supported",
+            details={"flow": flow_id, "node": node_id, "status": status},
+        )
+
+
+def _validate_evidence_refs(
+    item: Mapping[str, Any],
+    item_kind: str,
+    *,
+    flow_id: str,
+    node_id: Optional[str] = None,
+    edge_id: Optional[str] = None,
+) -> None:
+    refs = item.get("evidence_refs")
+    if refs is None:
+        return
+    details = _validation_details(flow_id=flow_id, node_id=node_id, edge_id=edge_id)
+    if not isinstance(refs, list):
+        raise CanvasStoreError(
+            "INVALID_EVIDENCE_REFS",
+            "%s.evidence_refs must be a list" % item_kind,
+            details=details,
+        )
+    for index, ref in enumerate(refs):
+        if not _non_empty(ref):
+            ref_details = dict(details)
+            ref_details["index"] = index
+            raise CanvasStoreError(
+                "INVALID_EVIDENCE_REF",
+                "%s.evidence_refs entries must be non-empty strings" % item_kind,
+                details=ref_details,
+            )
+
+
+def _validate_confidence(
+    item: Mapping[str, Any],
+    item_kind: str,
+    *,
+    flow_id: str,
+    node_id: Optional[str] = None,
+    edge_id: Optional[str] = None,
+) -> None:
+    confidence = item.get("confidence")
+    if confidence is None:
+        return
+    details = _validation_details(flow_id=flow_id, node_id=node_id, edge_id=edge_id)
+    if not isinstance(confidence, Mapping):
+        raise CanvasStoreError(
+            "INVALID_CONFIDENCE",
+            "%s.confidence must be an object" % item_kind,
+            details=details,
+        )
+    level = confidence.get("level")
+    if level is not None and level not in KNOWN_CONFIDENCE_LEVELS:
+        level_details = dict(details)
+        level_details["level"] = level
+        raise CanvasStoreError(
+            "INVALID_CONFIDENCE",
+            "%s.confidence.level is not supported" % item_kind,
+            details=level_details,
+        )
+    reason = confidence.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        reason_details = dict(details)
+        reason_details["field"] = "reason"
+        raise CanvasStoreError(
+            "INVALID_CONFIDENCE",
+            "%s.confidence.reason must be a string" % item_kind,
+            details=reason_details,
+        )
+
+
+def _validation_details(
+    *,
+    flow_id: str,
+    node_id: Optional[str] = None,
+    edge_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    details: Dict[str, Any] = {"flow": flow_id}
+    if node_id is not None:
+        details["node"] = node_id
+    if edge_id is not None:
+        details["edge"] = edge_id
+    return details
 
 
 def _load_v2_payload(

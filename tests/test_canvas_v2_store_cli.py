@@ -223,6 +223,45 @@ class CanvasV2StoreCliTests(unittest.TestCase):
             self.assertEqual(raised.exception.code, "EDGE_ID_REQUIRED")
             self.assertFalse((workspace / ".agentcanvas" / "canvas.ir.json").exists())
 
+    def test_rejects_invalid_evidence_refs(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            batch = self._initial_batch()
+            batch["operations"][2]["node"]["evidence_refs"] = ["src/upload.ts:12", ""]
+
+            with self.assertRaises(CanvasStoreError) as raised:
+                apply_operation_batch(workspace, batch)
+
+            self.assertEqual(raised.exception.code, "INVALID_EVIDENCE_REF")
+            self.assertEqual(raised.exception.details["node"], "n:upload:start")
+            self.assertFalse((workspace / ".agentcanvas" / "canvas.ir.json").exists())
+
+    def test_rejects_unknown_node_status(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            batch = self._initial_batch()
+            batch["operations"][2]["node"]["status"] = "guessed"
+
+            with self.assertRaises(CanvasStoreError) as raised:
+                apply_operation_batch(workspace, batch)
+
+            self.assertEqual(raised.exception.code, "UNKNOWN_STATUS")
+            self.assertEqual(raised.exception.details["status"], "guessed")
+            self.assertFalse((workspace / ".agentcanvas" / "canvas.ir.json").exists())
+
+    def test_rejects_invalid_confidence_shape(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            batch = self._initial_batch()
+            batch["operations"][1]["flow"]["confidence"] = {"level": "certain"}
+
+            with self.assertRaises(CanvasStoreError) as raised:
+                apply_operation_batch(workspace, batch)
+
+            self.assertEqual(raised.exception.code, "INVALID_CONFIDENCE")
+            self.assertEqual(raised.exception.details["level"], "certain")
+            self.assertFalse((workspace / ".agentcanvas" / "canvas.ir.json").exists())
+
     def test_delete_operations_increment_revision_and_snapshot_previous(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = self._workspace(temp_root)

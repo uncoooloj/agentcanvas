@@ -344,7 +344,7 @@ Current and planned integration paths:
 - **Skill**: install `skill/agentcanvas/` into an agent that supports skills.
 - **Local API**: the browser/server path uses `/api/context`, `/api/graph`,
   `/api/pending`, `/api/changes`, `/api/status`, and `/api/reindex`.
-- **MCP**: planned tool path for agents that prefer structured tools over shell
+- **MCP**: structured local tools for agents that prefer tool calls over shell
   commands.
 - **Webhooks**: planned callback path for outside tools to report status,
   questions, or completion.
@@ -441,6 +441,30 @@ See [docs/projection.md](docs/projection.md).
 - Agents should not mark a request `done` until the work is verified.
 - Migrations, seeds, deploys, and destructive commands still need explicit user
   permission.
+
+## Security And Privacy
+
+AgentCanvas is a local tool. It reads the workspace you point it at and writes
+state inside that workspace under `.agentcanvas/`. The browser server binds to
+localhost by default, and `agentcanvas up` refuses non-loopback hosts. The older
+foreground `agentcanvas start --host ...` path also requires
+`--allow-remote-host` before it will bind outside loopback.
+
+The launch URL includes a token. That token protects the local HTTP API from
+casual cross-site browser requests and other local users; it is not a promise
+against someone who already controls your machine or shell. The token is printed
+once at launch so your agent or terminal can open the right URL. Heartbeat files
+store only a token hint, and runtime smoke logs redact launch tokens.
+
+MCP tools can read and update AgentCanvas state for the workspace: status,
+canvas, evidence, pending requests, answers, and progress. They do not get a
+separate permission model from your coding agent. If your agent can call the
+tool, treat it like that agent reading and writing the local `.agentcanvas/`
+files.
+
+AgentCanvas ships with no telemetry. There is no analytics endpoint, no consent
+toggle hiding a future data path, and no background network reporting from the
+local app.
 
 ## Development
 

@@ -51,6 +51,18 @@ class ReleaseVerifierTests(unittest.TestCase):
         self.assertEqual(env["AGENTCANVAS_VITE_OUT_DIR"], str(output_dir))
         self.assertEqual(env["AGENTCANVAS_VITE_BASE"], "/agentcanvas/")
 
+    def test_readme_documents_phase4_security_truths(self):
+        readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("## Security And Privacy", readme)
+        self.assertIn("agentcanvas up` refuses non-loopback hosts", readme)
+        self.assertIn("--allow-remote-host", readme)
+        self.assertIn("Heartbeat files\nstore only a token hint", readme)
+        self.assertIn("runtime smoke logs redact launch tokens", readme)
+        self.assertIn("AgentCanvas ships with no telemetry", readme)
+        self.assertIn("MCP tools can read and update AgentCanvas state", readme)
+        self.assertNotIn("**MCP**: planned", readme)
+
     def test_run_step_reports_missing_commands_in_plain_language(self):
         verifier = load_verifier()
 

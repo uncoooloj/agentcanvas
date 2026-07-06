@@ -26,6 +26,7 @@ from agentcanvas.workspace_lock import WorkspaceLockBusy, workspace_write_lock
 SCHEMA = "agentcanvas.workflow.v1"
 IR_FILENAME = "workflow.ir.json"
 CANVAS_IR_FILENAME = "canvas.ir.json"
+CANVAS_V2_SCHEMA = "agentcanvas.canvas.v2"
 STATE_DIR_NAME = ".agentcanvas"
 PENDING_DIR_NAME = "pending"
 CONVERSATION_SUFFIX = ".conversation.jsonl"
@@ -68,6 +69,7 @@ class MapHealthStatus(str, Enum):
     MISSING_CANVAS_IR = "missing_canvas_ir"
     UNREADABLE_CANVAS_IR = "unreadable_canvas_ir"
     STALE_CANVAS_IR = "stale_canvas_ir"
+    UNKNOWN_CANVAS_FRESHNESS = "unknown_canvas_freshness"
 
 
 class MapHealthReason(str, Enum):
@@ -214,12 +216,13 @@ def map_health(workspace: str | Path) -> Dict[str, Any]:
     workflow_exists = workflow_path.is_file()
     canvas_exists = canvas_path.is_file()
     canvas_readable = False
+    canvas_payload: Optional[Dict[str, Any]] = None
     canvas_reason = MapHealthReason.MISSING.value if not canvas_exists else None
     canvas_error = None
     if canvas_exists:
         try:
             with canvas_path.open("r", encoding="utf-8") as handle:
-                canvas_payload = json.load(handle)
+                raw_canvas_payload = json.load(handle)
         except json.JSONDecodeError as exc:
             canvas_reason = MapHealthReason.INVALID_JSON.value
             canvas_error = str(exc)
@@ -227,22 +230,40 @@ def map_health(workspace: str | Path) -> Dict[str, Any]:
             canvas_reason = MapHealthReason.UNREADABLE.value
             canvas_error = str(exc)
         else:
-            canvas_readable = isinstance(canvas_payload, dict)
+            canvas_readable = isinstance(raw_canvas_payload, dict)
             if not canvas_readable:
                 canvas_reason = MapHealthReason.INVALID_SHAPE.value
+            else:
+                canvas_payload = raw_canvas_payload
 
     stale = None
     freshness_status = MapFreshnessStatus.UNKNOWN.value
     freshness_reason = None
+    evidence_status = None
     if workflow_exists and canvas_exists:
-        try:
-            workflow_mtime = workflow_path.stat().st_mtime
-            canvas_mtime = canvas_path.stat().st_mtime
-        except OSError as exc:
-            freshness_reason = f"Could not compare file times: {exc}"
+        if isinstance(canvas_payload, dict) and canvas_payload.get("schema") == CANVAS_V2_SCHEMA:
+            try:
+                from agentcanvas.canvas_v2.evidence import compare_canvas_with_current_workflow_evidence
+
+                evidence_status = compare_canvas_with_current_workflow_evidence(canvas_payload, root)
+            except (OSError, ValueError) as exc:
+                freshness_reason = f"Could not compare workflow evidence: {exc}"
+            else:
+                stale = evidence_status.get("stale")
+                status_value = evidence_status.get("status")
+                freshness_status = status_value if isinstance(status_value, str) else MapFreshnessStatus.UNKNOWN.value
+                reasons = evidence_status.get("reasons")
+                if isinstance(reasons, list) and reasons:
+                    freshness_reason = "; ".join(str(reason) for reason in reasons)
         else:
-            stale = canvas_mtime < workflow_mtime
-            freshness_status = MapFreshnessStatus.STALE.value if stale else MapFreshnessStatus.FRESH.value
+            try:
+                workflow_mtime = workflow_path.stat().st_mtime
+                canvas_mtime = canvas_path.stat().st_mtime
+            except OSError as exc:
+                freshness_reason = f"Could not compare file times: {exc}"
+            else:
+                stale = canvas_mtime < workflow_mtime
+                freshness_status = MapFreshnessStatus.STALE.value if stale else MapFreshnessStatus.FRESH.value
     elif not workflow_exists:
         freshness_reason = "Workflow evidence is missing."
     else:
@@ -270,6 +291,8 @@ def map_health(workspace: str | Path) -> Dict[str, Any]:
         status = MapHealthStatus.UNREADABLE_CANVAS_IR.value
     elif stale:
         status = MapHealthStatus.STALE_CANVAS_IR.value
+    elif stale is None:
+        status = MapHealthStatus.UNKNOWN_CANVAS_FRESHNESS.value
 
     health: Dict[str, Any] = {
         "schema": MAP_HEALTH_SCHEMA,
@@ -296,6 +319,7 @@ def map_health(workspace: str | Path) -> Dict[str, Any]:
             "status": freshness_status,
             "stale": stale,
             "reason": freshness_reason,
+            "evidence": evidence_status,
         },
         "pendingFiles": {
             "path": str(pending_dir),

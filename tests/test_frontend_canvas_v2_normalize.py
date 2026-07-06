@@ -164,6 +164,7 @@ def _node_script():
                 MissingCanvasIr: "missing_canvas_ir",
                 UnreadableCanvasIr: "unreadable_canvas_ir",
                 StaleCanvasIr: "stale_canvas_ir",
+                UnknownCanvasFreshness: "unknown_canvas_freshness",
               },
               MapHealthReason: {
                 Missing: "missing",

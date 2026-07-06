@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import urlparse
 
+from agentcanvas.canvas_v2.evidence import build_workflow_evidence_from_path
 from agentcanvas.ir import canvas_map_handoff
 from agentcanvas.server import make_handler
 
@@ -150,6 +151,96 @@ class ServerContextTests(unittest.TestCase):
                 str(workspace.resolve() / ".agentcanvas" / "pending"),
                 health["pendingFiles"]["path"],
             )
+
+    def test_health_api_uses_v2_evidence_before_file_mtime(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            workflow_path = workspace / ".agentcanvas" / "workflow.ir.json"
+            _write(
+                workspace,
+                ".agentcanvas/workflow.ir.json",
+                json.dumps(
+                    {
+                        "schema": "agentcanvas.workflow.v1",
+                        "generated_at": "2026-07-05T12:00:00Z",
+                        "source_facts": {"schema": "agentcanvas.source_facts.v1", "facts": []},
+                    },
+                    sort_keys=True,
+                ),
+            )
+            evidence = build_workflow_evidence_from_path(workflow_path, workspace=workspace)
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps(
+                    {
+                        "schema": "agentcanvas.canvas.v2",
+                        "revision": 1,
+                        "evidence": evidence,
+                        "app": {"name": "Evidence app", "summary": "", "is_demo": False},
+                        "flows": [],
+                    },
+                    sort_keys=True,
+                ),
+            )
+            canvas_path = workspace / ".agentcanvas" / "canvas.ir.json"
+            os.utime(workflow_path, (2000, 2000))
+            os.utime(canvas_path, (1000, 1000))
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/health?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            health = fake.response["payload"]["health"]
+            self.assertEqual("fresh", health["freshness"]["status"])
+            self.assertFalse(health["freshness"]["stale"])
+            self.assertEqual("fresh", health["freshness"]["evidence"]["status"])
+            self.assertEqual("ready", health["status"])
+
+    def test_health_api_does_not_report_v2_canvas_ready_without_evidence(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            _write(
+                workspace,
+                ".agentcanvas/workflow.ir.json",
+                json.dumps({"schema": "agentcanvas.workflow.v1", "source_facts": {"facts": []}}),
+            )
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps(
+                    {
+                        "schema": "agentcanvas.canvas.v2",
+                        "revision": 1,
+                        "app": {"name": "Evidence app", "summary": "", "is_demo": False},
+                        "flows": [],
+                    }
+                ),
+            )
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/health?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            health = fake.response["payload"]["health"]
+            self.assertFalse(health["ready"])
+            self.assertEqual("unknown_canvas_freshness", health["status"])
+            self.assertEqual("possibly-stale", health["freshness"]["status"])
+            self.assertIsNone(health["freshness"]["stale"])
 
     def test_canvas_api_serves_v2_compatibility_envelope(self):
         with tempfile.TemporaryDirectory() as temp_root:

@@ -404,6 +404,7 @@ export enum MapHealthStatus {
   MissingCanvasIr = "missing_canvas_ir",
   UnreadableCanvasIr = "unreadable_canvas_ir",
   StaleCanvasIr = "stale_canvas_ir",
+  UnknownCanvasFreshness = "unknown_canvas_freshness",
 }
 
 export enum MapHealthReason {

@@ -36,6 +36,25 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("onHandoffDismiss", bottom_dock)
         self.assertIn("onHandoffDismiss", app)
 
+    def test_needs_input_handoff_can_be_answered_from_overlay(self):
+        changeset = (PROJECT_ROOT / "frontend" / "src" / "lib" / "changeset.ts").read_text(encoding="utf-8")
+        overlay = (PROJECT_ROOT / "frontend" / "src" / "components" / "HandoffOverlay.tsx").read_text(encoding="utf-8")
+        api = (PROJECT_ROOT / "frontend" / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
+
+        self.assertIn("answerPendingRequest", api)
+        self.assertIn("answerPendingRequest", changeset)
+        self.assertIn("fetchPendingRequest", changeset)
+        self.assertIn("hydratePendingDetails", changeset)
+        self.assertIn("answerHandoffQuestion", changeset)
+        self.assertIn("conversationSummary", changeset)
+        self.assertIn("conversation", changeset)
+        self.assertIn("AnswerQuestion", overlay)
+        self.assertIn("Textarea", overlay)
+        self.assertIn("Send answer", overlay)
+        self.assertIn("ConversationThread", overlay)
+        self.assertIn("needsInputItems.map", overlay)
+        self.assertIn("onAnswer(item.pendingId, answer)", overlay)
+
 
 if __name__ == "__main__":
     unittest.main()

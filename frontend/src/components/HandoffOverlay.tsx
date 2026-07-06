@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react"
-import { AlertCircle, Check, CircleCheck, Clipboard, Clock, Loader2, RefreshCw } from "lucide-react"
+import { AlertCircle, Check, CircleCheck, Clipboard, Clock, Loader2, RefreshCw, Send } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { HandoffItemStatus, HandoffPhase, useChanges, type HandoffItem } from "@/lib/changeset"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Textarea } from "@/components/ui/textarea"
 import { documentIsVisible, PENDING_ACTIVITY_POLL_INTERVAL_MS } from "@/lib/polling"
-import { CanvasSourceTone, CopyState } from "@/lib/types"
+import { CanvasSourceTone, ConversationRole, ConversationTurnKind, CopyState } from "@/lib/types"
 
 interface Props {
   onAcknowledge: () => void
@@ -13,7 +14,7 @@ interface Props {
 }
 
 export function HandoffOverlay({ onAcknowledge, onDismiss }: Props) {
-  const { handoff, assistantName, refreshHandoff } = useChanges()
+  const { handoff, assistantName, refreshHandoff, answerHandoffQuestion } = useChanges()
   const { phase, items, summary, question, prompt, error } = handoff
 
   useEffect(() => {
@@ -87,6 +88,7 @@ export function HandoffOverlay({ onAcknowledge, onDismiss }: Props) {
 
   if (phase === HandoffPhase.NeedsInput || phase === HandoffPhase.Blocked || phase === HandoffPhase.Stopped) {
     const blocked = phase === HandoffPhase.Blocked || phase === HandoffPhase.Stopped
+    const needsInputItems = items.filter((item) => item.status === HandoffItemStatus.NeedsInput)
     return (
       <div className="w-full max-w-lg animate-fade-in rounded-lg border border-border bg-card shadow-lg">
         <div className="flex items-start gap-3 px-5 py-5">
@@ -100,6 +102,10 @@ export function HandoffOverlay({ onAcknowledge, onDismiss }: Props) {
           </div>
         </div>
         <HandoffItemList items={items} />
+        {!blocked &&
+          needsInputItems.map((item) => (
+            <AnswerQuestion key={item.pendingId || item.changeId} item={item} onAnswer={answerHandoffQuestion} />
+          ))}
         {prompt && <CopyPrompt prompt={prompt} />}
         <div className="border-t border-border px-5 py-4">
           <Button onClick={onDismiss}>Got it</Button>
@@ -237,6 +243,86 @@ function StatusCallout({ tone, message }: { tone: CanvasSourceTone.Warning | Can
       {message}
     </div>
   )
+}
+
+function AnswerQuestion({
+  item,
+  onAnswer,
+}: {
+  item: HandoffItem
+  onAnswer: (pendingId: string, answer: string) => Promise<void>
+}) {
+  const [answer, setAnswer] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const question = item.conversationSummary?.unansweredQuestion?.text || item.note || "What should your agent know?"
+  const canSubmit = Boolean(item.pendingId && answer.trim()) && !submitting
+
+  async function submit() {
+    if (!item.pendingId || !answer.trim()) return
+    setSubmitting(true)
+    try {
+      await onAnswer(item.pendingId, answer)
+      setAnswer("")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="mx-5 mb-4 rounded-md border border-when-accent/30 bg-when-bg/40 p-3">
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-when-fg">Question</p>
+        <p className="text-sm leading-snug text-foreground">{question}</p>
+        {item.conversation?.length ? <ConversationThread item={item} /> : null}
+        <Textarea
+          value={answer}
+          onChange={(event) => setAnswer(event.target.value)}
+          placeholder="Type your answer..."
+          className="min-h-20 bg-background text-sm"
+        />
+        <div className="flex items-center justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={() => setAnswer("")} disabled={!answer || submitting}>
+            Clear
+          </Button>
+          <Button type="button" size="sm" onClick={submit} disabled={!canSubmit}>
+            {submitting ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+            Send answer
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ConversationThread({ item }: { item: HandoffItem }) {
+  const turns = item.conversation || []
+  if (!turns.length) return null
+  return (
+    <ScrollArea className="max-h-36 rounded-md border bg-background/70">
+      <div className="flex flex-col gap-2 px-2.5 py-2">
+        {turns.map((turn) => (
+          <div key={turn.id} className="text-xs leading-snug">
+            <span
+              className={cn(
+                "mr-1.5 rounded-md px-1.5 py-0.5 font-medium",
+                turn.role === ConversationRole.User ? "bg-act-bg text-act-fg" : "bg-secondary text-muted-foreground",
+                turn.kind === ConversationTurnKind.Question && "bg-when-bg text-when-fg"
+              )}
+            >
+              {conversationLabel(turn.role, turn.kind)}
+            </span>
+            <span className="text-muted-foreground">{turn.text}</span>
+          </div>
+        ))}
+      </div>
+    </ScrollArea>
+  )
+}
+
+function conversationLabel(role: ConversationRole, kind: ConversationTurnKind): string {
+  if (kind === ConversationTurnKind.Question) return "Question"
+  if (kind === ConversationTurnKind.Answer) return "Answer"
+  return role === ConversationRole.User ? "You" : "Agent"
 }
 
 function CopyPrompt({ prompt }: { prompt: string }) {

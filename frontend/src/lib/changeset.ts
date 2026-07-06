@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import { fetchPending, isApiAuthExpired, postChange, type ChangeRequest } from "./api"
+import { answerPendingRequest, fetchPending, fetchPendingRequest, isApiAuthExpired, postChange, type ChangeRequest } from "./api"
 import {
   ChangeKind,
   FlowAction,
@@ -10,6 +10,8 @@ import {
   type BranchNode,
   type CanvasV2NodeKind,
   type FlowNode,
+  type PendingConversationSummary,
+  type PendingConversationTurn,
   type PendingItem,
   type StepNode,
 } from "./types"
@@ -65,6 +67,8 @@ export interface HandoffItem {
   title?: string
   jsonPath?: string | null
   markdownPath?: string | null
+  conversationSummary?: PendingConversationSummary
+  conversation?: PendingConversationTurn[]
 }
 
 export interface HandoffState {
@@ -118,6 +122,7 @@ interface ChangeStore {
   discardAll: () => void
   send: () => void
   refreshHandoff: () => Promise<void>
+  answerHandoffQuestion: (pendingId: string, answer: string) => Promise<void>
   acknowledgeDone: () => ChangeEntry[] // returns the applied changes so the caller can update the model
   dismissHandoff: () => void
   badgeForNode: (nodeId: string) => ChangeKind | null
@@ -236,7 +241,7 @@ export const useChanges = create<ChangeStore>((set, get) => ({
       return
     }
     try {
-      const pending = await fetchPending()
+      const pending = await hydratePendingDetails(await fetchPending())
       const byId = new Map(pending.map((item) => [item.id, item]))
       const byChangeId = new Map(pending.filter((item) => item.changeId).map((item) => [item.changeId!, item]))
       set((s) => {
@@ -253,7 +258,7 @@ export const useChanges = create<ChangeStore>((set, get) => ({
             phase,
             items,
             summary: phase === HandoffPhase.Done ? summarize(get().changes) : s.handoff.summary,
-            question: needsInput?.note || blocked?.note || s.handoff.question,
+            question: questionForItem(needsInput) || questionForItem(blocked) || s.handoff.question,
             error:
               phase === HandoffPhase.Working || phase === HandoffPhase.Done
                 ? undefined
@@ -272,6 +277,50 @@ export const useChanges = create<ChangeStore>((set, get) => ({
         handoff: {
           ...s.handoff,
           error: `Status refresh failed: ${message}`,
+          prompt: buildHandoffPrompt(s.changes, s.assistantName, s.handoff.items),
+        },
+      }))
+    }
+  },
+
+  answerHandoffQuestion: async (pendingId, answer) => {
+    const text = answer.trim()
+    if (!text) return
+
+    try {
+      const pending = await answerPendingRequest(pendingId, text)
+      set((s) => {
+        const items = s.handoff.items.map((item) =>
+          item.pendingId === pendingId ? handoffItemFromPending(item, pending) : item
+        )
+        const phase = phaseForItems(items)
+        const needsInput = items.find((item) => item.status === HandoffItemStatus.NeedsInput)
+        const blocked = items.find((item) => STOPPED_STATUSES.has(item.status))
+        return {
+          handoff: {
+            ...s.handoff,
+            phase,
+            items,
+            question: needsInput ? questionForItem(needsInput) : blocked ? questionForItem(blocked) : undefined,
+            error:
+              phase === HandoffPhase.Working || phase === HandoffPhase.Done || phase === HandoffPhase.Sending
+                ? undefined
+                : blocked?.note || s.handoff.error,
+            prompt: buildHandoffPrompt(s.changes, s.assistantName, items),
+          },
+        }
+      })
+      void get().refreshHandoff()
+    } catch (error) {
+      const message = isApiAuthExpired(error)
+        ? "This AgentCanvas link cannot send answers anymore. Reopen AgentCanvas from your agent, or copy the fallback prompt."
+        : error instanceof Error
+          ? error.message
+          : "Could not send answer."
+      set((s) => ({
+        handoff: {
+          ...s.handoff,
+          error: `Could not send answer: ${message}`,
           prompt: buildHandoffPrompt(s.changes, s.assistantName, s.handoff.items),
         },
       }))
@@ -324,10 +373,30 @@ function handoffItemFromPending(item: HandoffItem, pending: PendingItem): Handof
     status: status === PendingStatus.Pending ? HandoffItemStatus.Sent : status,
     pendingId: pending.id,
     title: pending.title,
-    note: pending.note || pending.error,
+    note: pending.note || pending.conversationSummary?.unansweredQuestion?.text || pending.error,
     jsonPath: pending.jsonPath,
     markdownPath: pending.markdownPath,
+    conversationSummary: pending.conversationSummary,
+    conversation: pending.conversation,
   }
+}
+
+async function hydratePendingDetails(pending: PendingItem[]): Promise<PendingItem[]> {
+  return Promise.all(
+    pending.map(async (item) => {
+      if (item.status !== PendingStatus.NeedsInput) return item
+      try {
+        const detail = await fetchPendingRequest(item.id)
+        return { ...item, ...detail, changeId: detail.changeId || item.changeId }
+      } catch {
+        return item
+      }
+    })
+  )
+}
+
+function questionForItem(item?: HandoffItem): string | undefined {
+  return item?.conversationSummary?.unansweredQuestion?.text || item?.note
 }
 
 function blockedHandoffItem(item: HandoffItem, note: string): HandoffItem {

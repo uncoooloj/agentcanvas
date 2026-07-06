@@ -360,7 +360,13 @@ def _node_script():
 
           const answered = await api.answerPendingRequest("request-1", "Signup");
           const answerCall = calls.find((call) => call.key === "POST /api/pending/request-1/answer");
-          if (answered.status !== "in_progress" || JSON.parse(answerCall.options.body).sessionId !== "session-1") {
+          const answerBody = JSON.parse(answerCall.options.body);
+          if (
+            answered.status !== "in_progress" ||
+            answered.conversationSummary?.unansweredQuestion ||
+            answerBody.sessionId !== "session-1" ||
+            answerBody.answer !== "Signup"
+          ) {
             throw new Error("answer client did not post answer with session");
           }
           checked.push("answer-pending");

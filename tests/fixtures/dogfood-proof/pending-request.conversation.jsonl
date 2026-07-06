@@ -1,0 +1,2 @@
+{"id":"turn-1","role":"agent","kind":"question","text":"Should the confirmation happen before or after inventory is reserved?"}
+{"id":"turn-2","role":"user","kind":"answer","text":"After inventory is reserved."}

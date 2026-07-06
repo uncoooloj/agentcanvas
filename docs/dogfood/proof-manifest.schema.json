@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentcanvas.local/schemas/dogfood-proof-manifest.v1.json",
+  "title": "AgentCanvas dogfood proof manifest",
+  "type": "object",
+  "required": [
+    "schema",
+    "agent",
+    "workspace",
+    "checklist",
+    "permissions",
+    "pending_request",
+    "verification",
+    "canvas",
+    "workflow_ir",
+    "recording"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agentcanvas.dogfood_proof.v1"
+    },
+    "agent": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["type", "fixture_path", "fixture_sha256"],
+      "properties": {
+        "type": { "enum": ["fixture", "local-project", "external-project"] },
+        "fixture_path": { "type": "string", "minLength": 1 },
+        "fixture_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "checklist": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "status"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["passed", "failed", "blocked", "not_applicable"] },
+          "evidence": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "required": ["prompt_count"],
+      "properties": {
+        "prompt_count": { "type": "integer", "minimum": 0 },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "pending_request": {
+      "type": "object",
+      "required": ["id", "status", "markdown_path", "json_path", "conversation_jsonl_path"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["verified", "done"] },
+        "markdown_path": { "type": "string", "minLength": 1 },
+        "json_path": { "type": "string", "minLength": 1 },
+        "conversation_jsonl_path": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "verification": {
+      "type": "object",
+      "required": ["command", "result", "actor"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "result": { "const": "passed" },
+        "actor": { "type": "string", "minLength": 1 },
+        "evidence_path": { "type": "string" },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "canvas": {
+      "type": "object",
+      "required": ["revision_before", "revision_after"],
+      "properties": {
+        "revision_before": { "type": "integer", "minimum": 0 },
+        "revision_after": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "workflow_ir": {
+      "type": "object",
+      "required": ["indexed_at_before", "indexed_at_after"],
+      "properties": {
+        "indexed_at_before": { "type": "string", "minLength": 1 },
+        "indexed_at_after": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "recording": {
+      "type": "object",
+      "required": ["redacted"],
+      "oneOf": [
+        { "required": ["path"] },
+        { "required": ["not_recorded_reason"] }
+      ],
+      "properties": {
+        "path": { "type": "string" },
+        "redacted": { "type": "boolean" },
+        "not_recorded_reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

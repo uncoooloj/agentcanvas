@@ -1,0 +1,62 @@
+{
+  "schema": "agentcanvas.dogfood_proof.v1",
+  "agent": {
+    "id": "codex",
+    "name": "Codex"
+  },
+  "workspace": {
+    "type": "fixture",
+    "fixture_path": "examples/sample-js-app",
+    "fixture_sha256": "674fb53d7291610222a38bcad886b59eca82bcfad2028306a0d56843dd2f2404",
+    "description": "Local sample workspace used for service-free proof validation."
+  },
+  "checklist": [
+    {
+      "id": "bootstrap",
+      "title": "AgentCanvas opens against a real workspace",
+      "status": "passed",
+      "evidence": "Runtime smoke verified workspace mode."
+    },
+    {
+      "id": "pending-request",
+      "title": "A canvas change is represented as a pending implementation request",
+      "status": "passed",
+      "evidence": "pending_request.id is dogfood-proof-change."
+    },
+    {
+      "id": "verification",
+      "title": "The request reaches verified with evidence",
+      "status": "passed",
+      "evidence": "verification.txt records the command/result."
+    }
+  ],
+  "permissions": {
+    "prompt_count": 0,
+    "notes": "Local fixture proof does not require OS permission prompts."
+  },
+  "pending_request": {
+    "id": "dogfood-proof-change",
+    "status": "verified",
+    "markdown_path": "tests/fixtures/dogfood-proof/pending-request.md",
+    "json_path": "tests/fixtures/dogfood-proof/pending-request.json",
+    "conversation_jsonl_path": "tests/fixtures/dogfood-proof/pending-request.conversation.jsonl"
+  },
+  "verification": {
+    "command": "python3.9 scripts/verify_release.py",
+    "result": "passed",
+    "actor": "codex",
+    "evidence_path": "tests/fixtures/dogfood-proof/verification.txt"
+  },
+  "canvas": {
+    "revision_before": 1,
+    "revision_after": 2
+  },
+  "workflow_ir": {
+    "indexed_at_before": "2026-07-06T00:00:00Z",
+    "indexed_at_after": "2026-07-06T00:05:00Z"
+  },
+  "recording": {
+    "redacted": true,
+    "not_recorded_reason": "Local CI fixture validates proof shape without storing a screen recording."
+  }
+}

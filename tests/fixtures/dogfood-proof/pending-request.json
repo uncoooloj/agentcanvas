@@ -1,0 +1,8 @@
+{
+  "id": "dogfood-proof-change",
+  "status": "verified",
+  "change": {
+    "clientChangeId": "dogfood-proof-change",
+    "summary": "Add a confirmation step after checkout payment is accepted."
+  }
+}

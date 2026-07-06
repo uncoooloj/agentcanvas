@@ -17,6 +17,7 @@ FRONTEND_DIR = PROJECT_ROOT / "frontend"
 PACKAGED_WEB_DIR = PROJECT_ROOT / "agentcanvas" / "web"
 WRANGLER_CONFIG = PROJECT_ROOT / "wrangler.jsonc"
 WRANGLER_AGENTCANVAS_CONFIG = PROJECT_ROOT / "wrangler.agentcanvas.jsonc"
+DOGFOOD_PROOF_MANIFEST = PROJECT_ROOT / "tests" / "fixtures" / "dogfood-proof" / "manifest.valid.json"
 MIN_PYTHON = (3, 9)
 
 
@@ -291,6 +292,13 @@ def run_python_checks(skip_runtime_smoke=False):
         print("Skipped by --skip-runtime-smoke.", flush=True)
     else:
         run_runtime_smoke(env)
+    run_step(
+        "Dogfood proof manifest",
+        [sys.executable, "scripts/verify_dogfood_proof.py", str(DOGFOOD_PROOF_MANIFEST)],
+        PROJECT_ROOT,
+        env=env,
+        timeout=60,
+    )
 
 
 def build_parser():

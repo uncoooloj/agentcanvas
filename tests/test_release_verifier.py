@@ -219,6 +219,7 @@ class ReleaseVerifierTests(unittest.TestCase):
                 "Python unit tests",
                 "AgentCanvas CLI smoke test",
                 "AgentCanvas runtime API smoke test",
+                "Dogfood proof manifest",
             ],
         )
 
@@ -234,7 +235,7 @@ class ReleaseVerifierTests(unittest.TestCase):
         ):
             verifier.run_python_checks(skip_runtime_smoke=True)
 
-        self.assertEqual(labels, ["Python unit tests", "AgentCanvas CLI smoke test"])
+        self.assertEqual(labels, ["Python unit tests", "AgentCanvas CLI smoke test", "Dogfood proof manifest"])
 
 
 if __name__ == "__main__":

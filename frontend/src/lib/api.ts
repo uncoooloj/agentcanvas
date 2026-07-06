@@ -32,6 +32,7 @@ import {
   type CanvasSourceMetadata,
   type CanvasV2Document,
   type CanvasV2Edge,
+  type CanvasV2Evidence,
   type CanvasV2Flow,
   type CanvasV2NativeRef,
   type CanvasV2Node,
@@ -517,6 +518,12 @@ function normalizeCanvasV2Flow(value: unknown): CanvasV2Flow | null {
   const id = stringValue(flow?.id)
   if (!flow || !id) return null
   const title = stringValue(flow.title) || id
+  const confidence = normalizeCanvasV2Confidence(flow.confidence)
+  const evidenceRefs = stringList(flow.evidence_refs || flow.evidenceRefs)
+  const evidence = normalizeCanvasV2EvidenceList(flow.evidence, {
+    refs: evidenceRefs,
+    confidence,
+  })
   return {
     id,
     title,
@@ -529,8 +536,9 @@ function normalizeCanvasV2Flow(value: unknown): CanvasV2Flow | null {
     edges: Array.isArray(flow.edges)
       ? flow.edges.map(normalizeCanvasV2Edge).filter((edge): edge is CanvasV2Edge => Boolean(edge))
       : [],
-    evidenceRefs: stringList(flow.evidence_refs || flow.evidenceRefs),
-    confidence: normalizeCanvasV2Confidence(flow.confidence),
+    evidence,
+    evidenceRefs: evidenceRefsFromEvidence(evidence, evidenceRefs),
+    confidence,
     metadata: recordValue(flow.metadata),
   }
 }
@@ -539,14 +547,23 @@ function normalizeCanvasV2Node(value: unknown): CanvasV2Node | null {
   const node = recordValue(value)
   const id = stringValue(node?.id)
   if (!node || !id) return null
+  const confidence = normalizeCanvasV2Confidence(node.confidence)
+  const status = normalizeCanvasV2Status(node.status)
+  const evidenceRefs = stringList(node.evidence_refs || node.evidenceRefs)
+  const evidence = normalizeCanvasV2EvidenceList(node.evidence, {
+    refs: evidenceRefs,
+    status,
+    confidence,
+  })
   return {
     id,
     kind: normalizeCanvasV2NodeKind(node.kind),
     title: stringValue(node.title) || stringValue(node.label) || id,
     summary: stringValue(node.summary),
-    evidenceRefs: stringList(node.evidence_refs || node.evidenceRefs),
-    confidence: normalizeCanvasV2Confidence(node.confidence),
-    status: normalizeCanvasV2Status(node.status),
+    evidence,
+    evidenceRefs: evidenceRefsFromEvidence(evidence, evidenceRefs),
+    confidence,
+    status,
     flowRef: stringValue(node.flow_ref) || stringValue(node.flowRef),
     metadata: recordValue(node.metadata),
   }
@@ -558,6 +575,12 @@ function normalizeCanvasV2Edge(value: unknown): CanvasV2Edge | null {
   const source = stringValue(edge?.source)
   const target = stringValue(edge?.target)
   if (!edge || !id || !source || !target) return null
+  const confidence = normalizeCanvasV2Confidence(edge.confidence)
+  const evidenceRefs = stringList(edge.evidence_refs || edge.evidenceRefs)
+  const evidence = normalizeCanvasV2EvidenceList(edge.evidence, {
+    refs: evidenceRefs,
+    confidence,
+  })
   return {
     id,
     kind: normalizeCanvasV2EdgeKind(edge.kind),
@@ -565,6 +588,9 @@ function normalizeCanvasV2Edge(value: unknown): CanvasV2Edge | null {
     target,
     label: stringValue(edge.label),
     isDefault: booleanValue(edge.is_default) || booleanValue(edge.isDefault),
+    evidence,
+    evidenceRefs: evidenceRefsFromEvidence(evidence, evidenceRefs),
+    confidence,
     metadata: recordValue(edge.metadata),
   }
 }
@@ -681,6 +707,52 @@ function normalizeCanvasV2Confidence(value: unknown): CanvasV2Confidence | undef
   const reason = stringValue(confidence.reason)
   if (reason) normalized.reason = reason
   return normalized.level || normalized.reason ? normalized : undefined
+}
+
+function normalizeCanvasV2EvidenceList(
+  value: unknown,
+  fallback: {
+    refs?: string[]
+    status?: CanvasV2Status
+    confidence?: CanvasV2Confidence
+  } = {}
+): CanvasV2Evidence[] {
+  const evidence = Array.isArray(value)
+    ? value.map(normalizeCanvasV2Evidence).filter((item): item is CanvasV2Evidence => Boolean(item))
+    : []
+  if (evidence.length > 0) return evidence
+  return (fallback.refs || []).map((ref) =>
+    stripUndefined({
+      ref,
+      status: fallback.status,
+      confidence: fallback.confidence,
+      reason: fallback.confidence?.reason,
+    })
+  )
+}
+
+function normalizeCanvasV2Evidence(value: unknown): CanvasV2Evidence | null {
+  if (typeof value === "string" && value.trim()) {
+    return { ref: value }
+  }
+  const evidence = recordValue(value)
+  const ref = stringValue(evidence?.ref)
+  if (!evidence || !ref) return null
+  const confidence = normalizeCanvasV2Confidence(evidence.confidence)
+  return stripUndefined({
+    ref,
+    status: normalizeCanvasV2Status(evidence.status),
+    confidence,
+    reason: stringValue(evidence.reason) || confidence?.reason,
+  })
+}
+
+function evidenceRefsFromEvidence(evidence: CanvasV2Evidence[], fallbackRefs: string[]): string[] {
+  return Array.from(new Set([...fallbackRefs, ...evidence.map((item) => item.ref)]))
+}
+
+function stripUndefined<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T
 }
 
 const CANVAS_MAPPING_MODES = new Set<string>(Object.values(CanvasMappingMode))

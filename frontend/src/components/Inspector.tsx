@@ -46,7 +46,8 @@ export function Inspector({ node, nativeNode, onAction, onModifyChange, onCancel
   const canAddRule = canAddRuleNative(nativeKind)
   const hasTech = Boolean(node.tech?.refs?.length || node.native)
   const hasEvidence = Boolean(
-    nativeNode?.evidenceRefs.length ||
+    nativeNode?.evidence.length ||
+      nativeNode?.evidenceRefs.length ||
       nativeNode?.status ||
       nativeNode?.confidence?.level ||
       nativeNode?.confidence?.reason
@@ -187,16 +188,33 @@ function EvidencePanel({ node }: { node: CanvasV2Node }) {
       {node.confidence?.reason && (
         <p className="mt-2 text-sm leading-snug text-muted-foreground">{node.confidence.reason}</p>
       )}
-      {node.evidenceRefs.length > 0 ? (
+      {node.evidence.length > 0 ? (
         <div className="mt-3 flex flex-col gap-1.5">
           <p className="text-xs text-muted-foreground">Project references AgentCanvas used:</p>
-          {node.evidenceRefs.map((ref) => (
+          {node.evidence.map((evidence) => (
             <div
-              key={ref}
-              className="flex min-w-0 items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-xs text-muted-foreground"
+              key={evidence.ref}
+              className="flex min-w-0 flex-col gap-1 rounded-md border bg-background px-2 py-1.5 text-xs text-muted-foreground"
             >
-              <FileText className="size-3.5 shrink-0" />
-              <span className="truncate font-mono">{ref}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <FileText className="size-3.5 shrink-0" />
+                <span className="truncate font-mono">{evidence.ref}</span>
+              </div>
+              {(evidence.status || evidence.confidence?.level || evidence.reason) && (
+                <div className="flex flex-wrap gap-1 pl-5">
+                  {evidence.status && (
+                    <Badge variant={evidence.status === CanvasV2Status.Stale ? "outline" : "secondary"}>
+                      {statusLabel(evidence.status)}
+                    </Badge>
+                  )}
+                  {evidence.confidence?.level && (
+                    <Badge variant="outline">{confidenceLabel(evidence.confidence.level)}</Badge>
+                  )}
+                  {evidence.reason && (
+                    <span className="min-w-0 flex-1 text-muted-foreground">{evidence.reason}</span>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -11,18 +11,21 @@ describe("CanvasV2FlowCanvas", () => {
     title: "Checkout",
     summary: "How checkout works.",
     entryNode: "n:start",
+    evidence: [],
     evidenceRefs: [],
     nodes: [
       {
         id: "n:start",
         kind: CanvasV2NodeKind.When,
         title: "Someone starts checkout",
+        evidence: [],
         evidenceRefs: [],
       },
       {
         id: "n:pay",
         kind: CanvasV2NodeKind.Do,
         title: "Take payment",
+        evidence: [],
         evidenceRefs: [],
       },
     ],
@@ -32,6 +35,8 @@ describe("CanvasV2FlowCanvas", () => {
         kind: CanvasV2EdgeKind.Normal,
         source: "n:start",
         target: "n:pay",
+        evidence: [],
+        evidenceRefs: [],
       },
     ],
   }

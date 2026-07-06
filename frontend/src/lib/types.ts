@@ -164,11 +164,19 @@ export interface CanvasV2Confidence {
   reason?: string
 }
 
+export interface CanvasV2Evidence {
+  ref: string
+  status?: CanvasV2Status
+  confidence?: CanvasV2Confidence
+  reason?: string
+}
+
 export interface CanvasV2Node {
   id: string
   kind: CanvasV2NodeKind
   title: string
   summary?: string
+  evidence: CanvasV2Evidence[]
   evidenceRefs: string[]
   confidence?: CanvasV2Confidence
   status?: CanvasV2Status
@@ -183,6 +191,9 @@ export interface CanvasV2Edge {
   target: string
   label?: string
   isDefault?: boolean
+  evidence: CanvasV2Evidence[]
+  evidenceRefs: string[]
+  confidence?: CanvasV2Confidence
   metadata?: Record<string, unknown>
 }
 
@@ -191,6 +202,7 @@ export interface CanvasV2NodeOperationPayload {
   kind: CanvasV2NodeKind
   title: string
   summary?: string
+  evidence?: CanvasV2Evidence[]
   evidence_refs?: string[]
   confidence?: CanvasV2Confidence
   status?: CanvasV2Status
@@ -205,6 +217,9 @@ export interface CanvasV2EdgeOperationPayload {
   target: string
   label?: string
   is_default?: boolean
+  evidence?: CanvasV2Evidence[]
+  evidence_refs?: string[]
+  confidence?: CanvasV2Confidence
   metadata?: Record<string, unknown>
 }
 
@@ -216,6 +231,7 @@ export interface CanvasV2Flow {
   altitude?: string
   nodes: CanvasV2Node[]
   edges: CanvasV2Edge[]
+  evidence: CanvasV2Evidence[]
   evidenceRefs: string[]
   confidence?: CanvasV2Confidence
   metadata?: Record<string, unknown>

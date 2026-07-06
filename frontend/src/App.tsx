@@ -924,6 +924,9 @@ function buildAddAfterOperations(flow: CanvasV2Flow, node: CanvasV2Node, title: 
         target: edge.target,
         label: edge.label,
         is_default: edge.isDefault,
+        evidence: edge.evidence,
+        evidence_refs: edge.evidenceRefs,
+        confidence: edge.confidence,
         metadata: edge.metadata,
       }),
     })
@@ -968,6 +971,9 @@ function buildRemoveNodeOperations(flow: CanvasV2Flow, node: CanvasV2Node): Canv
           target: targetEdge.target,
           label: template.label,
           is_default: template.isDefault,
+          evidence: template.evidence,
+          evidence_refs: template.evidenceRefs,
+          confidence: template.confidence,
           metadata: template.metadata,
         }),
       })
@@ -993,6 +999,7 @@ function canvasNodePayload(node: CanvasV2Node): CanvasV2NodeOperationPayload {
     kind: node.kind,
     title: node.title,
     summary: node.summary,
+    evidence: node.evidence,
     evidence_refs: node.evidenceRefs,
     confidence: node.confidence,
     status: node.status,

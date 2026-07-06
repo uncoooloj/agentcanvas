@@ -21,12 +21,14 @@ describe("native display node adapter", () => {
     title: "Checkout",
     summary: "How checkout works.",
     entryNode: "n:start",
+    evidence: [],
     evidenceRefs: [],
     nodes: [
       {
         id: "n:start",
         kind: CanvasV2NodeKind.When,
         title: "Someone starts checkout",
+        evidence: [{ ref: "src/routes/checkout.ts:10" }],
         evidenceRefs: ["src/routes/checkout.ts:10"],
       },
       {
@@ -34,12 +36,14 @@ describe("native display node adapter", () => {
         kind: CanvasV2NodeKind.Do,
         title: "Take payment",
         summary: "Charge the saved card.",
+        evidence: [{ ref: "src/payments.ts:42" }],
         evidenceRefs: ["src/payments.ts:42"],
       },
       {
         id: "n:risk",
         kind: CanvasV2NodeKind.Decision,
         title: "Payment looks risky",
+        evidence: [{ ref: "src/risk.ts:8" }],
         evidenceRefs: ["src/risk.ts:8"],
       },
     ],
@@ -49,6 +53,8 @@ describe("native display node adapter", () => {
         kind: CanvasV2EdgeKind.Normal,
         source: "n:start",
         target: "n:pay",
+        evidence: [],
+        evidenceRefs: [],
       },
     ],
   }

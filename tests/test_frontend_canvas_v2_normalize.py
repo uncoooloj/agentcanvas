@@ -499,22 +499,44 @@ def _node_script():
                   kind: "Do",
                   title: "Mapped step",
                   evidence_refs: ["src/evidence.ts:12"],
+                  evidence: [{
+                    ref: "src/evidence.ts:12",
+                    status: "verified",
+                    confidence: { level: "high", reason: "Matched route handler." },
+                    reason: "Matched route handler.",
+                  }],
                   status: "verified",
                   confidence: { level: "high", reason: "Found in the route handler." },
                 }],
-                edges: [],
-                evidence_refs: [],
+                edges: [{
+                  id: "e:evidence",
+                  source: "n:evidence:step",
+                  target: "n:evidence:step",
+                  kind: "normal",
+                  evidence_refs: ["src/evidence.ts:20"],
+                  evidence: [{ ref: "src/evidence.ts:20", confidence: { level: "medium" } }],
+                }],
+                evidence_refs: ["src/evidence-flow.ts"],
+                evidence: [{ ref: "src/evidence-flow.ts", confidence: { level: "medium" } }],
               }],
             },
           });
           const evidenceNode = evidenceResponse.canvasV2.flows[0].nodes[0];
+          const evidenceFlow = evidenceResponse.canvasV2.flows[0];
+          const evidenceEdge = evidenceFlow.edges[0];
           if (
             evidenceNode.status !== "verified" ||
             evidenceNode.confidence?.level !== "high" ||
             evidenceNode.confidence?.reason !== "Found in the route handler." ||
-            evidenceNode.evidenceRefs[0] !== "src/evidence.ts:12"
+            evidenceNode.evidenceRefs[0] !== "src/evidence.ts:12" ||
+            evidenceNode.evidence[0]?.ref !== "src/evidence.ts:12" ||
+            evidenceNode.evidence[0]?.reason !== "Matched route handler." ||
+            evidenceNode.evidence[0]?.confidence?.reason !== "Matched route handler." ||
+            evidenceFlow.evidence[0]?.ref !== "src/evidence-flow.ts" ||
+            evidenceEdge.evidence[0]?.ref !== "src/evidence.ts:20" ||
+            evidenceEdge.evidence[0]?.confidence?.level !== "medium"
           ) {
-            throw new Error("v2 evidence status/confidence was not preserved");
+            throw new Error("v2 typed evidence/status/confidence was not preserved");
           }
           const clients = await runClientChecks(localModule.exports, context);
           process.stdout.write(JSON.stringify({ checked, clients }));

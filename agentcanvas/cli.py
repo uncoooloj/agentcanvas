@@ -13,6 +13,9 @@ from .demo import demo_workspace
 from .indexer import format_index_summary, index_workspace
 from .ir import (
     PENDING_STATUSES,
+    ConversationRole,
+    ConversationTurnKind,
+    append_pending_conversation,
     atomic_write_json,
     build_canvas_map_instruction,
     canvas_ir_path,
@@ -79,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     pending_parser = subparsers.add_parser("pending", help="list pending change requests")
     pending_parser.add_argument("path", nargs="?", help="workspace path to inspect")
     pending_parser.add_argument("--workspace", help="workspace path to inspect")
+    pending_parser.add_argument("--session-id", help="only show requests for this agent session")
     pending_parser.set_defaults(func=cmd_pending)
 
     health_parser = subparsers.add_parser(
@@ -111,7 +115,23 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--workspace", help="workspace path to update")
     status_parser.add_argument("--status", required=True, choices=sorted(PENDING_STATUSES))
     status_parser.add_argument("--note", help="short status note for the user")
+    status_parser.add_argument("--session-id", help="only update a request from this agent session")
     status_parser.set_defaults(func=cmd_status)
+
+    reply_parser = subparsers.add_parser(
+        "reply",
+        help="append a question, answer, or note to a pending request thread",
+    )
+    reply_parser.add_argument("pending_id", help="pending request id or unique id fragment")
+    reply_parser.add_argument("path", nargs="?", help="workspace path to update")
+    reply_parser.add_argument("--workspace", help="workspace path to update")
+    reply_parser.add_argument("--session-id", help="only reply to a request from this agent session")
+    reply_parser.add_argument("--actor", default="agentcanvas-cli", help="actor name for the conversation turn")
+    reply_kind = reply_parser.add_mutually_exclusive_group(required=True)
+    reply_kind.add_argument("--question", help="ask the user a clarifying question")
+    reply_kind.add_argument("--answer", help="record a user answer")
+    reply_kind.add_argument("--note", help="add an implementation note")
+    reply_parser.set_defaults(func=cmd_reply)
 
     apply_parser = subparsers.add_parser(
         "apply-query",
@@ -215,7 +235,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
 def cmd_pending(args: argparse.Namespace) -> int:
     workspace = resolve_workspace(selected_workspace(args))
-    pending = list_pending(workspace)
+    pending = list_pending(workspace, session_id=getattr(args, "session_id", None))
     _, _, pending_dir = state_paths(workspace)
     if not pending:
         print(f"No pending change requests in {pending_dir}")
@@ -272,6 +292,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             args.pending_id,
             args.status,
             note=getattr(args, "note", None),
+            session_id=getattr(args, "session_id", None),
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not update pending request: {exc}")
@@ -280,6 +301,43 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Updated {item['id']} to {item['status']}")
     if item.get("note"):
         print(item["note"])
+    return 0
+
+
+def cmd_reply(args: argparse.Namespace) -> int:
+    workspace = resolve_workspace(selected_workspace(args))
+    if getattr(args, "question", None):
+        role = ConversationRole.AGENT.value
+        kind = ConversationTurnKind.QUESTION.value
+        text = args.question
+    elif getattr(args, "answer", None):
+        role = ConversationRole.USER.value
+        kind = ConversationTurnKind.ANSWER.value
+        text = args.answer
+    else:
+        role = ConversationRole.AGENT.value
+        kind = ConversationTurnKind.NOTE.value
+        text = args.note
+
+    try:
+        item = append_pending_conversation(
+            workspace,
+            args.pending_id,
+            role=role,
+            kind=kind,
+            text=text,
+            actor=getattr(args, "actor", None) or "agentcanvas-cli",
+            session_id=getattr(args, "session_id", None),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Could not append pending reply: {exc}")
+        return 1
+
+    print(f"Added {kind} to {item['id']} [{item.get('status', 'pending')}]")
+    summary = item.get("conversation_summary") or {}
+    unanswered = summary.get("unanswered_question")
+    if isinstance(unanswered, dict) and unanswered.get("text"):
+        print(f"Needs input: {unanswered['text']}")
     return 0
 
 

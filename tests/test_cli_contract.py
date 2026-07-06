@@ -191,10 +191,25 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                         "status": "pending",
                         "created_at": "2026-06-19T00:00:00Z",
                         "workspace": str(workspace),
+                        "sessionId": "session-1",
                         "change": {
                             "journeyId": "flow:checkout",
                             "targetStep": "n:checkout:empty-cart",
                         },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (pending_dir / "other-session.json").write_text(
+                json.dumps(
+                    {
+                        "id": "other-session",
+                        "title": "Other session",
+                        "status": "pending",
+                        "created_at": "2026-06-19T00:00:01Z",
+                        "workspace": str(workspace),
+                        "sessionId": "session-2",
+                        "change": {"journeyId": "flow:other"},
                     }
                 ),
                 encoding="utf-8",
@@ -210,6 +225,34 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             )
             self.assertIn("raise-checkout-empty-state.md", completed.stdout)
             self.assertIn("raise-checkout-empty-state.json", completed.stdout)
+            self.assertIn("other-session", completed.stdout)
+
+            session_result = self._run_agentcanvas(
+                "pending",
+                str(workspace),
+                "--session-id",
+                "session-1",
+                cwd=temp_root,
+            )
+            self.assertEqual(
+                session_result.returncode,
+                0,
+                session_result.stdout + session_result.stderr,
+            )
+            self.assertIn("raise-checkout-empty-state", session_result.stdout)
+            self.assertNotIn("other-session", session_result.stdout)
+
+            wrong_session_status = self._run_agentcanvas(
+                "status",
+                "raise-checkout-empty-state",
+                str(workspace),
+                "--status",
+                "sent",
+                "--session-id",
+                "session-2",
+                cwd=temp_root,
+            )
+            self.assertEqual(wrong_session_status.returncode, 1)
 
             status_result = self._run_agentcanvas(
                 "status",
@@ -219,6 +262,8 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 "in_progress",
                 "--note",
                 "Working on it.",
+                "--session-id",
+                "session-1",
                 cwd=temp_root,
             )
             self.assertEqual(
@@ -243,6 +288,72 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(updated["orphaned_refs"], [])
+
+    def test_reply_command_appends_pending_conversation(self):
+        from agentcanvas.ir import write_pending_change
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._copy_sample_workspace(temp_root)
+            pending = write_pending_change(
+                workspace,
+                {
+                    "title": "Clarify checkout copy",
+                    "summary": "Make checkout copy clearer.",
+                    "journeyId": "flow:checkout",
+                },
+                session_id="session-1",
+            )
+
+            question = self._run_agentcanvas(
+                "reply",
+                pending["id"],
+                str(workspace),
+                "--question",
+                "Should this include email receipts too?",
+                "--session-id",
+                "session-1",
+                cwd=temp_root,
+            )
+            self.assertEqual(question.returncode, 0, question.stdout + question.stderr)
+            self.assertIn("Added question", question.stdout)
+            self.assertIn("needs_input", question.stdout)
+
+            answer = self._run_agentcanvas(
+                "reply",
+                pending["id"],
+                str(workspace),
+                "--answer",
+                "Checkout screen only.",
+                "--session-id",
+                "session-1",
+                cwd=temp_root,
+            )
+            self.assertEqual(answer.returncode, 0, answer.stdout + answer.stderr)
+            self.assertIn("Added answer", answer.stdout)
+            self.assertIn("in_progress", answer.stdout)
+
+            wrong_session = self._run_agentcanvas(
+                "reply",
+                pending["id"],
+                str(workspace),
+                "--note",
+                "Wrong session should not write.",
+                "--session-id",
+                "session-2",
+                cwd=temp_root,
+            )
+            self.assertEqual(wrong_session.returncode, 1)
+
+            conversation_path = (
+                workspace
+                / ".agentcanvas"
+                / "pending"
+                / f"{pending['id']}.conversation.jsonl"
+            )
+            lines = conversation_path.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), 2)
+            turns = [json.loads(line) for line in lines]
+            self.assertEqual([turn["kind"] for turn in turns], ["question", "answer"])
 
     def test_health_command_reports_missing_map_files_without_writing_state(self):
         with tempfile.TemporaryDirectory() as temp_root:

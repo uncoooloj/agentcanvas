@@ -408,7 +408,13 @@ def slugify(value: str, fallback: str = "canvas-change") -> str:
     return slug[:64] or fallback
 
 
-def list_pending(workspace: str | Path, *, summary: bool = False) -> List[Dict[str, Any]]:
+def list_pending(
+    workspace: str | Path,
+    *,
+    summary: bool = False,
+    status: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     _, _, pending_dir = state_paths(workspace)
     if not pending_dir.exists():
         return []
@@ -416,6 +422,10 @@ def list_pending(workspace: str | Path, *, summary: bool = False) -> List[Dict[s
     items: List[Dict[str, Any]] = []
     for json_path in sorted(pending_dir.glob("*.json")):
         item = _read_pending_file(json_path)
+        if status and item.get("status") != status:
+            continue
+        if session_id and not _pending_matches_session(item, session_id):
+            continue
         if summary:
             item = pending_summary(item)
         items.append(item)
@@ -428,10 +438,13 @@ def get_pending_request(
     pending_id: str,
     *,
     since: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     _, _, pending_dir = state_paths(workspace)
     json_path = _resolve_pending_json_path(pending_dir, pending_id)
     item = _read_pending_file(json_path)
+    if session_id and not _pending_matches_session(item, session_id):
+        raise FileNotFoundError(f"pending request not found for session: {pending_id}")
     item["conversation"] = read_pending_conversation(json_path, since=since)
     return item
 
@@ -477,6 +490,10 @@ def _pending_record_for_write(record: Dict[str, Any]) -> Dict[str, Any]:
     clean.pop("markdown_path", None)
     clean.pop("conversation", None)
     return clean
+
+
+def _pending_matches_session(item: Dict[str, Any], session_id: str) -> bool:
+    return item.get("sessionId") == session_id or item.get("session_id") == session_id
 
 
 def _resolve_pending_json_path(pending_dir: Path, pending_id: str) -> Path:
@@ -704,6 +721,7 @@ def append_pending_conversation(
     kind: str,
     text: str,
     actor: str = "agentcanvas",
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     try:
         role = ConversationRole(str(role).strip().lower()).value
@@ -721,6 +739,8 @@ def append_pending_conversation(
         _, _, pending_dir = state_paths(root)
         json_path = _resolve_pending_json_path(pending_dir, pending_id)
         record = _read_pending_file(json_path)
+        if session_id and not _pending_matches_session(record, session_id):
+            raise FileNotFoundError(f"pending request not found for session: {pending_id}")
         turn = {
             "id": uuid.uuid4().hex,
             "at": now_utc(),
@@ -848,6 +868,7 @@ def update_pending_status(
     actor: str = "agentcanvas",
     evidence: Dict[str, Any] | None = None,
     enforce_transitions: bool = False,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     if status not in PENDING_STATUSES:
         allowed = ", ".join(sorted(PENDING_STATUSES))
@@ -866,6 +887,8 @@ def update_pending_status(
 
         with json_path.open("r", encoding="utf-8") as handle:
             record = json.load(handle)
+        if session_id and not _pending_matches_session(record, session_id):
+            raise FileNotFoundError(f"pending request not found for session: {pending_id}")
 
         record = transition_record(
             record,

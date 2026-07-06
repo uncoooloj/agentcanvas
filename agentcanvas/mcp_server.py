@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .canvas_v2 import (
     CanvasStoreError,
@@ -234,8 +234,12 @@ def list_requests(
 ) -> Dict[str, Any]:
     """List pending requests as bounded summaries."""
 
-    items = list_pending(workspace, summary=True)
-    items = _filter_requests(items, status=status, session_id=session_id)
+    items = list_pending(
+        workspace,
+        summary=True,
+        status=status,
+        session_id=session_id,
+    )
     return {
         "ok": True,
         "workspace": str(resolve_workspace(workspace)),
@@ -249,13 +253,19 @@ def get_request(
     *,
     workspace: str = ".",
     since: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return one pending request with its conversation turns."""
 
     return {
         "ok": True,
         "workspace": str(resolve_workspace(workspace)),
-        "request": get_pending_request(workspace, request_id, since=since),
+        "request": get_pending_request(
+            workspace,
+            request_id,
+            since=since,
+            session_id=session_id,
+        ),
     }
 
 
@@ -267,6 +277,7 @@ def update_request(
     note: Optional[str] = None,
     evidence: Optional[Mapping[str, Any]] = None,
     actor: str = "agentcanvas-mcp",
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Update a pending request status through the shared lifecycle."""
 
@@ -278,6 +289,7 @@ def update_request(
         actor=actor,
         evidence=dict(evidence) if isinstance(evidence, Mapping) else None,
         enforce_transitions=True,
+        session_id=session_id,
     )
     return {"ok": True, "workspace": str(resolve_workspace(workspace)), "request": item}
 
@@ -288,6 +300,7 @@ def ask_user(
     *,
     workspace: str = ".",
     actor: str = "agentcanvas-mcp",
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Ask the user a clarifying question on a pending request."""
 
@@ -298,6 +311,7 @@ def ask_user(
         kind=ConversationTurnKind.QUESTION.value,
         text=question,
         actor=actor,
+        session_id=session_id,
     )
     return {"ok": True, "workspace": str(resolve_workspace(workspace)), "request": item}
 
@@ -462,8 +476,9 @@ def run_mcp_server(default_workspace: str = ".") -> int:
         request_id: str,
         workspace: str = default_workspace,
         since: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return get_request(request_id, workspace=workspace, since=since)
+        return get_request(request_id, workspace=workspace, since=since, session_id=session_id)
 
     @server.tool()
     def agentcanvas_update_request(
@@ -473,6 +488,7 @@ def run_mcp_server(default_workspace: str = ".") -> int:
         note: Optional[str] = None,
         evidence: Optional[Dict[str, Any]] = None,
         actor: str = "agentcanvas-mcp",
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         return update_request(
             request_id,
@@ -481,6 +497,7 @@ def run_mcp_server(default_workspace: str = ".") -> int:
             note=note,
             evidence=evidence,
             actor=actor,
+            session_id=session_id,
         )
 
     @server.tool()
@@ -489,8 +506,15 @@ def run_mcp_server(default_workspace: str = ".") -> int:
         question: str,
         workspace: str = default_workspace,
         actor: str = "agentcanvas-mcp",
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return ask_user(request_id, question, workspace=workspace, actor=actor)
+        return ask_user(
+            request_id,
+            question,
+            workspace=workspace,
+            actor=actor,
+            session_id=session_id,
+        )
 
     @server.tool()
     def agentcanvas_get_answers(
@@ -509,24 +533,6 @@ def run_mcp_server(default_workspace: str = ".") -> int:
 
     server.run()
     return 0
-
-
-def _filter_requests(
-    items: Iterable[Dict[str, Any]],
-    *,
-    status: Optional[str],
-    session_id: Optional[str],
-) -> List[Dict[str, Any]]:
-    filtered = list(items)
-    if status:
-        filtered = [item for item in filtered if item.get("status") == status]
-    if session_id:
-        filtered = [
-            item
-            for item in filtered
-            if item.get("sessionId") == session_id or item.get("session_id") == session_id
-        ]
-    return filtered
 
 
 def _find_flow(document: Mapping[str, Any], flow_id: str) -> Optional[Dict[str, Any]]:

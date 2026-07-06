@@ -291,7 +291,11 @@ def run_pending_loop_smoke(env):
     )
 
 
-def run_python_checks(skip_runtime_smoke=False):
+def run_python_checks(
+    skip_runtime_smoke=False,
+    dogfood_matrix_manifest=DOGFOOD_MATRIX_MANIFEST,
+    require_dogfood_gate=False,
+):
     env = with_project_pythonpath()
     run_step(
         "Python unit tests",
@@ -323,8 +327,13 @@ def run_python_checks(skip_runtime_smoke=False):
         timeout=60,
     )
     run_step(
-        "Dogfood matrix manifest shape",
-        [sys.executable, "scripts/verify_dogfood_matrix.py", str(DOGFOOD_MATRIX_MANIFEST)],
+        "Dogfood matrix manifest gate" if require_dogfood_gate else "Dogfood matrix manifest shape",
+        [
+            sys.executable,
+            "scripts/verify_dogfood_matrix.py",
+            *(["--gate"] if require_dogfood_gate else []),
+            str(dogfood_matrix_manifest),
+        ],
         PROJECT_ROOT,
         env=env,
         timeout=60,
@@ -351,6 +360,20 @@ def build_parser():
             "that cannot bind or request localhost."
         ),
     )
+    parser.add_argument(
+        "--dogfood-matrix",
+        type=Path,
+        default=DOGFOOD_MATRIX_MANIFEST,
+        help=(
+            "Dogfood matrix manifest to validate. Defaults to the intentionally "
+            "partial fixture used for shape checks."
+        ),
+    )
+    parser.add_argument(
+        "--require-dogfood-gate",
+        action="store_true",
+        help="Fail unless the dogfood matrix satisfies the full public release gate.",
+    )
     return parser
 
 
@@ -363,7 +386,11 @@ def main(argv=None):
     try:
         require_supported_python()
         verify_cloudflare_config()
-        run_python_checks(skip_runtime_smoke=args.skip_runtime_smoke)
+        run_python_checks(
+            skip_runtime_smoke=args.skip_runtime_smoke,
+            dogfood_matrix_manifest=args.dogfood_matrix,
+            require_dogfood_gate=args.require_dogfood_gate,
+        )
         if args.skip_frontend:
             print("\n== Frontend build ==", flush=True)
             print("Skipped by --skip-frontend.", flush=True)

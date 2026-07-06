@@ -215,12 +215,27 @@ class ReleaseVerifierTests(unittest.TestCase):
 
         self.assertTrue(args.skip_runtime_smoke)
 
+    def test_dogfood_gate_arguments_are_explicit(self):
+        verifier = load_verifier()
+
+        default_args = verifier.build_parser().parse_args([])
+        gate_args = verifier.build_parser().parse_args(
+            ["--dogfood-matrix", "release-matrix.json", "--require-dogfood-gate"]
+        )
+
+        self.assertEqual(default_args.dogfood_matrix, verifier.DOGFOOD_MATRIX_MANIFEST)
+        self.assertFalse(default_args.require_dogfood_gate)
+        self.assertEqual(gate_args.dogfood_matrix, Path("release-matrix.json"))
+        self.assertTrue(gate_args.require_dogfood_gate)
+
     def test_python_checks_run_runtime_smoke_after_cli_by_default(self):
         verifier = load_verifier()
         labels = []
+        commands = []
 
-        def fake_run_step(label, *args, **kwargs):
+        def fake_run_step(label, command, *args, **kwargs):
             labels.append(label)
+            commands.append(command)
 
         with patch.object(verifier, "run_step", side_effect=fake_run_step):
             verifier.run_python_checks()
@@ -236,6 +251,7 @@ class ReleaseVerifierTests(unittest.TestCase):
                 "Dogfood matrix manifest shape",
             ],
         )
+        self.assertNotIn("--gate", commands[-1])
 
     def test_python_checks_can_skip_runtime_smoke(self):
         verifier = load_verifier()
@@ -258,6 +274,28 @@ class ReleaseVerifierTests(unittest.TestCase):
                 "Dogfood matrix manifest shape",
             ],
         )
+
+    def test_python_checks_can_require_dogfood_gate_manifest(self):
+        verifier = load_verifier()
+        labels = []
+        commands = []
+
+        def fake_run_step(label, command, *args, **kwargs):
+            labels.append(label)
+            commands.append(command)
+
+        with patch.object(verifier, "run_step", side_effect=fake_run_step), redirect_stdout(
+            StringIO()
+        ):
+            verifier.run_python_checks(
+                skip_runtime_smoke=True,
+                dogfood_matrix_manifest=Path("release-matrix.json"),
+                require_dogfood_gate=True,
+            )
+
+        self.assertEqual(labels[-1], "Dogfood matrix manifest gate")
+        self.assertIn("--gate", commands[-1])
+        self.assertEqual(commands[-1][-1], "release-matrix.json")
 
 
 if __name__ == "__main__":

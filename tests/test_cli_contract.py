@@ -215,6 +215,24 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             self.assertEqual(kwargs["session_id"], "session-1")
             self.assertFalse(kwargs["open_browser"])
 
+    def test_up_command_refuses_non_loopback_host(self):
+        from agentcanvas.cli import main
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "real-workspace"
+            workspace.mkdir()
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(
+                    main(["up", str(workspace), "--host", "0.0.0.0", "--json"]),
+                    1,
+                )
+
+            payload = json.loads(stdout.getvalue())
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["error"]["code"], "NON_LOOPBACK_HOST")
+            self.assertEqual(payload["error"]["details"]["host"], "0.0.0.0")
+
     def test_up_stop_uses_launch_record(self):
         from agentcanvas.cli import main
 

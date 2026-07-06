@@ -92,6 +92,18 @@ class ReleaseVerifierTests(unittest.TestCase):
                 self.assertIn("--dogfood-matrix", source)
                 self.assertIn("--require-dogfood-gate", source)
 
+    def test_public_dogfood_docs_explain_attempt_runner(self):
+        paths = [
+            PROJECT_ROOT / "docs" / "dogfood" / "README.md",
+            PROJECT_ROOT / "docs" / "dogfood" / "release-runbook.md",
+        ]
+
+        for path in paths:
+            with self.subTest(path=path.relative_to(PROJECT_ROOT).as_posix()):
+                source = path.read_text(encoding="utf-8")
+                self.assertIn("scripts/run_dogfood_attempt.py", source)
+                self.assertIn("--proof-dir", source)
+
     def test_landing_copy_avoids_unsupported_agent_and_repo_claims(self):
         source = (PROJECT_ROOT / "frontend" / "src" / "components" / "LandingPage.tsx").read_text(
             encoding="utf-8"

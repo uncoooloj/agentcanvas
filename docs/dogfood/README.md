@@ -17,6 +17,12 @@ Validate one proof manifest:
 python3.9 scripts/verify_dogfood_proof.py tests/fixtures/dogfood-proof/manifest.valid.json
 ```
 
+Generate and validate one local proof attempt:
+
+```bash
+python3.9 scripts/run_dogfood_attempt.py /path/to/workspace --proof-dir /path/to/private/proof-folder
+```
+
 Validate matrix shape without claiming release readiness:
 
 ```bash

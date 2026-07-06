@@ -162,6 +162,10 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("WorkspaceProgressStage.MappingFlows", state)
         self.assertIn("liveProgress?.message", state)
         self.assertIn("progress.current / progress.total", state)
+        self.assertIn("STUCK_PROGRESS_MS = 10 * 60 * 1000", state)
+        self.assertIn("Your agent seems to have stopped", state)
+        self.assertIn("resumePrompt(fallbackPrompt, liveProgress)", state)
+        self.assertIn("`.agentcanvas/progress.json`", state)
 
 
 if __name__ == "__main__":

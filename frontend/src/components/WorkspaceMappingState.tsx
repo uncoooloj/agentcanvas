@@ -19,6 +19,7 @@ const MAPPING_STAGES = [
   "Naming the flows",
   "Preparing the map",
 ]
+const STUCK_PROGRESS_MS = 10 * 60 * 1000
 
 interface Props {
   kind: CanvasStateKind.Loading | CanvasStateKind.Reindexing | CanvasStateKind.Empty | CanvasStateKind.Error
@@ -48,6 +49,7 @@ export function WorkspaceMappingState({
   const active = kind === CanvasStateKind.Loading || kind === CanvasStateKind.Reindexing
   const liveProgress = active && workspaceProgress?.readable ? workspaceProgress : null
   const liveStage = liveProgress?.stage
+  const progressStuck = isProgressStuck(liveProgress)
   const clampedStage = liveStage
     ? stageIndexForProgress(liveStage)
     : Math.min(Math.max(stageIndex, 0), MAPPING_STAGES.length - 1)
@@ -55,6 +57,7 @@ export function WorkspaceMappingState({
   const Icon = kind === CanvasStateKind.Error ? AlertCircle : kind === CanvasStateKind.Empty ? Search : Sparkles
   const title =
     message ||
+    (progressStuck ? "Your agent seems to have stopped" : undefined) ||
     (kind === CanvasStateKind.Reindexing
       ? "Refreshing this project"
       : kind === CanvasStateKind.Loading
@@ -64,6 +67,9 @@ export function WorkspaceMappingState({
           : "Couldn't open the project map")
   const body =
     detail ||
+    (progressStuck
+      ? "AgentCanvas has not seen a mapping progress update for more than 10 minutes. Ask your agent to resume from the last progress stage."
+      : undefined) ||
     liveProgress?.message ||
     (active
       ? MAPPING_STAGES[clampedStage]
@@ -117,6 +123,17 @@ export function WorkspaceMappingState({
                     {liveProgress.current} of {liveProgress.total}
                   </span>
                 )}
+              </div>
+            )}
+            {progressStuck && fallbackPrompt && liveProgress && (
+              <div className="mt-4 rounded-lg border border-when-accent/25 bg-when-bg/30 p-3">
+                <p className="text-sm font-medium text-foreground">Resume mapping</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Copy this note into your agent so it can continue from the saved progress file.
+                </p>
+                <div className="mt-3">
+                  <CopyMapPrompt prompt={resumePrompt(fallbackPrompt, liveProgress)} />
+                </div>
               </div>
             )}
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -253,4 +270,26 @@ function progressValue(
     return Math.min(100, Math.max(0, (progress.current / progress.total) * 100))
   }
   return active ? ((clampedStage + 1) / MAPPING_STAGES.length) * 100 : kind === CanvasStateKind.Empty ? 100 : 0
+}
+
+function isProgressStuck(progress: WorkspaceProgressStatus | null): boolean {
+  if (!progress || progress.stage === WorkspaceProgressStage.Done || !progress.updated_at) return false
+  const updatedAt = Date.parse(progress.updated_at)
+  if (Number.isNaN(updatedAt)) return false
+  return Date.now() - updatedAt > STUCK_PROGRESS_MS
+}
+
+function resumePrompt(fallbackPrompt: string, progress: WorkspaceProgressStatus): string {
+  const lines = [
+    "AgentCanvas mapping seems stalled.",
+    "",
+    "Please resume from the latest progress state in `.agentcanvas/progress.json`.",
+    `Current stage: ${progress.stage || "unknown"}`,
+  ]
+  if (progress.message) lines.push(`Last message: ${progress.message}`)
+  if (typeof progress.current === "number" && typeof progress.total === "number") {
+    lines.push(`Progress: ${progress.current} of ${progress.total}`)
+  }
+  lines.push("", fallbackPrompt)
+  return lines.join("\n")
 }

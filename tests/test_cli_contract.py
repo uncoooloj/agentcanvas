@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -151,6 +151,41 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             _, kwargs = run_server.call_args
             self.assertEqual(kwargs["token"], "supervised-token")
             self.assertTrue(kwargs["supervised"])
+
+    def test_start_non_loopback_host_requires_explicit_allow_flag(self):
+        from agentcanvas.cli import main
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "real-workspace"
+            workspace.mkdir()
+
+            with patch("agentcanvas.cli.run_server") as run_server:
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    self.assertEqual(main(["start", str(workspace), "--host", "0.0.0.0", "--port", "0"]), 1)
+            run_server.assert_not_called()
+            self.assertIn("--allow-remote-host", stderr.getvalue())
+
+            with patch("agentcanvas.cli.run_server") as run_server:
+                stderr = io.StringIO()
+                with redirect_stderr(stderr):
+                    self.assertEqual(
+                        main(
+                            [
+                                "start",
+                                str(workspace),
+                                "--host",
+                                "0.0.0.0",
+                                "--allow-remote-host",
+                                "--port",
+                                "0",
+                            ]
+                        ),
+                        0,
+                    )
+            _, kwargs = run_server.call_args
+            self.assertEqual(kwargs["host"], "0.0.0.0")
+            self.assertIn("exposes the local canvas server", stderr.getvalue())
 
     def test_up_command_prints_stable_json_launch_payload(self):
         from agentcanvas.cli import main

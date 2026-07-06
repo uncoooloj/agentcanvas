@@ -52,7 +52,7 @@ from .canvas_v2 import (
 from .projection import ProjectionValidationError, materialize_canvas_model
 from .progress import ProgressError, write_progress, progress_status
 from .server import run_server
-from .supervisor import SupervisorError, ensure_server_up, stop_server
+from .supervisor import SupervisorError, ensure_server_up, is_loopback_host, stop_server
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -72,6 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
     start_parser.add_argument("path", nargs="?", help="workspace path to serve")
     start_parser.add_argument("--workspace", help="workspace path to serve")
     start_parser.add_argument("--host", default="127.0.0.1", help="host to bind")
+    start_parser.add_argument(
+        "--allow-remote-host",
+        action="store_true",
+        help="allow start --host to bind a non-loopback interface; prints a warning",
+    )
     start_parser.add_argument("--port", default=8765, type=int, help="port to bind; 0 picks a free port")
     start_parser.add_argument(
         "--agent",
@@ -293,6 +298,17 @@ def cmd_index(args: argparse.Namespace) -> int:
 def cmd_start(args: argparse.Namespace) -> int:
     landing_mode = not args.workspace and not args.path and not args.demo
     demo_mode = bool(args.demo)
+    if not is_loopback_host(args.host):
+        if not getattr(args, "allow_remote_host", False):
+            print(
+                "Refusing to bind AgentCanvas to a non-loopback host without --allow-remote-host.",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            "Warning: binding AgentCanvas to a non-loopback host exposes the local canvas server to your network.",
+            file=sys.stderr,
+        )
     run_server(
         workspace=Path(selected_workspace(args, demo_default=landing_mode or demo_mode)),
         host=args.host,

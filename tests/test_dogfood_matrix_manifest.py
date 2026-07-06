@@ -1,9 +1,11 @@
 import json
 import tempfile
 import unittest
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
-from scripts.verify_dogfood_matrix import DogfoodMatrixError, validate_matrix
+from scripts.verify_dogfood_matrix import DogfoodMatrixError, main, validate_matrix
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +30,8 @@ class DogfoodMatrixManifestTests(unittest.TestCase):
             validate_matrix(PARTIAL_MATRIX, gate=True)
 
         self.assertIn("dogfood matrix gate is incomplete", str(raised.exception))
+        self.assertIn("antigravity / agentcanvas", str(raised.exception))
+        self.assertIn("clean full_loop attempts seen: none", str(raised.exception))
 
     def test_public_release_matrix_template_validates_without_claiming_gate(self):
         result = validate_matrix(TEMPLATE_MATRIX)
@@ -40,6 +44,30 @@ class DogfoodMatrixManifestTests(unittest.TestCase):
     def test_public_release_matrix_template_fails_gate_mode(self):
         with self.assertRaises(DogfoodMatrixError):
             validate_matrix(TEMPLATE_MATRIX, gate=True)
+
+    def test_details_output_lists_missing_pairs(self):
+        output = StringIO()
+
+        with patch("sys.stdout", output):
+            exit_code = main(["--details", str(PARTIAL_MATRIX)])
+
+        self.assertEqual(exit_code, 0)
+        rendered = output.getvalue()
+        self.assertIn("Missing release-gate pairs:", rendered)
+        self.assertIn("antigravity / agentcanvas", rendered)
+        self.assertIn("clean full_loop attempts seen: none", rendered)
+
+    def test_json_output_includes_missing_pairs(self):
+        output = StringIO()
+
+        with patch("sys.stdout", output):
+            exit_code = main(["--json", str(PARTIAL_MATRIX)])
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(output.getvalue())
+        self.assertEqual(len(payload), 1)
+        self.assertFalse(payload[0]["complete"])
+        self.assertEqual(payload[0]["missing"][0]["required"], "two_consecutive_clean_attempts")
 
     def test_complete_matrix_requires_two_consecutive_clean_attempts_per_pair(self):
         with tempfile.TemporaryDirectory() as temp_root:

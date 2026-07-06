@@ -115,6 +115,21 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("confidenceLabel", inspector)
         self.assertIn("Project references AgentCanvas used", inspector)
 
+    def test_activity_dialog_merges_canvas_history_and_pending_status(self):
+        activity = (PROJECT_ROOT / "frontend" / "src" / "components" / "ActivityDialog.tsx").read_text(encoding="utf-8")
+        app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("ActivityDialog", activity)
+        self.assertIn("fetchCanvasHistory", activity)
+        self.assertIn("fetchPending", activity)
+        self.assertIn("ActivityEventKind", activity)
+        self.assertIn("buildActivityEvents", activity)
+        self.assertIn("statusHistory", activity)
+        self.assertIn("compareActivityEvents", activity)
+        self.assertIn("ActivityDialog", app)
+        self.assertIn("activityOpen", app)
+        self.assertIn("aria-label=\"Activity\"", app)
+
 
 if __name__ == "__main__":
     unittest.main()

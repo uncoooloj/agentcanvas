@@ -469,9 +469,20 @@ def pending_summary(item: Dict[str, Any]) -> Dict[str, Any]:
         "markdown_path",
         "refs",
         "orphaned_refs",
+        "status_history",
         "conversation_summary",
     ]
     summary = {key: item[key] for key in summary_keys if key in item}
+    if isinstance(summary.get("status_history"), list):
+        summary["status_history"] = summary["status_history"][-20:]
+    else:
+        summary["status_history"] = [
+            {
+                "status": item.get("status", PENDING),
+                "updated_at": item.get("updated_at") or item.get("created_at"),
+                "note": item.get("note"),
+            }
+        ]
     if "changeId" not in summary and isinstance(item.get("change"), dict):
         change = item["change"]
         for key in ("changeId", "clientChangeId", "change_id"):

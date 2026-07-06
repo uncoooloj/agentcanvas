@@ -9,6 +9,7 @@ from agentcanvas.ir import (
     ConversationRole,
     ConversationTurnKind,
     append_pending_conversation,
+    update_pending_status,
     write_pending_change,
 )
 from agentcanvas.lifecycle import IN_PROGRESS, NEEDS_INPUT
@@ -87,8 +88,18 @@ class ServerPendingApiTests(unittest.TestCase):
             self.assertEqual(summary["sessionId"], "session-1")
             self.assertEqual(summary["conversation_summary"]["turns"], 0)
             self.assertIn("refs", summary)
+            self.assertIn("status_history", summary)
             self.assertNotIn("change", summary)
             self.assertNotIn("graph", summary)
+
+            update_pending_status(workspace, pending["id"], "in_progress", note="Started work.")
+            fake = _FakeHandler(handler_cls)
+            handler_cls.handle_api_get(fake, urlparse("/api/pending?token=token"))
+            updated = fake.response["payload"]["pending"][0]
+            self.assertEqual(updated["status_history"][-1]["status"], "in_progress")
+            self.assertEqual(updated["status_history"][-1]["note"], "Started work.")
+            self.assertNotIn("change", updated)
+            self.assertNotIn("graph", updated)
 
     def test_pending_detail_and_answer_route_use_conversation_jsonl(self):
         with tempfile.TemporaryDirectory() as temp_root:

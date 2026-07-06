@@ -128,6 +128,14 @@ def _authoring_warnings(document: Mapping[str, Any]) -> List[Dict[str, Any]]:
             continue
         flow_id = str(flow.get("id"))
         nodes = flow.get("nodes") or []
+        edges = flow.get("edges") or []
+        outgoing: Dict[str, List[Mapping[str, Any]]] = {}
+        for edge in edges:
+            if not isinstance(edge, Mapping):
+                continue
+            source = edge.get("source")
+            if isinstance(source, str):
+                outgoing.setdefault(source, []).append(edge)
         if nodes and not flow.get("entry_node"):
             warnings.append(
                 _warning(
@@ -159,6 +167,35 @@ def _authoring_warnings(document: Mapping[str, Any]) -> List[Dict[str, Any]]:
                         repair_hint="Attach evidence_refs when this node is grounded in source facts, or keep it as an authoring draft.",
                     )
                 )
+            node_id = str(node.get("id"))
+            node_outgoing = outgoing.get(node_id, [])
+            if node.get("kind") == "Decision":
+                branches = [
+                    edge
+                    for edge in node_outgoing
+                    if edge.get("kind") in {"branch", "error", "loop_back", "loop_exit"}
+                ]
+                if len(branches) < 2:
+                    warnings.append(
+                        _warning(
+                            "DECISION_BRANCHES_INCOMPLETE",
+                            "Decision has fewer than two outgoing branches",
+                            details={"flow": flow_id, "node": node_id},
+                            repair_hint="Add both the true path and fallback path before treating this flow as complete.",
+                        )
+                    )
+            if node.get("kind") == "Loop":
+                has_body = any(edge.get("kind") == "loop_body" for edge in node_outgoing)
+                has_exit = any(edge.get("kind") == "loop_exit" for edge in node_outgoing)
+                if not has_body or not has_exit:
+                    warnings.append(
+                        _warning(
+                            "LOOP_EXIT_INCOMPLETE",
+                            "Loop is missing either its body path or exit path",
+                            details={"flow": flow_id, "node": node_id},
+                            repair_hint="Add a loop_body path and a loop_exit path so readers can see when the loop stops.",
+                        )
+                    )
     return warnings
 
 

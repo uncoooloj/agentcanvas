@@ -203,6 +203,75 @@ class ServerCanvasV2ApiTests(unittest.TestCase):
                 [1, 0],
             )
 
+    def test_canvas_validate_returns_authoring_warnings(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            handler_cls.handle_api_post(
+                _FakePostHandler(handler_cls, self._initial_batch()),
+                urlparse("/api/canvas/apply?token=token"),
+            )
+            fake = _FakeGetHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/canvas/validate?token=token&mode=authoring"))
+
+            self.assertEqual(fake.response["status"], 200)
+            payload = fake.response["payload"]
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["mode"], "authoring")
+            self.assertEqual(payload["revision"], 1)
+            self.assertEqual(payload["flow_count"], 1)
+            warning_codes = {warning["code"] for warning in payload["warnings"]}
+            self.assertIn("EVIDENCE_REFS_MISSING", warning_codes)
+
+    def test_canvas_validate_returns_strict_error_envelope(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            handler_cls.handle_api_post(
+                _FakePostHandler(handler_cls, self._initial_batch()),
+                urlparse("/api/canvas/apply?token=token"),
+            )
+            handler_cls.handle_api_post(
+                _FakePostHandler(
+                    handler_cls,
+                    {
+                        "base_revision": 1,
+                        "operations": [
+                            {
+                                "op": "upsert_node",
+                                "flow": "flow:upload",
+                                "node": {
+                                    "id": "n:upload:orphan",
+                                    "kind": "Do",
+                                    "title": "Unreachable work",
+                                },
+                            }
+                        ],
+                    },
+                ),
+                urlparse("/api/canvas/apply?token=token"),
+            )
+            fake = _FakeGetHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/canvas/validate?token=token&mode=strict"))
+
+            self.assertEqual(fake.response["status"], 400)
+            payload = fake.response["payload"]
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["error"]["code"], "UNREACHABLE_NODE")
+            self.assertIn("repair_hint", payload["error"])
+
     def test_canvas_restore_restores_snapshot_as_new_revision(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = self._workspace(temp_root)

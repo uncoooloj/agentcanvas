@@ -21,6 +21,7 @@ from .canvas_v2 import (
     apply_operation_batch,
     list_canvas_history,
     restore_canvas_revision,
+    validate_canvas_v2,
 )
 from .indexer import index_workspace
 from .ir import (
@@ -840,6 +841,16 @@ def make_handler(
                     self.write_json(exc.to_dict(), status=canvas_store_error_status(exc))
                     return
                 self.write_json(history)
+                return
+
+            if parsed.path == "/api/canvas/validate":
+                mode = parse_qs(parsed.query).get("mode", ["authoring"])[0]
+                try:
+                    canvas = load_or_build_canvas(workspace, demo_mode=demo_mode)
+                    result = validate_canvas_v2(canvas["canvas_v2"], mode=mode)
+                    self.write_json({"ok": True, "revision": canvas.get("revision"), **result})
+                except CanvasStoreError as exc:
+                    self.write_json(exc.to_dict(), status=canvas_store_error_status(exc))
                 return
 
             if parsed.path == "/api/pending":

@@ -56,6 +56,36 @@ class CanvasV2ValidationTests(unittest.TestCase):
         for warning in result["warnings"]:
             self.assertTrue(warning["repair_hint"])
 
+    def test_authoring_mode_warns_for_incomplete_decision_and_loop_paths(self):
+        result = validate_canvas_v2(
+            {
+                "schema": "agentcanvas.canvas.v2",
+                "app": {},
+                "flows": [
+                    {
+                        "id": "flow:draft",
+                        "title": "Draft",
+                        "entry_node": "n:start",
+                        "nodes": [
+                            {"id": "n:start", "kind": "When", "title": "Start", "evidence_refs": ["src/app.ts"]},
+                            {"id": "n:decision", "kind": "Decision", "title": "Can continue?", "evidence_refs": ["src/app.ts"]},
+                            {"id": "n:loop", "kind": "Loop", "title": "Retry work", "evidence_refs": ["src/app.ts"]},
+                            {"id": "n:done", "kind": "End", "title": "Done"},
+                        ],
+                        "edges": [
+                            {"id": "e:start:decision", "source": "n:start", "target": "n:decision", "kind": "normal"},
+                            {"id": "e:decision:loop", "source": "n:decision", "target": "n:loop", "kind": "branch"},
+                            {"id": "e:loop:done", "source": "n:loop", "target": "n:done", "kind": "loop_body"},
+                        ],
+                    }
+                ],
+            }
+        )
+
+        warnings_by_code = {warning["code"]: warning for warning in result["warnings"]}
+        self.assertIn("DECISION_BRANCHES_INCOMPLETE", warnings_by_code)
+        self.assertIn("LOOP_EXIT_INCOMPLETE", warnings_by_code)
+
     def test_invalid_validation_mode_reports_repair_hint(self):
         self.assertValidationError(
             {

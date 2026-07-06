@@ -99,7 +99,11 @@ class AdapterSetupTests(unittest.TestCase):
             self.assertEqual(skill.read_text(encoding="utf-8"), render_skill_template())
             mcp = json.loads((workspace / ".mcp.json").read_text(encoding="utf-8"))
             self.assertIn("existing", mcp["mcpServers"])
-            self.assertEqual(mcp["mcpServers"]["agentcanvas"]["command"], "agentcanvas")
+            self.assertEqual(mcp["mcpServers"]["agentcanvas"]["command"], "uvx")
+            self.assertEqual(
+                mcp["mcpServers"]["agentcanvas"]["args"][:3],
+                ["--from", "use-agentcanvas[mcp]", "agentcanvas"],
+            )
 
             setup_adapter(workspace, agent="cursor")
             cursor_first = _snapshot(workspace)
@@ -109,7 +113,8 @@ class AdapterSetupTests(unittest.TestCase):
             cursor_rule = workspace / ".cursor" / "rules" / "agentcanvas.mdc"
             self.assertIn("Cursor Notes", cursor_rule.read_text(encoding="utf-8"))
             cursor_mcp = json.loads((workspace / ".cursor" / "mcp.json").read_text(encoding="utf-8"))
-            self.assertEqual(cursor_mcp["mcpServers"]["agentcanvas"]["args"][0], "mcp")
+            self.assertEqual(cursor_mcp["mcpServers"]["agentcanvas"]["command"], "uvx")
+            self.assertIn("mcp", cursor_mcp["mcpServers"]["agentcanvas"]["args"])
 
     def test_setup_generic_has_zero_mcp_mentions_and_antigravity_writes_nothing(self):
         with tempfile.TemporaryDirectory() as temp_root:

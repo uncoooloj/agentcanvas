@@ -92,7 +92,7 @@ pip install 'use-agentcanvas[mcp]'
 Then run:
 
 ```bash
-agentcanvas mcp --workspace <workspace>
+uvx --from 'use-agentcanvas[mcp]' agentcanvas mcp --workspace <workspace>
 ```
 
 MCP exposes the same local state and lifecycle as the CLI:
@@ -112,8 +112,10 @@ MCP exposes the same local state and lifecycle as the CLI:
 Do not make MCP smarter than the product contract. It is a nicer handle for the
 same local state.
 
-If the optional MCP dependency is missing, `agentcanvas mcp` exits with code `3`,
-prints nothing to stdout, and prints the install hint to stderr.
+If you already installed AgentCanvas locally with the MCP extra, `agentcanvas mcp
+--workspace <workspace>` is equivalent. If the optional MCP dependency is
+missing, `agentcanvas mcp` exits with code `3`, prints nothing to stdout, and
+prints the install hint to stderr.
 
 ### 3.1 Setup
 

@@ -19,6 +19,8 @@ from agentcanvas.lifecycle import (
     SENT,
 )
 from agentcanvas.mcp_server import (
+    DEFAULT_EVIDENCE_MAX_BYTES,
+    DEFAULT_EVIDENCE_MAX_ITEMS,
     apply_canvas,
     ask_user,
     get_answers,
@@ -49,6 +51,10 @@ def _agentcanvas_env():
 
 class McpServerContractTests(unittest.TestCase):
     maxDiff = None
+
+    def test_mcp_evidence_defaults_match_phase_1_contract(self):
+        self.assertEqual(DEFAULT_EVIDENCE_MAX_ITEMS, 100)
+        self.assertEqual(DEFAULT_EVIDENCE_MAX_BYTES, 48 * 1024)
 
     def _workspace(self, temp_root):
         workspace = Path(temp_root) / "workspace"

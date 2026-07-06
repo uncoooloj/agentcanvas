@@ -8,7 +8,7 @@ needed.
 ## Start Here
 
 1. Run `agentcanvas --help` to confirm the CLI is available.
-2. Call `agentcanvas mcp` tools when your agent supports MCP.
+2. Call `uvx --from 'use-agentcanvas[mcp]' agentcanvas mcp` tools when your agent supports MCP.
 3. If MCP is not available, use the CLI and files under `.agentcanvas/`.
 4. Start each turn by checking workspace status and unanswered questions.
 

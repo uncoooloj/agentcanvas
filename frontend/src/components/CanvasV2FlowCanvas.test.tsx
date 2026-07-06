@@ -8,7 +8,7 @@ import {
 } from "./CanvasV2FlowCanvas"
 import { TooltipProvider } from "./ui/tooltip"
 import { nativeNodeToDisplayNode } from "@/lib/nativeDisplay"
-import { CanvasV2EdgeKind, CanvasV2NodeKind, type CanvasV2Flow } from "@/lib/types"
+import { CanvasV2EdgeKind, CanvasV2NodeKind, CanvasV2Status, type CanvasV2Flow } from "@/lib/types"
 
 describe("CanvasV2FlowCanvas", () => {
   const flow: CanvasV2Flow = {
@@ -32,6 +32,7 @@ describe("CanvasV2FlowCanvas", () => {
         title: "Take payment",
         evidence: [],
         evidenceRefs: [],
+        status: CanvasV2Status.Proposed,
       },
       {
         id: "n:receipt",
@@ -79,6 +80,7 @@ describe("CanvasV2FlowCanvas", () => {
     )
 
     expect(html).toContain("Take payment")
+    expect(html).toContain("Not built yet")
     expect(html).toContain("Send receipt")
     expect(html).toContain("Opens receipt")
     expect(html).toContain('data-canvas-v2-node-id="n:start"')

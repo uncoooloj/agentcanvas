@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 import {
   CanvasV2EdgeKind,
   CanvasV2NodeKind,
+  CanvasV2Status,
   FlowAction,
   FlowNodeKind,
   type CanvasV2Flow,
@@ -202,6 +203,11 @@ function NativeNodeCard({
             {node.kind === CanvasV2NodeKind.SubFlow && node.flowRef && (
               <span className="rounded-md bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
                 Opens {node.flowRef.replace(/^flow:/, "")}
+              </span>
+            )}
+            {node.status === CanvasV2Status.Proposed && (
+              <span className="rounded-md bg-rule-bg px-1.5 py-0.5 text-[10px] font-medium text-rule-fg">
+                Not built yet
               </span>
             )}
           </span>

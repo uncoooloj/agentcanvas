@@ -51,7 +51,13 @@ class NoTelemetryTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             for match in FETCH_CALL_RE.finditer(text):
                 target = match.group("target").strip()
-                if target not in {"url(path", "url(\"/api/reindex\"", "url(\"/api/changes\"", "u.toString("}:
+                if target not in {
+                    "url(path",
+                    "url(\"/api/reindex\"",
+                    "url(\"/api/reindex?includeGraph=1\"",
+                    "url(\"/api/changes\"",
+                    "u.toString(",
+                }:
                     offenders.append(f"{path.relative_to(PROJECT_ROOT)} uses fetch({target}")
 
         self.assertEqual(offenders, [])

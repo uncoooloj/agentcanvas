@@ -403,6 +403,50 @@ def main():
                 persisted = json.load(handle)
             self.assertEqual("Signup", persisted["canvas"]["journeys"][0]["title"])
 
+    def test_reindex_returns_thin_canvas_response_by_default(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            _agentcanvas_like_workspace(root)
+            index_workspace(root)
+            handler_cls = make_handler(
+                root,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_post(fake, urlparse("/api/reindex?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            payload = fake.response["payload"]
+            self.assertTrue(payload["ok"])
+            self.assertIn("canvas", payload)
+            self.assertIn("mapping", payload)
+            self.assertIn("summary", payload)
+            self.assertIn("workspace_profile", payload["canvas"]["metadata"])
+            self.assertNotIn("graph", payload)
+
+    def test_reindex_can_include_graph_for_explicit_callers(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            _agentcanvas_like_workspace(root)
+            index_workspace(root)
+            handler_cls = make_handler(
+                root,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_post(fake, urlparse("/api/reindex?token=token&includeGraph=1"))
+
+            self.assertEqual(fake.response["status"], 200)
+            payload = fake.response["payload"]
+            self.assertIn("graph", payload)
+            self.assertEqual(payload["summary"], payload["graph"]["summary"])
+
     def test_manifest_surfaces_survive_source_file_truncation(self):
         with tempfile.TemporaryDirectory() as temp_root:
             root = Path(temp_root)

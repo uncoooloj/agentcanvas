@@ -203,7 +203,7 @@ export async function restoreCanvasRevision(request: CanvasRestoreRequest): Prom
 }
 
 export async function reindex(): Promise<CodeGraph> {
-  const res = await fetch(url("/api/reindex"), {
+  const res = await fetch(url("/api/reindex?includeGraph=1"), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ source: "agentcanvas-web" }),

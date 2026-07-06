@@ -34,9 +34,10 @@ import {
   type ChangeEntry,
   type HandoffItem,
 } from "@/lib/changeset"
-import { ApiError, fetchCanvas, reindexCanvas } from "@/lib/api"
+import { ApiError, fetchCanvas, fetchMapHealth, isApiAuthExpired, reindexCanvas } from "@/lib/api"
 import { AppContextMode, useAppContext, type AppContext } from "@/lib/appcontext"
 import type { EditRequest, StagedEdit } from "@/lib/edits"
+import { CANVAS_POLL_INTERVAL_MS, documentIsVisible, HEALTH_POLL_INTERVAL_MS } from "@/lib/polling"
 import {
   CanvasStateKind,
   CanvasMappingMode,
@@ -45,16 +46,19 @@ import {
   CopyState,
   FlowAction,
   JourneyActivity,
+  MapFreshnessStatus,
+  MapHealthStatus,
   findNode,
   type AppModel,
   type CanvasMapping,
   type CanvasSourceSummary,
   type FlowNode,
   type Journey,
+  type MapHealth,
 } from "@/lib/types"
 
 const HOME = "__home__"
-const CANVAS_POLL_INTERVAL_MS = 2500
+const AUTH_EXPIRED_NOTICE = "This AgentCanvas link cannot sync anymore. Reopen AgentCanvas from your agent to keep this map live."
 const MAPPING_STAGES = [
   "Reading project",
   "Finding where work starts",
@@ -78,6 +82,7 @@ type WorkspaceModelResult = {
   model: AppModel
   mapping?: CanvasMapping
   notice?: string
+  revision?: number
 }
 
 type MapRefreshAction = {
@@ -119,7 +124,10 @@ export default function App() {
   const [dark, setDark] = useState(false)
   const mappingActive = canvasState.kind === CanvasStateKind.Loading || canvasState.kind === CanvasStateKind.Reindexing
   const [mappingStage, setMappingStage] = useState(0)
+  const [mapHealth, setMapHealth] = useState<MapHealth | null>(null)
+  const [authNotice, setAuthNotice] = useState<string | null>(null)
   const canvasSignatureRef = useRef<string | null>(null)
+  const canvasRevisionRef = useRef<number | null>(null)
   const pollBlockedRef = useRef(false)
 
   const phase = useChanges((s) => s.handoff.phase)
@@ -139,8 +147,8 @@ export default function App() {
     [handoffItems, localChanges, model.journeys, orderingChanges, phase]
   )
   const canvasSource = useMemo(
-    () => describeCanvasSource(context, model, canvasState),
-    [context, model, canvasState]
+    () => describeCanvasSource(context, model, canvasState, mapHealth),
+    [context, model, canvasState, mapHealth]
   )
   const mapRefreshAction = useMemo(
     () => describeMapRefreshAction(canvasSource, context, model.appName),
@@ -170,6 +178,38 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [mappingActive])
 
+  function rememberWorkspaceResult(result: WorkspaceModelResult) {
+    canvasSignatureRef.current = canvasSignature(result)
+    canvasRevisionRef.current = result.revision ?? null
+  }
+
+  function showWorkspaceResult(result: WorkspaceModelResult) {
+    if (isUnreadyMap(result.mapping)) {
+      setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
+      setCanvasState({
+        kind: CanvasStateKind.Empty,
+        message: unreadyMapTitle(result),
+        detail: starterMapDetail(result, context.assistant),
+        nextSteps: mapNextSteps(result, context),
+        fallbackPrompt: mapFallbackPrompt(result, context),
+        mapping: result.mapping,
+      })
+    } else if (!result.model.journeys.length) {
+      setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
+      setCanvasState({
+        kind: CanvasStateKind.Empty,
+        message: "No plain-English map yet",
+        detail: emptyWorkspaceDetail(result),
+        nextSteps: mapNextSteps(result, context),
+        fallbackPrompt: mapFallbackPrompt(result, context),
+        mapping: result.mapping,
+      })
+    } else {
+      setModel((current) => preserveLocalJourneyRecency(result.model, current))
+      setCanvasState({ kind: CanvasStateKind.Ready, notice: result.notice, mapping: result.mapping })
+    }
+  }
+
   async function load({ refresh = false }: { refresh?: boolean } = {}) {
     // Demo mode shows the curated, hand-authored flows (great first impression);
     // the heuristic projection over real code isn't good enough to lead with yet.
@@ -177,40 +217,24 @@ export default function App() {
     if (context.mode === AppContextMode.Demo) {
       setModel((current) => preserveLocalJourneyRecency(DEMO_MODEL, current))
       setSelectedId(null)
+      setMapHealth(null)
+      setAuthNotice(null)
+      canvasSignatureRef.current = null
+      canvasRevisionRef.current = null
       setCanvasState({ kind: CanvasStateKind.Ready })
       return
     }
 
     setMappingStage(0)
+    setMapHealth(null)
     setCanvasState({ kind: refresh ? CanvasStateKind.Reindexing : CanvasStateKind.Loading })
     try {
       const result = await loadWorkspaceModel(refresh)
-      canvasSignatureRef.current = canvasSignature(result)
-      if (isUnreadyMap(result.mapping)) {
-        setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
-        setCanvasState({
-          kind: CanvasStateKind.Empty,
-          message: unreadyMapTitle(result),
-          detail: starterMapDetail(result, context.assistant),
-          nextSteps: mapNextSteps(result, context),
-          fallbackPrompt: mapFallbackPrompt(result, context),
-          mapping: result.mapping,
-        })
-      } else if (!result.model.journeys.length) {
-        setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
-        setCanvasState({
-          kind: CanvasStateKind.Empty,
-          message: "No plain-English map yet",
-          detail: emptyWorkspaceDetail(result),
-          nextSteps: mapNextSteps(result, context),
-          fallbackPrompt: mapFallbackPrompt(result, context),
-          mapping: result.mapping,
-        })
-      } else {
-        setModel((current) => preserveLocalJourneyRecency(result.model, current))
-        setCanvasState({ kind: CanvasStateKind.Ready, notice: result.notice, mapping: result.mapping })
-      }
+      rememberWorkspaceResult(result)
+      showWorkspaceResult(result)
+      setAuthNotice(null)
     } catch (error) {
+      if (isApiAuthExpired(error)) setAuthNotice(AUTH_EXPIRED_NOTICE)
       setModel(emptyAppModel(context.workspace || model.appName || "Your app"))
       setCanvasState({
         kind: CanvasStateKind.Error,
@@ -241,42 +265,59 @@ export default function App() {
         const result = await loadWorkspaceModel(false)
         if (cancelled || pollBlockedRef.current) return
 
-        const signature = canvasSignature(result)
-        if (signature === canvasSignatureRef.current) return
-
-        canvasSignatureRef.current = signature
-        if (isUnreadyMap(result.mapping)) {
-          setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
-          setCanvasState({
-            kind: CanvasStateKind.Empty,
-            message: unreadyMapTitle(result),
-            detail: starterMapDetail(result, context.assistant),
-            nextSteps: mapNextSteps(result, context),
-            fallbackPrompt: mapFallbackPrompt(result, context),
-            mapping: result.mapping,
-          })
-        } else if (!result.model.journeys.length) {
-          setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
-          setCanvasState({
-            kind: CanvasStateKind.Empty,
-            message: "No plain-English map yet",
-            detail: emptyWorkspaceDetail(result),
-            nextSteps: mapNextSteps(result, context),
-            fallbackPrompt: mapFallbackPrompt(result, context),
-            mapping: result.mapping,
-          })
-        } else {
-          setModel((current) => preserveLocalJourneyRecency(result.model, current))
-          setCanvasState({ kind: CanvasStateKind.Ready, notice: result.notice, mapping: result.mapping })
+        if (typeof result.revision === "number" && result.revision === canvasRevisionRef.current) {
+          setAuthNotice(null)
+          return
         }
-      } catch {
-        // Polling is quiet; keep the current canvas visible through transient read errors.
+
+        const signature = canvasSignature(result)
+        if (typeof result.revision !== "number" && signature === canvasSignatureRef.current) {
+          setAuthNotice(null)
+          return
+        }
+
+        rememberWorkspaceResult(result)
+        showWorkspaceResult(result)
+        setAuthNotice(null)
+      } catch (error) {
+        if (!cancelled && isApiAuthExpired(error)) setAuthNotice(AUTH_EXPIRED_NOTICE)
+        // Other polling failures are quiet; keep the current canvas visible through transient read errors.
       } finally {
         inFlight = false
       }
     }
 
     const timer = window.setInterval(pollCanvas, CANVAS_POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [contextLoading, context.mode, context.workspace, onWelcome])
+
+  useEffect(() => {
+    if (contextLoading || context.mode !== AppContextMode.Workspace || onWelcome) return
+
+    let cancelled = false
+    let inFlight = false
+
+    async function pollHealth() {
+      if (inFlight || !documentIsVisible()) return
+      inFlight = true
+      try {
+        const health = await fetchMapHealth()
+        if (!cancelled) {
+          setMapHealth(health)
+          setAuthNotice(null)
+        }
+      } catch (error) {
+        if (!cancelled && isApiAuthExpired(error)) setAuthNotice(AUTH_EXPIRED_NOTICE)
+      } finally {
+        inFlight = false
+      }
+    }
+
+    void pollHealth()
+    const timer = window.setInterval(pollHealth, HEALTH_POLL_INTERVAL_MS)
     return () => {
       cancelled = true
       window.clearInterval(timer)
@@ -473,7 +514,9 @@ export default function App() {
 
         <main className="min-w-0 flex-1 overflow-auto">
           {(model.isDemo || context.isDemo) && <DemoBanner thin={model.thin} />}
-          {readyMapRefreshAction ? (
+          {authNotice ? (
+            <WorkspaceNotice message={authNotice} />
+          ) : readyMapRefreshAction ? (
             <MapRefreshNotice
               action={readyMapRefreshAction}
               loading={loading}
@@ -566,6 +609,7 @@ async function loadWorkspaceModel(refresh: boolean): Promise<WorkspaceModelResul
     model: result.model,
     mapping: result.mapping,
     notice: mappingNotice(result.mapping),
+    revision: result.revision,
   }
 }
 
@@ -705,7 +749,8 @@ function canvasSignature(result: WorkspaceModelResult): string {
 function describeCanvasSource(
   context: AppContext,
   model: AppModel,
-  state: CanvasState
+  state: CanvasState,
+  health?: MapHealth | null
 ): CanvasSourceSummary {
   const mapping = state.mapping
   const source = mapping?.source
@@ -768,6 +813,17 @@ function describeCanvasSource(
       label: "No map yet",
       shortLabel: "No map yet",
       detail: "AgentCanvas checked this project, but it does not have a clear plain-English map yet.",
+      tone: CanvasSourceTone.Warning,
+      flowCount,
+    }
+  }
+
+  if (isStaleHealth(health)) {
+    return {
+      kind: CanvasSourceKind.StaleCache,
+      label: "Saved map may be out of date",
+      shortLabel: "Saved copy",
+      detail: health?.freshness.reason || "The project changed after this map was saved. Ask your assistant to refresh it if the behavior changed.",
       tone: CanvasSourceTone.Warning,
       flowCount,
     }
@@ -841,6 +897,15 @@ function isStaleMap(mapping?: CanvasMapping): boolean {
       looksStale(mapping?.cacheStatus) ||
       looksStale(mapping?.source?.status) ||
       mapping?.warnings?.some((warning) => looksStale(warning) || /refreshed after|kept the canvas|behavior changed/i.test(warning))
+  )
+}
+
+function isStaleHealth(health?: MapHealth | null): boolean {
+  return Boolean(
+    health &&
+      (health.freshness.stale ||
+        health.freshness.status === MapFreshnessStatus.Stale ||
+        health.status === MapHealthStatus.StaleCanvasIr)
   )
 }
 

@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils"
 import { HandoffItemStatus, HandoffPhase, useChanges, type HandoffItem } from "@/lib/changeset"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { documentIsVisible, PENDING_ACTIVITY_POLL_INTERVAL_MS } from "@/lib/polling"
 import { CanvasSourceTone, CopyState } from "@/lib/types"
 
 interface Props {
@@ -18,8 +19,9 @@ export function HandoffOverlay({ onAcknowledge, onDismiss }: Props) {
   useEffect(() => {
     if (phase === HandoffPhase.Composing || phase === HandoffPhase.Done) return
     const id = window.setInterval(() => {
+      if (!documentIsVisible()) return
       refreshHandoff()
-    }, 2500)
+    }, PENDING_ACTIVITY_POLL_INTERVAL_MS)
     return () => window.clearInterval(id)
   }, [phase, refreshHandoff])
 

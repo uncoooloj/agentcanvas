@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import { fetchPending, postChange, type ChangeRequest } from "./api"
+import { fetchPending, isApiAuthExpired, postChange, type ChangeRequest } from "./api"
 import {
   ChangeKind,
   FlowAction,
@@ -263,7 +263,11 @@ export const useChanges = create<ChangeStore>((set, get) => ({
         }
       })
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not refresh pending request status."
+      const message = isApiAuthExpired(error)
+        ? "This AgentCanvas link cannot read status anymore. Reopen AgentCanvas from your agent, or use the fallback prompt."
+        : error instanceof Error
+          ? error.message
+          : "Could not refresh pending request status."
       set((s) => ({
         handoff: {
           ...s.handoff,

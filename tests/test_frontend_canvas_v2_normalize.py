@@ -59,12 +59,33 @@ class FrontendCanvasV2NormalizeTests(unittest.TestCase):
                 "answer-pending",
                 "apply-error",
                 "apply-success",
+                "auth-expired",
                 "health",
                 "history",
                 "pending-detail",
                 "restore",
             ],
         )
+
+    def test_polling_helpers_are_visibility_aware(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            script_path = Path(temp_root) / "polling-helpers.cjs"
+            script_path.write_text(_polling_node_script(), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    "node",
+                    str(script_path),
+                    str(FRONTEND_ROOT / "src" / "lib" / "polling.ts"),
+                    str(FRONTEND_ROOT / "node_modules" / "typescript"),
+                ],
+                cwd=str(FRONTEND_ROOT),
+                text=True,
+                capture_output=True,
+                timeout=20,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertEqual(json.loads(completed.stdout), {"ok": True})
 
 
 def _node_script():
@@ -344,6 +365,17 @@ def _node_script():
           }
           checked.push("answer-pending");
 
+          const authError = new api.ApiError("/api/canvas", 401, "expired");
+          const forbiddenError = new api.ApiError("/api/canvas", 403, "forbidden");
+          const missingError = new api.ApiError("/api/canvas", 404, "missing");
+          if (!api.isApiAuthExpired(authError) || !api.isApiAuthExpired(forbiddenError)) {
+            throw new Error("401/403 should be treated as expired AgentCanvas auth");
+          }
+          if (api.isApiAuthExpired(missingError) || !api.isApiNotFound(missingError)) {
+            throw new Error("404 should not be treated as expired AgentCanvas auth");
+          }
+          checked.push("auth-expired");
+
           try {
             await api.applyCanvasBatch({ base_revision: 2, operations: [] });
             throw new Error("apply conflict did not throw");
@@ -411,6 +443,49 @@ def _node_script():
           console.error(error && error.stack ? error.stack : error);
           process.exit(1);
         });
+        """
+    )
+
+
+def _polling_node_script():
+    return textwrap.dedent(
+        """
+        const fs = require("fs");
+        const vm = require("vm");
+        const ts = require(process.argv[3]);
+
+        const source = fs.readFileSync(process.argv[2], "utf8");
+        const compiled = ts.transpileModule(source, {
+          compilerOptions: {
+            module: ts.ModuleKind.CommonJS,
+            target: ts.ScriptTarget.ES2020,
+          },
+        }).outputText;
+
+        const localModule = { exports: {} };
+        const context = {
+          module: localModule,
+          exports: localModule.exports,
+          require,
+        };
+        vm.createContext(context);
+        vm.runInContext(compiled, context, { filename: process.argv[2] });
+
+        const {
+          CANVAS_POLL_INTERVAL_MS,
+          PENDING_ACTIVITY_POLL_INTERVAL_MS,
+          HEALTH_POLL_INTERVAL_MS,
+          documentIsVisible,
+        } = localModule.exports;
+
+        if (CANVAS_POLL_INTERVAL_MS !== 2500) throw new Error("canvas poll interval drifted");
+        if (PENDING_ACTIVITY_POLL_INTERVAL_MS !== 5000) throw new Error("pending poll interval drifted");
+        if (HEALTH_POLL_INTERVAL_MS !== 30000) throw new Error("health poll interval drifted");
+        if (!documentIsVisible()) throw new Error("missing document should be visible for non-browser tests");
+        if (!documentIsVisible({ visibilityState: "visible" })) throw new Error("visible document should poll");
+        if (documentIsVisible({ visibilityState: "hidden" })) throw new Error("hidden document should not poll");
+
+        process.stdout.write(JSON.stringify({ ok: true }));
         """
     )
 

@@ -303,6 +303,10 @@ export function isApiNotFound(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404
 }
 
+export function isApiAuthExpired(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403)
+}
+
 export function describeApiError(error: unknown): string {
   if (error instanceof ApiError) return `${error.path} returned ${error.message}`
   if (error instanceof Error) return error.message

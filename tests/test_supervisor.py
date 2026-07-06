@@ -17,6 +17,7 @@ from agentcanvas.supervisor import (
     stop_server,
     validate_loopback_host,
     validate_launch_record,
+    windows_pid_is_alive,
     write_launch_record,
 )
 
@@ -154,8 +155,54 @@ class SupervisorTests(unittest.TestCase):
         error = OSError("invalid parameter")
         error.winerror = 87
 
-        with patch("agentcanvas.supervisor.os.kill", side_effect=error):
-            self.assertFalse(pid_is_alive(99999999))
+        with patch("agentcanvas.supervisor.os.name", "posix"):
+            with patch("agentcanvas.supervisor.os.kill", side_effect=error):
+                self.assertFalse(pid_is_alive(99999999))
+
+    def test_pid_is_alive_uses_windows_process_handle_check_on_windows(self):
+        with patch("agentcanvas.supervisor.os.name", "nt"):
+            with patch("agentcanvas.supervisor.windows_pid_is_alive", return_value=False) as check:
+                self.assertFalse(pid_is_alive(99999999))
+
+        check.assert_called_once_with(99999999)
+
+    def test_windows_pid_is_alive_treats_access_denied_as_alive(self):
+        class FakeKernel32:
+            def __init__(self):
+                self.closed = []
+
+            def OpenProcess(self, *_args):
+                return 0
+
+            def GetLastError(self):
+                return 5
+
+        fake_ctypes = type("FakeCtypes", (), {"windll": type("Windll", (), {"kernel32": FakeKernel32()})()})()
+
+        with patch.dict("sys.modules", {"ctypes": fake_ctypes}):
+            self.assertTrue(windows_pid_is_alive(123))
+
+    def test_windows_pid_is_alive_closes_open_handle(self):
+        class FakeKernel32:
+            def __init__(self):
+                self.closed = []
+
+            def OpenProcess(self, *_args):
+                return 42
+
+            def CloseHandle(self, handle):
+                self.closed.append(handle)
+
+            def GetLastError(self):
+                return 0
+
+        kernel32 = FakeKernel32()
+        fake_ctypes = type("FakeCtypes", (), {"windll": type("Windll", (), {"kernel32": kernel32})()})()
+
+        with patch.dict("sys.modules", {"ctypes": fake_ctypes}):
+            self.assertTrue(windows_pid_is_alive(123))
+
+        self.assertEqual([42], kernel32.closed)
 
     def test_validate_loopback_host_rejects_public_bind(self):
         validate_loopback_host("127.0.0.1")

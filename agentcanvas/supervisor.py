@@ -329,6 +329,8 @@ def port_is_free(host: str, port: int) -> bool:
 def pid_is_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        return windows_pid_is_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -342,6 +344,19 @@ def pid_is_alive(pid: int) -> bool:
             return False
         return True
     return True
+
+
+def windows_pid_is_alive(pid: int) -> bool:
+    import ctypes
+
+    process_query_limited_information = 0x1000
+    error_access_denied = 5
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(process_query_limited_information, False, int(pid))
+    if handle:
+        kernel32.CloseHandle(handle)
+        return True
+    return kernel32.GetLastError() == error_access_denied
 
 
 def terminate_pid(pid: int, *, wait_seconds: float = 0) -> bool:

@@ -121,10 +121,7 @@ def validate_matrix(path: Path, *, gate: bool = False) -> Dict[str, Any]:
         "missing": missing,
     }
     if gate and not complete:
-        raise DogfoodMatrixError(
-            "dogfood matrix gate is incomplete: %s missing public-agent/workspace pairs"
-            % len(missing)
-        )
+        raise DogfoodMatrixError(_format_missing_gate_error(missing))
     return result
 
 
@@ -185,9 +182,50 @@ def _has_two_consecutive_attempts(attempts: Iterable[int]) -> bool:
     return any(current + 1 == following for current, following in zip(ordered, ordered[1:]))
 
 
-def verify_matrices(paths: Iterable[Path], *, gate: bool) -> int:
+def _format_missing_gate_error(missing: List[Dict[str, Any]]) -> str:
+    summary = [
+        "dogfood matrix gate is incomplete: %s missing public-agent/workspace pairs" % len(missing)
+    ]
+    for item in missing[:8]:
+        attempts = item["clean_attempts"]
+        attempts_text = ", ".join(str(attempt) for attempt in attempts) if attempts else "none"
+        summary.append(
+            "- {agent_id} / {workspace_id}: clean full_loop attempts seen: {attempts}; required: two consecutive clean attempts".format(
+                agent_id=item["agent_id"],
+                workspace_id=item["workspace_id"],
+                attempts=attempts_text,
+            )
+        )
+    if len(missing) > 8:
+        summary.append("- ... %s more missing pairs" % (len(missing) - 8))
+    return "\n".join(summary)
+
+
+def _print_missing_details(result: Mapping[str, Any]) -> None:
+    missing = result["missing"]
+    if not missing:
+        return
+    print("Missing release-gate pairs:", flush=True)
+    for item in missing:
+        attempts = item["clean_attempts"]
+        attempts_text = ", ".join(str(attempt) for attempt in attempts) if attempts else "none"
+        print(
+            "- {agent_id} / {workspace_id}: clean full_loop attempts seen: {attempts}; required: two consecutive clean attempts".format(
+                agent_id=item["agent_id"],
+                workspace_id=item["workspace_id"],
+                attempts=attempts_text,
+            ),
+            flush=True,
+        )
+
+
+def verify_matrices(paths: Iterable[Path], *, gate: bool, details: bool = False, json_output: bool = False) -> int:
+    results = []
     for path in paths:
         result = validate_matrix(path, gate=gate)
+        results.append(result)
+        if json_output:
+            continue
         status = "complete" if result["complete"] else "incomplete"
         print(
             "PASS: {path} status={status} runs={run_count} proofs={proof_count} missing={missing_count}".format(
@@ -199,6 +237,10 @@ def verify_matrices(paths: Iterable[Path], *, gate: bool) -> int:
             ),
             flush=True,
         )
+        if details:
+            _print_missing_details(result)
+    if json_output:
+        print(json.dumps(results, indent=2, sort_keys=True), flush=True)
     return 0
 
 
@@ -210,13 +252,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail unless every public claimed agent has two consecutive clean runs on each gate workspace.",
     )
+    parser.add_argument(
+        "--details",
+        action="store_true",
+        help="Print each missing public-agent/gate-workspace pair when the matrix is incomplete.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print validation results as JSON for release dashboards and scripts.",
+    )
     return parser
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        return verify_matrices(args.matrices, gate=args.gate)
+        return verify_matrices(args.matrices, gate=args.gate, details=args.details, json_output=args.json)
     except (DogfoodMatrixError, DogfoodProofError) as error:
         print(f"FAILED: {error}", file=sys.stderr)
         return 1

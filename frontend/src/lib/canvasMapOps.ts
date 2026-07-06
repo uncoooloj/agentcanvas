@@ -16,7 +16,8 @@ export function buildMapEditOperations(
   node: CanvasV2Node,
   action: FlowAction,
   text1?: string,
-  text2?: string
+  text2?: string,
+  context: CanvasMapPendingContext = {}
 ): CanvasApplyOperation[] {
   switch (action) {
     case FlowAction.Change:
@@ -32,24 +33,75 @@ export function buildMapEditOperations(
         },
       ]
     case FlowAction.AddAfter:
-      return buildAddAfterOperations(flow, node, requiredText(text1, "This map change needs the new step text."))
+      return buildAddAfterOperations(flow, node, requiredText(text1, "This map change needs the new step text."), context)
     case FlowAction.AddRule:
       return buildAddRuleOperations(
         flow,
         node,
         requiredText(text1, "This map change needs the rule condition."),
-        requiredText(text2, "This map change needs the step for the true path.")
+        requiredText(text2, "This map change needs the step for the true path."),
+        context
       )
     case FlowAction.AddThen:
-      return buildAddDecisionPathOperations(flow, node, requiredText(text1, "This map change needs the new step text."), true)
+      return buildAddDecisionPathOperations(flow, node, requiredText(text1, "This map change needs the new step text."), true, context)
     case FlowAction.AddElse:
-      return buildAddDecisionPathOperations(flow, node, requiredText(text1, "This map change needs the new step text."), false)
+      return buildAddDecisionPathOperations(flow, node, requiredText(text1, "This map change needs the new step text."), false, context)
     case FlowAction.Remove:
       return buildRemoveNodeOperations(flow, node)
   }
 }
 
-export function buildAddAfterOperations(flow: CanvasV2Flow, node: CanvasV2Node, title: string): CanvasApplyOperation[] {
+export enum CanvasMapPendingMetadataKey {
+  ClientChangeId = "client_change_id",
+  PendingRequestId = "pending_request_id",
+}
+
+export interface CanvasMapPendingContext {
+  clientChangeId?: string
+  pendingRequestId?: string
+}
+
+export function mapEditCreatesProposedNodes(action: FlowAction): boolean {
+  return (
+    action === FlowAction.AddAfter ||
+    action === FlowAction.AddRule ||
+    action === FlowAction.AddThen ||
+    action === FlowAction.AddElse
+  )
+}
+
+export function proposedNodeIdsFromOperations(operations: CanvasApplyOperation[]): string[] {
+  return operations
+    .filter((operation): operation is Extract<CanvasApplyOperation, { op: "upsert_node" }> => operation.op === "upsert_node")
+    .filter((operation) => operation.node.status === CanvasV2Status.Proposed)
+    .map((operation) => operation.node.id)
+}
+
+export function withPendingRequestMetadata(
+  operations: CanvasApplyOperation[],
+  context: CanvasMapPendingContext
+): CanvasApplyOperation[] {
+  return operations.map((operation) => {
+    if (operation.op !== "upsert_node" || operation.node.status !== CanvasV2Status.Proposed) return operation
+    return {
+      ...operation,
+      node: {
+        ...operation.node,
+        metadata: {
+          ...(operation.node.metadata ?? {}),
+          ...pendingMetadata(context),
+        },
+      },
+    }
+  })
+}
+
+export function buildAddAfterOperations(
+  flow: CanvasV2Flow,
+  node: CanvasV2Node,
+  title: string,
+  context: CanvasMapPendingContext = {}
+): CanvasApplyOperation[] {
   const outgoing = flow.edges.filter((edge) => edge.source === node.id)
   const newNodeId = uniqueCanvasId(
     `node:${node.id}:after:${slugId(title) || "step"}`,
@@ -63,7 +115,7 @@ export function buildAddAfterOperations(flow: CanvasV2Flow, node: CanvasV2Node, 
   operations.push({
     op: "upsert_node",
     flow: flow.id,
-    node: proposedDoNode(newNodeId, title),
+    node: proposedDoNode(newNodeId, title, context),
   })
   const usedEdgeIds = flow.edges.map((edge) => edge.id)
   const insertedEdgeId = uniqueCanvasId(`edge:${node.id}:${newNodeId}`, usedEdgeIds)
@@ -96,7 +148,8 @@ export function buildAddRuleOperations(
   flow: CanvasV2Flow,
   node: CanvasV2Node,
   condition: string,
-  thenTitle: string
+  thenTitle: string,
+  context: CanvasMapPendingContext = {}
 ): CanvasApplyOperation[] {
   const incoming = flow.edges.filter((edge) => edge.target === node.id)
   const usedNodeIds = flow.nodes.map((item) => item.id)
@@ -126,12 +179,13 @@ export function buildAddRuleOperations(
         title: condition,
         evidence_refs: [],
         status: CanvasV2Status.Proposed,
+        metadata: pendingMetadata(context),
       },
     },
     {
       op: "upsert_node",
       flow: flow.id,
-      node: proposedDoNode(thenNodeId, thenTitle),
+      node: proposedDoNode(thenNodeId, thenTitle, context),
     }
   )
   const usedEdgeIds = flow.edges.map((edge) => edge.id)
@@ -189,7 +243,8 @@ export function buildAddDecisionPathOperations(
   flow: CanvasV2Flow,
   node: CanvasV2Node,
   title: string,
-  positivePath: boolean
+  positivePath: boolean,
+  context: CanvasMapPendingContext = {}
 ): CanvasApplyOperation[] {
   if (node.kind !== CanvasV2NodeKind.Decision && node.kind !== CanvasV2NodeKind.Loop) {
     throw new Error("Steps can only be added to rule paths on a decision or loop.")
@@ -212,7 +267,7 @@ export function buildAddDecisionPathOperations(
     {
       op: "upsert_node",
       flow: flow.id,
-      node: proposedDoNode(newNodeId, title),
+      node: proposedDoNode(newNodeId, title, context),
     },
     {
       op: "upsert_edge",
@@ -298,14 +353,22 @@ function findPathEdge(flow: CanvasV2Flow, nodeId: string, positivePath: boolean)
   )
 }
 
-function proposedDoNode(id: string, title: string): CanvasV2NodeOperationPayload {
+function proposedDoNode(id: string, title: string, context: CanvasMapPendingContext = {}): CanvasV2NodeOperationPayload {
   return {
     id,
     kind: CanvasV2NodeKind.Do,
     title,
     evidence_refs: [],
     status: CanvasV2Status.Proposed,
+    metadata: pendingMetadata(context),
   }
+}
+
+function pendingMetadata(context: CanvasMapPendingContext): Record<string, string> | undefined {
+  const metadata: Record<string, string> = {}
+  if (context.clientChangeId) metadata[CanvasMapPendingMetadataKey.ClientChangeId] = context.clientChangeId
+  if (context.pendingRequestId) metadata[CanvasMapPendingMetadataKey.PendingRequestId] = context.pendingRequestId
+  return Object.keys(metadata).length ? metadata : undefined
 }
 
 export function canvasNodePayload(node: CanvasV2Node): CanvasV2NodeOperationPayload {

@@ -35,14 +35,21 @@ import {
   HandoffItemStatus,
   HandoffPhase,
   applyChanges,
+  changeRequestFor,
+  kindForAction,
   useChanges,
   type ChangeEntry,
   type HandoffItem,
 } from "@/lib/changeset"
-import { ApiError, applyCanvasBatch, fetchCanvas, fetchMapHealth, fetchProgress, isApiAuthExpired, reindexCanvas } from "@/lib/api"
+import { ApiError, applyCanvasBatch, fetchCanvas, fetchMapHealth, fetchProgress, isApiAuthExpired, postChange, reindexCanvas } from "@/lib/api"
 import { AppContextMode, useAppContext, type AppContext } from "@/lib/appcontext"
 import { EditDelivery, type EditRequest, type StagedEdit } from "@/lib/edits"
-import { buildMapEditOperations } from "@/lib/canvasMapOps"
+import {
+  buildMapEditOperations,
+  mapEditCreatesProposedNodes,
+  proposedNodeIdsFromOperations,
+  withPendingRequestMetadata,
+} from "@/lib/canvasMapOps"
 import { CANVAS_POLL_INTERVAL_MS, documentIsVisible, HEALTH_POLL_INTERVAL_MS, PENDING_ACTIVITY_POLL_INTERVAL_MS } from "@/lib/polling"
 import {
   CanvasStateKind,
@@ -54,6 +61,7 @@ import {
   JourneyActivity,
   MapFreshnessStatus,
   MapHealthStatus,
+  PendingRefKind,
   findNode,
   type AppModel,
   type CanvasMapping,
@@ -64,6 +72,7 @@ import {
   type FlowNode,
   type Journey,
   type MapHealth,
+  type PendingRef,
   type WorkspaceProgressStatus,
 } from "@/lib/types"
 import { findNativeDisplayNodeByDisplayId, findNodeByNativeId, nativeNodeToDisplayNode } from "@/lib/nativeDisplay"
@@ -464,7 +473,11 @@ export default function App() {
         await applyCanvasMapEdit(edit, canvasV2, activeJourney.id)
         await load()
       } catch (error) {
-        if (error instanceof ApiError && error.code === "REVISION_CONFLICT") {
+        if (
+          error instanceof ApiError &&
+          error.code === "REVISION_CONFLICT" &&
+          !mapEditCreatesProposedNodes(edit.action)
+        ) {
           try {
             const latest = await fetchCanvas()
             await applyCanvasMapEdit(edit, latest.canvasV2 ?? null, activeJourney.id)
@@ -876,10 +889,102 @@ async function applyCanvasMapEdit(
   const node = flow.nodes.find((item) => item.id === nodeId) ?? null
   if (!node) throw new Error("That canvas step moved or no longer exists.")
 
-  await applyCanvasBatch({
+  const clientChangeId = newCanvasMapChangeId()
+  const operations = buildMapEditOperations(flow, node, edit.action, edit.text1, edit.text2, { clientChangeId })
+  const applyResult = await applyCanvasBatch({
     base_revision: document.revision,
     authored_by: "agentcanvas-web",
-    operations: buildMapEditOperations(flow, node, edit.action, edit.text1, edit.text2),
+    operations,
+  })
+
+  if (mapEditCreatesProposedNodes(edit.action)) {
+    const proposedNodeIds = proposedNodeIdsFromOperations(operations)
+    const proposedRefs = pendingRefsForProposedNodes(flow.id, proposedNodeIds)
+    const request = changeRequestFor({
+      id: clientChangeId,
+      action: edit.action,
+      kind: kindForAction(edit.action),
+      summary: edit.summary,
+      journeyId: flow.id,
+      journeyTitle: edit.journeyTitle,
+      targetNodeId: edit.node.id,
+      targetNativeNodeId: node.id,
+      targetNativeKind: node.kind,
+      targetFlowId: flow.id,
+      text1: edit.text1,
+      text2: edit.text2,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+    const pending = await postChange({ ...request, refs: [...(request.refs ?? []), ...proposedRefs] })
+    const metadataOperations = withProposedNodeRefs(
+      withPendingRequestMetadata(operations, {
+        clientChangeId,
+        pendingRequestId: pending.id,
+      }),
+      proposedNodeIds,
+      proposedRefs
+    ).filter((operation): operation is Extract<ReturnType<typeof buildMapEditOperations>[number], { op: "upsert_node" }> => {
+      return operation.op === "upsert_node" && proposedNodeIds.includes(operation.node.id)
+    })
+    if (metadataOperations.length) {
+      await applyCanvasMetadataBatch(metadataOperations, applyResult.revision)
+    }
+  }
+}
+
+async function applyCanvasMetadataBatch(
+  operations: Extract<ReturnType<typeof buildMapEditOperations>[number], { op: "upsert_node" }>[],
+  baseRevision: number
+) {
+  try {
+    await applyCanvasBatch({
+      base_revision: baseRevision,
+      authored_by: "agentcanvas-web",
+      operations,
+    })
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.code !== "REVISION_CONFLICT") throw error
+    const latest = await fetchCanvas()
+    await applyCanvasBatch({
+      base_revision: latest.revision,
+      authored_by: "agentcanvas-web",
+      operations,
+    })
+  }
+}
+
+function newCanvasMapChangeId(): string {
+  return `map-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+}
+
+function pendingRefsForProposedNodes(flowId: string, nodeIds: string[]): PendingRef[] {
+  return nodeIds.map((id) => ({
+    kind: PendingRefKind.Node,
+    id,
+    flow: flowId,
+    source: "canvas.proposed_node",
+  }))
+}
+
+function withProposedNodeRefs(
+  operations: ReturnType<typeof buildMapEditOperations>,
+  nodeIds: string[],
+  refs: PendingRef[]
+): ReturnType<typeof buildMapEditOperations> {
+  if (!nodeIds.length || !refs.length) return operations
+  return operations.map((operation) => {
+    if (operation.op !== "upsert_node" || !nodeIds.includes(operation.node.id)) return operation
+    return {
+      ...operation,
+      node: {
+        ...operation.node,
+        metadata: {
+          ...(operation.node.metadata ?? {}),
+          pending_refs: refs,
+        },
+      },
+    }
   })
 }
 

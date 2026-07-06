@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { buildMapEditOperations } from "./canvasMapOps"
+import {
+  CanvasMapPendingMetadataKey,
+  buildMapEditOperations,
+  proposedNodeIdsFromOperations,
+  withPendingRequestMetadata,
+} from "./canvasMapOps"
 import {
   CanvasV2EdgeKind,
   CanvasV2NodeKind,
@@ -159,6 +164,33 @@ describe("canvas map operation builders", () => {
     )
     expect(op(elseOps, "upsert_edge")[0].edge).toEqual(
       expect.objectContaining({ source: "n:decision", label: "Otherwise", is_default: true })
+    )
+  })
+
+  it("links proposed nodes to client and pending request ids", () => {
+    const subject = flow()
+    const operations = buildMapEditOperations(
+      subject,
+      subject.nodes[1],
+      FlowAction.AddAfter,
+      "offer free shipping",
+      undefined,
+      { clientChangeId: "client-123" }
+    )
+    const proposedNodeIds = proposedNodeIdsFromOperations(operations)
+    const linked = withPendingRequestMetadata(operations, {
+      clientChangeId: "client-123",
+      pendingRequestId: "pending-456",
+    })
+
+    expect(proposedNodeIds).toHaveLength(1)
+    expect(op(linked, "upsert_node")[0].node).toEqual(
+      expect.objectContaining({
+        metadata: {
+          [CanvasMapPendingMetadataKey.ClientChangeId]: "client-123",
+          [CanvasMapPendingMetadataKey.PendingRequestId]: "pending-456",
+        },
+      })
     )
   })
 })

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { GitPullRequestArrow, History, ListChecks } from "lucide-react"
 import { describeApiError, fetchCanvasHistory, fetchPending } from "@/lib/api"
 import {
-  PendingStatus,
+  pendingStatusLabel,
   type CanvasHistoryEntry,
   type CanvasHistoryResponse,
   type PendingItem,
@@ -179,7 +179,7 @@ function pendingEvent(item: PendingItem, status: PendingStatusHistoryEntry, inde
   return {
     id: `pending:${item.id}:${index}:${status.status}`,
     kind: ActivityEventKind.Pending,
-    title: `${item.title || item.id}: ${statusLabel(status.status)}`,
+    title: `${item.title || item.id}: ${pendingStatusLabel(status.status)}`,
     detail: status.note || item.note || item.summary || item.target || "Agent request updated.",
     at: status.updatedAt || item.updatedAt || item.createdAt,
   }
@@ -203,31 +203,6 @@ function flowSummary(entry: CanvasHistoryEntry): string {
   if (summary.count === 0) return "No flows"
   const named = summary.titles.length ? summary.titles.join(", ") : `${summary.count} flow${summary.count === 1 ? "" : "s"}`
   return `${summary.count} flow${summary.count === 1 ? "" : "s"}: ${named}${summary.truncated ? ", and more" : ""}`
-}
-
-function statusLabel(status: PendingStatus): string {
-  switch (status) {
-    case PendingStatus.Pending:
-      return "pending"
-    case PendingStatus.Sent:
-      return "sent"
-    case PendingStatus.InProgress:
-      return "in progress"
-    case PendingStatus.Implemented:
-      return "implemented"
-    case PendingStatus.NeedsInput:
-      return "needs input"
-    case PendingStatus.Blocked:
-      return "blocked"
-    case PendingStatus.Verified:
-      return "verified"
-    case PendingStatus.Done:
-      return "done"
-    case PendingStatus.Cancelled:
-      return "cancelled"
-    case PendingStatus.Rejected:
-      return "rejected"
-  }
 }
 
 function formatDate(value?: string): string {

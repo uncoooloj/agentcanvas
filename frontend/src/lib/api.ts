@@ -1032,11 +1032,16 @@ export function hasToken(): boolean {
   return Boolean(token())
 }
 
-const PENDING_STATUSES = new Set<string>(Object.values(PendingStatus))
+const PENDING_STATUS_VALUES = Object.values(PendingStatus) as PendingStatus[]
+const PENDING_STATUS_SET = new Set<PendingStatus>(PENDING_STATUS_VALUES)
+
+function isPendingStatus(value: unknown): value is PendingStatus {
+  return typeof value === "string" && PENDING_STATUS_SET.has(value as PendingStatus)
+}
 
 function normalizePendingStatus(status: unknown): PendingStatus {
   const value = String(status || PendingStatus.Pending)
-  if (PENDING_STATUSES.has(value)) return value as PendingStatus
+  if (isPendingStatus(value)) return value
   return value === LegacyPendingStatus.Queued ? PendingStatus.Pending : PendingStatus.Rejected
 }
 

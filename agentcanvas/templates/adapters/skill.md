@@ -11,12 +11,14 @@ For a real workspace:
 
 ```bash
 agentcanvas index --workspace <workspace>
-agentcanvas start --workspace <workspace> --port 8765
+agentcanvas up <workspace> --port 8765
 ```
 
-For no workspace, `agentcanvas start --port 8765` opens the landing page only.
+For no workspace, the lower-level server command
+`agentcanvas start --port 8765` opens the landing page only.
 
-For the bundled sample, `agentcanvas start --demo --port 8765` opens demo mode.
+For the bundled sample, the lower-level server command
+`agentcanvas start --demo --port 8765` opens demo mode.
 Keep saying it is demo mode when the sample project is shown.
 
 ## Applying Canvas Edits

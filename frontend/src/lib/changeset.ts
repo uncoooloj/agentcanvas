@@ -46,7 +46,7 @@ export enum HandoffPhase {
   Stopped = "stopped",
 }
 export enum HandoffItemStatus {
-  Queued = "queued",
+  Creating = "creating",
   Sent = "sent",
   InProgress = "in_progress",
   Implemented = "implemented",
@@ -183,7 +183,7 @@ export const useChanges = create<ChangeStore>((set, get) => ({
     const items: HandoffItem[] = changes.map((c) => ({
       changeId: c.id,
       label: `${VERB[c.kind]}: ${c.summary}`,
-      status: HandoffItemStatus.Queued,
+      status: HandoffItemStatus.Creating,
     }))
     set({ handoff: { phase: HandoffPhase.Sending, items, prompt: buildHandoffPrompt(changes, get().assistantName) } })
 
@@ -434,7 +434,7 @@ const STOPPED_STATUSES = new Set<HandoffItemStatus>([
 
 function phaseForItems(items: HandoffItem[]): HandoffPhase {
   if (!items.length) return HandoffPhase.Composing
-  if (items.some((item) => item.status === HandoffItemStatus.Queued)) return HandoffPhase.Sending
+  if (items.some((item) => item.status === HandoffItemStatus.Creating)) return HandoffPhase.Sending
   if (items.every((item) => FINISHED_STATUSES.has(item.status))) return HandoffPhase.Done
   if (items.some((item) => STOPPED_STATUSES.has(item.status))) return HandoffPhase.Stopped
   if (items.some((item) => item.status === HandoffItemStatus.NeedsInput)) return HandoffPhase.NeedsInput
@@ -500,7 +500,7 @@ function statusLabel(status?: HandoffItemStatus): string {
 }
 
 const STATUS_LABELS: Record<HandoffItemStatus, string> = {
-  [HandoffItemStatus.Queued]: "creating pending file",
+  [HandoffItemStatus.Creating]: "creating pending file",
   [HandoffItemStatus.Sent]: "sent",
   [HandoffItemStatus.InProgress]: "in progress",
   [HandoffItemStatus.Implemented]: "implemented",

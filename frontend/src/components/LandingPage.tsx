@@ -8,15 +8,12 @@ import {
   GitBranch,
   Loader2,
   MousePointer2,
-  Orbit,
   Play,
   Send,
   Sparkles,
-  SquareTerminal,
   X,
   Zap,
 } from "lucide-react"
-import { siClaudecode, siCursor, siGooglegemini } from "simple-icons"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { BrandMark } from "@/components/BrandMark"
@@ -84,8 +81,6 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
           </div>
         </section>
 
-        <WorksWith />
-
         <HowItWorks />
 
         <AgentPrompt />
@@ -108,7 +103,7 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
               <p className="mt-1 text-sm text-muted-foreground">
                 Point AgentCanvas at it from your terminal, or ask whoever set it up to run:
               </p>
-              <CopyBox text="agentcanvas start --workspace ./your-project" oneLine />
+              <CopyBox text="agentcanvas up ./your-project" oneLine />
             </div>
           </div>
         </section>
@@ -126,44 +121,6 @@ export function LandingPage({ onEnterApp }: { onEnterApp?: () => void } = {}) {
         </div>
       </footer>
     </div>
-  )
-}
-
-// ---- "Works with" logo strip ----
-
-function SimpleLogo({ path }: { path: string }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="size-[18px] fill-current">
-      <path d={path} />
-    </svg>
-  )
-}
-
-function WorksWith() {
-  const tools = [
-    { name: "Claude Code", logo: <SimpleLogo path={siClaudecode.path} /> },
-    { name: "Codex", logo: <SquareTerminal className="size-[18px]" /> },
-    { name: "Cursor", logo: <SimpleLogo path={siCursor.path} /> },
-    { name: "Antigravity", logo: <Orbit className="size-[18px]" /> },
-    { name: "Gemini", logo: <SimpleLogo path={siGooglegemini.path} /> },
-  ]
-  return (
-    <section className="mx-auto max-w-4xl px-6 pb-16">
-      <p className="mb-7 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Works with your AI coding agent
-      </p>
-      <div className="flex flex-wrap items-center justify-center gap-x-9 gap-y-5">
-        {tools.map((t) => (
-          <span
-            key={t.name}
-            className="inline-flex items-center gap-2 text-[15px] font-medium text-foreground/70 transition-colors hover:text-foreground"
-          >
-            {t.logo}
-            {t.name}
-          </span>
-        ))}
-      </div>
-    </section>
   )
 }
 
@@ -350,7 +307,7 @@ function DemoFrame({ step }: { step: number }) {
         </span>
         <span className="ml-auto hidden items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-[11px] text-muted-foreground sm:inline-flex">
           <Sparkles className="size-3 text-clay" /> Assistant:{" "}
-          <span className="font-medium text-foreground">Claude Code</span>
+          <span className="font-medium text-foreground">Your agent</span>
         </span>
       </div>
 
@@ -462,7 +419,7 @@ function DemoFrame({ step }: { step: number }) {
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-sm font-medium">1 change ready</span>
                       <span className="relative inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground">
-                        <Send className="size-3" /> Send to Claude Code
+                        <Send className="size-3" /> Send to agent
                         <Cursor className="-bottom-1.5 -right-1.5" />
                       </span>
                     </div>
@@ -477,7 +434,7 @@ function DemoFrame({ step }: { step: number }) {
                 {step === 4 && !done && (
                   <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-3 text-sm">
                     <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
-                    <span className="text-muted-foreground">Claude Code is making your change…</span>
+                    <span className="text-muted-foreground">Your agent is making your change...</span>
                   </div>
                 )}
                 {step === 4 && done && (
@@ -582,7 +539,7 @@ function HeroRow({
 
 const AGENT_PROMPT = `Use AgentCanvas to help me change this app.
 
-1. Start it: run \`agentcanvas start --workspace .\` (if it isn't installed, run \`pip install agentcanvas\` first). Open the local URL it prints so I can see and edit my app's flows in plain English.
+1. Start it: run \`agentcanvas up .\` (if it isn't installed, run \`pip install use-agentcanvas\` first). Open the local URL it prints so I can see and edit my app's flows in plain English.
 2. When I make a change there, AgentCanvas writes it to \`.agentcanvas/pending/\` as a plain-English request (a .md and a .json per change).
 3. For each pending request: read it, make the change in the code, run the relevant tests, then re-index with \`agentcanvas index --workspace .\` and tell me what changed.
 
@@ -596,8 +553,8 @@ function AgentPrompt() {
         Already chatting with an AI coding agent?
       </h2>
       <p className="mx-auto mt-3 max-w-lg text-muted-foreground">
-        Paste this into Claude Code, Codex, or Cursor and it'll launch AgentCanvas and pick up the
-        changes you make. No setup from you.
+        Paste this into your AI coding agent and it'll launch AgentCanvas and pick up the changes
+        you make. No setup from you.
       </p>
       <CopyBox text={AGENT_PROMPT} className="mt-8 text-left" />
     </section>

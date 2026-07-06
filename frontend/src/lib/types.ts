@@ -464,6 +464,23 @@ export enum LegacyPendingStatus {
   Queued = "queued",
 }
 
+export const PENDING_STATUS_LABELS: Record<PendingStatus, string> = {
+  [PendingStatus.Pending]: "pending",
+  [PendingStatus.Sent]: "sent",
+  [PendingStatus.InProgress]: "in progress",
+  [PendingStatus.Implemented]: "implemented",
+  [PendingStatus.NeedsInput]: "needs input",
+  [PendingStatus.Blocked]: "blocked",
+  [PendingStatus.Verified]: "verified",
+  [PendingStatus.Done]: "done",
+  [PendingStatus.Cancelled]: "cancelled",
+  [PendingStatus.Rejected]: "rejected",
+}
+
+export function pendingStatusLabel(status: PendingStatus): string {
+  return PENDING_STATUS_LABELS[status]
+}
+
 export enum ConversationRole {
   Agent = "agent",
   User = "user",

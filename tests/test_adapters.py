@@ -45,6 +45,12 @@ def _snapshot(root):
 class AdapterSetupTests(unittest.TestCase):
     maxDiff = None
 
+    def test_skill_template_recommends_up_for_workspace_launch(self):
+        skill = render_skill_template()
+        self.assertIn("agentcanvas up <workspace> --port 8765", skill)
+        self.assertNotIn("agentcanvas start --workspace", skill)
+        self.assertIn("agentcanvas start --port 8765", skill)
+
     def test_setup_codex_writes_marked_section_and_preserves_outside_content(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "workspace"

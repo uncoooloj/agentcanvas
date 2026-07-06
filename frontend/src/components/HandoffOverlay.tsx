@@ -127,7 +127,7 @@ const STATUS_VIEW: Record<
     badgeClassName: string
   }
 > = {
-  [HandoffItemStatus.Queued]: {
+  [HandoffItemStatus.Creating]: {
     label: "Creating",
     detail: "Writing pending files",
     Icon: Clock,

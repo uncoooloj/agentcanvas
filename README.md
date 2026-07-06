@@ -107,23 +107,10 @@ python3 -m agentcanvas --help
 
 ## Run It
 
-Start with the landing page when you do not have a workspace selected yet:
-
-```bash
-agentcanvas start --port 8765
-```
-
-Try the bundled demo project:
-
-```bash
-agentcanvas start --demo --port 8765
-```
-
 Use a real workspace:
 
 ```bash
-agentcanvas index --workspace /path/to/your/project
-agentcanvas start --workspace /path/to/your/project --port 8765
+agentcanvas up /path/to/your/project --port 8765
 ```
 
 Open the printed URL, usually:
@@ -135,23 +122,43 @@ http://127.0.0.1:8765
 If an agent is launching AgentCanvas, it can pass its name and session id:
 
 ```bash
-agentcanvas start --workspace /path/to/your/project --agent codex --session-id <session-id>
+agentcanvas up /path/to/your/project --agent codex --session-id <session-id>
+```
+
+For foreground/manual server modes, use `start` directly:
+
+```bash
+agentcanvas start --port 8765
+agentcanvas start --demo --port 8765
+```
+
+To run a real workspace in foreground server mode:
+
+```bash
+agentcanvas index --workspace /path/to/your/project
+agentcanvas start --workspace /path/to/your/project --port 8765
 ```
 
 ## What Happens When You Run It
 
-AgentCanvas has three plain modes. The important difference is whether it is
-looking at a real project and where it writes local AgentCanvas files.
+AgentCanvas has a normal workspace launcher plus lower-level foreground server
+modes. The important difference is whether it is looking at a real project and
+where it writes local AgentCanvas files.
 
-- `agentcanvas start` opens the landing page. No project has been read yet.
-- `agentcanvas start --demo` opens the bundled sample project. This is safe for
+- `agentcanvas up /path/to/project` starts or reuses a background browser server
+  for that real project and reads AgentCanvas state from
+  `<workspace>/.agentcanvas/`.
+- `agentcanvas start` opens the foreground landing page. No project has been
+  read yet.
+- `agentcanvas start --demo` opens the bundled sample project in foreground
+  server mode. This is safe for
   trying the product because it writes demo AgentCanvas files, not files in your
   own repo.
 - `agentcanvas index --workspace /path/to/project` reads a real project and
   writes the raw evidence file:
   `<workspace>/.agentcanvas/workflow.ir.json`.
 - `agentcanvas start --workspace /path/to/project` opens the browser for that
-  real project and reads AgentCanvas state from `<workspace>/.agentcanvas/`.
+  real project in foreground server mode.
 
 Starting or indexing AgentCanvas does not change source code. It creates or
 refreshes AgentCanvas files beside the project. Source-code changes only happen
@@ -448,7 +455,7 @@ Useful local loop:
 ```bash
 python3 -m pip install -e .
 agentcanvas index --workspace examples/sample-js-app
-agentcanvas start --workspace examples/sample-js-app --port 8765
+python3 -m agentcanvas up examples/sample-js-app --port 8765
 python3 -m unittest discover
 ```
 

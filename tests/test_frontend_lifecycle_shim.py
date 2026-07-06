@@ -9,18 +9,35 @@ class FrontendLifecycleShimTests(unittest.TestCase):
     def test_pending_status_enum_includes_phase1_lifecycle_values(self):
         types_source = (PROJECT_ROOT / "frontend" / "src" / "lib" / "types.ts").read_text(encoding="utf-8")
         changeset_source = (PROJECT_ROOT / "frontend" / "src" / "lib" / "changeset.ts").read_text(encoding="utf-8")
+        api_source = (PROJECT_ROOT / "frontend" / "src" / "lib" / "api.ts").read_text(encoding="utf-8")
+        activity_source = (PROJECT_ROOT / "frontend" / "src" / "components" / "ActivityDialog.tsx").read_text(encoding="utf-8")
 
         self.assertIn("export enum PendingStatus", types_source)
         self.assertIn("export enum HandoffItemStatus", changeset_source)
         self.assertIn("export enum HandoffPhase", changeset_source)
-        self.assertIn("const STATUS_LABELS", changeset_source)
+        self.assertIn("export const PENDING_STATUS_LABELS: Record<PendingStatus, string>", types_source)
+        self.assertIn("export function pendingStatusLabel", types_source)
+        self.assertIn("const PENDING_STATUS_SET = new Set<PendingStatus>", api_source)
+        self.assertIn("function isPendingStatus(value: unknown): value is PendingStatus", api_source)
+        self.assertIn("LegacyPendingStatus.Queued", api_source)
+        self.assertIn("pendingStatusLabel(status.status)", activity_source)
+        self.assertIn("[HandoffItemStatus.Creating]: \"creating pending file\"", changeset_source)
+        self.assertNotIn('Queued = "queued"', changeset_source)
         self.assertNotIn('if (status === "queued") return', changeset_source)
-        for member, value in [
+        self.assertNotIn("function statusLabel(status: PendingStatus)", activity_source)
+        self.assertNotIn("case PendingStatus.", activity_source)
+        for member, value in (
+            ("Pending", "pending"),
+            ("Sent", "sent"),
+            ("InProgress", "in_progress"),
             ("Implemented", "implemented"),
+            ("NeedsInput", "needs_input"),
+            ("Blocked", "blocked"),
             ("Verified", "verified"),
+            ("Done", "done"),
             ("Cancelled", "cancelled"),
             ("Rejected", "rejected"),
-        ]:
+        ):
             self.assertIn('%s = "%s"' % (member, value), types_source)
 
     def test_stopped_handoff_dismiss_does_not_acknowledge_done(self):

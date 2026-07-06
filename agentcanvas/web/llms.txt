@@ -12,12 +12,12 @@ Non-technical people (operators, founders, power users) who want to understand a
 
 ## How an AI coding agent uses it
 
-1. Start it: `agentcanvas start --workspace .` (install: `pip install use-agentcanvas`). It serves a local web canvas and prints a URL.
+1. Start it: `agentcanvas up .` (install: `pip install use-agentcanvas`). It serves a local web canvas and prints a URL.
 2. Read `.agentcanvas/workflow.ir.json` as raw evidence and write/update the browser canvas with `agentcanvas canvas apply`.
 3. For canvas edits, keep applying operation batches through `agentcanvas canvas apply`. Do not re-index unless evidence needs to be refreshed.
 4. For explicit source-code implementation requests, read `.agentcanvas/pending/`, implement the change in code, run the relevant tests, re-index with `agentcanvas index --workspace .` to refresh evidence, and report what changed.
 
-Works with Claude Code, Codex, Cursor, Antigravity, or any agent that can read files and run commands. Copy-paste fallback is always available.
+Any AI coding agent that can read files and run commands can use it. Copy-paste fallback is always available.
 
 ## Key facts
 

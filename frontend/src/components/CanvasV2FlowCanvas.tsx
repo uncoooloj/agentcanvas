@@ -31,6 +31,7 @@ interface Props {
   selectedDisplayId: string | null
   displayNodeForNativeId: (nativeId: string) => FlowNode | null
   onSelectDisplayNode: (id: string) => void
+  onOpenFlow?: (flowId: string) => void
   onAction: (action: FlowAction, node: FlowNode) => void
 }
 
@@ -39,6 +40,7 @@ export function CanvasV2FlowCanvas({
   selectedDisplayId,
   displayNodeForNativeId,
   onSelectDisplayNode,
+  onOpenFlow,
   onAction,
 }: Props) {
   const fallbackLayout = useMemo(() => layoutFlow(flow), [flow])
@@ -104,7 +106,13 @@ export function CanvasV2FlowCanvas({
                 node={node}
                 selected={selected}
                 displayNode={displayNode}
-                onSelect={() => displayNode && onSelectDisplayNode(displayNode.id)}
+                onSelect={() => {
+                  if (node.kind === CanvasV2NodeKind.SubFlow && node.flowRef && onOpenFlow) {
+                    onOpenFlow(node.flowRef)
+                    return
+                  }
+                  if (displayNode) onSelectDisplayNode(displayNode.id)
+                }}
                 onAction={onAction}
               />
             </div>

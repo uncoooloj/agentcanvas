@@ -34,6 +34,7 @@ export function nativeNodeToDisplayNode(flowId: string, node: CanvasV2Node): Flo
     flowId,
     nodeId: node.id,
     nodeKind: node.kind,
+    ...(node.flowRef ? { flowRef: node.flowRef } : {}),
   }
   if (node.kind === CanvasV2NodeKind.Decision) {
     return {

@@ -422,9 +422,17 @@ export default function App() {
     }
   }, [contextLoading, context.mode, context.workspace, onWelcome])
 
+  const routeCanvasV2Flow: CanvasV2Flow | null = useMemo(
+    () => (view === HOME ? null : canvasV2?.flows.find((flow) => flow.id === view) ?? null),
+    [canvasV2, view]
+  )
   const activeJourney: Journey | null = useMemo(
-    () => (view === HOME ? null : model.journeys.find((j) => j.id === view) ?? null),
-    [model, view]
+    () =>
+      view === HOME
+        ? null
+        : model.journeys.find((j) => j.id === view) ??
+          (routeCanvasV2Flow ? journeyFromCanvasV2Flow(routeCanvasV2Flow) : null),
+    [model.journeys, routeCanvasV2Flow, view]
   )
   const activeCanvasV2Flow: CanvasV2Flow | null = useMemo(
     () => (activeJourney ? canvasV2?.flows.find((flow) => flow.id === activeJourney.id) ?? null : null),
@@ -752,6 +760,10 @@ export default function App() {
                 setSelectedId(null)
               }}
               onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))}
+              onOpenFlow={(flowId) => {
+                go(`/flows/${encodeURIComponent(flowId)}`)
+                setSelectedId(null)
+              }}
               onAction={openAction}
             />
           ) : (
@@ -1653,6 +1665,17 @@ function preserveLocalJourneyRecency(next: AppModel, current: AppModel) {
   }
 }
 
+function journeyFromCanvasV2Flow(flow: CanvasV2Flow): Journey {
+  const entryNode = flow.nodes.find((node) => node.id === flow.entryNode)
+  return {
+    id: flow.id,
+    title: flow.title,
+    summary: flow.summary,
+    entry: entryNode?.title || flow.title,
+    nodes: [],
+  }
+}
+
 function JourneyView({
   journey,
   nativeFlow,
@@ -1660,6 +1683,7 @@ function JourneyView({
   locked,
   onBack,
   onSelect,
+  onOpenFlow,
   onAction,
 }: {
   journey: Journey
@@ -1668,6 +1692,7 @@ function JourneyView({
   locked: boolean
   onBack: () => void
   onSelect: (id: string) => void
+  onOpenFlow: (flowId: string) => void
   onAction: (action: FlowAction, node: FlowNode) => void
 }) {
   const displayNodeForNativeId = useMemo(
@@ -1704,6 +1729,7 @@ function JourneyView({
             selectedDisplayId={selectedId}
             displayNodeForNativeId={displayNodeForNativeId}
             onSelectDisplayNode={onSelect}
+            onOpenFlow={onOpenFlow}
             onAction={onAction}
           />
         ) : (

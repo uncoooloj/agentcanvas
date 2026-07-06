@@ -46,6 +46,14 @@ describe("native display node adapter", () => {
         evidence: [{ ref: "src/risk.ts:8" }],
         evidenceRefs: ["src/risk.ts:8"],
       },
+      {
+        id: "n:receipt",
+        kind: CanvasV2NodeKind.SubFlow,
+        title: "Send the receipt",
+        flowRef: "flow:receipt",
+        evidence: [{ ref: "src/receipt.ts:8" }],
+        evidenceRefs: ["src/receipt.ts:8"],
+      },
     ],
     edges: [
       {
@@ -85,6 +93,18 @@ describe("native display node adapter", () => {
     expect(node.then).toEqual([])
     expect(node.otherwise).toEqual([])
     expect(node.native?.nodeKind).toBe(CanvasV2NodeKind.Decision)
+  })
+
+  it("preserves subflow references on synthetic display nodes", () => {
+    const node = nativeNodeToDisplayNode("flow:checkout", nativeFlow.nodes[3])
+
+    expect(node.native).toMatchObject({
+      schema: CanvasV2Schema.Canvas,
+      flowId: "flow:checkout",
+      nodeId: "n:receipt",
+      nodeKind: CanvasV2NodeKind.SubFlow,
+      flowRef: "flow:receipt",
+    })
   })
 
   it("resolves existing flattened nodes before synthetic fallbacks", () => {

@@ -179,6 +179,19 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("nativeNode ? nativeNodeToDisplayNode", app)
         self.assertIn("disabled={!displayNode}", canvas)
 
+    def test_native_v2_subflows_open_referenced_flows(self):
+        app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+        adapter = (PROJECT_ROOT / "frontend" / "src" / "lib" / "nativeDisplay.ts").read_text(encoding="utf-8")
+        canvas = (PROJECT_ROOT / "frontend" / "src" / "components" / "CanvasV2FlowCanvas.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("...(node.flowRef ? { flowRef: node.flowRef } : {})", adapter)
+        self.assertIn("routeCanvasV2Flow", app)
+        self.assertIn("journeyFromCanvasV2Flow", app)
+        self.assertIn("onOpenFlow={(flowId) => {", app)
+        self.assertIn("onOpenFlow?: (flowId: string) => void", canvas)
+        self.assertIn("onOpenFlow(node.flowRef)", canvas)
+        self.assertIn("CanvasV2NodeKind.SubFlow && node.flowRef", canvas)
+
     def test_inspector_shows_native_v2_evidence_citations(self):
         inspector = (PROJECT_ROOT / "frontend" / "src" / "components" / "Inspector.tsx").read_text(encoding="utf-8")
         app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")

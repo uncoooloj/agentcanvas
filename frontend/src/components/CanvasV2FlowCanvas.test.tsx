@@ -28,6 +28,14 @@ describe("CanvasV2FlowCanvas", () => {
         evidence: [],
         evidenceRefs: [],
       },
+      {
+        id: "n:receipt",
+        kind: CanvasV2NodeKind.SubFlow,
+        title: "Send receipt",
+        flowRef: "flow:receipt",
+        evidence: [],
+        evidenceRefs: [],
+      },
     ],
     edges: [
       {
@@ -35,6 +43,14 @@ describe("CanvasV2FlowCanvas", () => {
         kind: CanvasV2EdgeKind.Normal,
         source: "n:start",
         target: "n:pay",
+        evidence: [],
+        evidenceRefs: [],
+      },
+      {
+        id: "e:pay:receipt",
+        kind: CanvasV2EdgeKind.Normal,
+        source: "n:pay",
+        target: "n:receipt",
         evidence: [],
         evidenceRefs: [],
       },
@@ -58,6 +74,8 @@ describe("CanvasV2FlowCanvas", () => {
     )
 
     expect(html).toContain("Take payment")
+    expect(html).toContain("Send receipt")
+    expect(html).toContain("Opens receipt")
     expect(html).toContain('aria-label="Change"')
     expect(html).toContain('aria-label="Add a step after"')
     expect(html).not.toContain('disabled=""')

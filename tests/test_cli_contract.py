@@ -1,10 +1,12 @@
 import json
+import io
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -129,6 +131,64 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                         self.assertTrue((selected / ".agentcanvas-demo").is_file())
                     else:
                         self.assertEqual(selected, expected_workspace)
+
+    def test_start_command_accepts_supervised_token_from_env(self):
+        from agentcanvas.cli import main
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "real-workspace"
+            workspace.mkdir()
+            with patch.dict(
+                os.environ,
+                {
+                    "AGENTCANVAS_SERVER_TOKEN": "supervised-token",
+                    "AGENTCANVAS_SUPERVISED": "1",
+                },
+            ):
+                with patch("agentcanvas.cli.run_server") as run_server:
+                    self.assertEqual(main(["start", str(workspace), "--port", "0"]), 0)
+
+            _, kwargs = run_server.call_args
+            self.assertEqual(kwargs["token"], "supervised-token")
+            self.assertTrue(kwargs["supervised"])
+
+    def test_up_command_prints_stable_json_launch_payload(self):
+        from agentcanvas.cli import main
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "real-workspace"
+            workspace.mkdir()
+            payload = {
+                "ok": True,
+                "url": "http://127.0.0.1:8765/?token=secret",
+                "port": 8765,
+                "token": "secret",
+                "pid": 123,
+                "already_running": False,
+            }
+            stdout = io.StringIO()
+            with patch("agentcanvas.cli.ensure_server_up", return_value=payload) as ensure_up:
+                with redirect_stdout(stdout):
+                    self.assertEqual(main(["up", str(workspace), "--json", "--session-id", "session-1"]), 0)
+            result = json.loads(stdout.getvalue())
+            self.assertEqual(result["url"], payload["url"])
+            self.assertFalse(result["already_running"])
+            ensure_up.assert_called_once()
+            _, kwargs = ensure_up.call_args
+            self.assertEqual(kwargs["session_id"], "session-1")
+            self.assertFalse(kwargs["open_browser"])
+
+    def test_up_stop_uses_launch_record(self):
+        from agentcanvas.cli import main
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "real-workspace"
+            workspace.mkdir()
+            with patch("agentcanvas.cli.stop_server", return_value={"ok": True, "stopped": True, "pid": 123}) as stop:
+                with patch("builtins.print"):
+                    self.assertEqual(main(["up", str(workspace), "--stop"]), 0)
+            stop.assert_called_once()
+            self.assertEqual(stop.call_args.args[0], workspace.resolve())
 
     def test_index_command_writes_workflow_ir_for_sample_app(self):
         with tempfile.TemporaryDirectory() as temp_root:

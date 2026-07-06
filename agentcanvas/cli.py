@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -50,6 +51,7 @@ from .canvas_v2 import (
 )
 from .projection import ProjectionValidationError, materialize_canvas_model
 from .server import run_server
+from .supervisor import SupervisorError, ensure_server_up, stop_server
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,6 +86,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="open the bundled demo project instead of the launch page",
     )
     start_parser.set_defaults(func=cmd_start)
+
+    up_parser = subparsers.add_parser("up", help="start or reuse a background AgentCanvas server")
+    up_parser.add_argument("path", nargs="?", help="workspace path to serve")
+    up_parser.add_argument("--workspace", help="workspace path to serve")
+    up_parser.add_argument("--host", default="127.0.0.1", help="host to bind")
+    up_parser.add_argument("--port", default=8765, type=int, help="first port to try")
+    up_parser.add_argument("--port-end", default=8865, type=int, help="last port to try")
+    up_parser.add_argument(
+        "--agent",
+        help="coding agent invoking AgentCanvas (claude-code, codex, cursor, antigravity)",
+    )
+    up_parser.add_argument(
+        "--session-id",
+        help="optional launching agent session id to bind browser requests and pending changes",
+    )
+    up_parser.add_argument("--json", action="store_true", help="print a stable JSON launch record")
+    up_parser.add_argument("--open", action="store_true", help="open the browser after the server is ready")
+    up_parser.add_argument("--stop", action="store_true", help="stop the recorded background server")
+    up_parser.set_defaults(func=cmd_up)
 
     pending_parser = subparsers.add_parser("pending", help="list pending change requests")
     pending_parser.add_argument("path", nargs="?", help="workspace path to inspect")
@@ -255,11 +276,47 @@ def cmd_start(args: argparse.Namespace) -> int:
         workspace=Path(selected_workspace(args, demo_default=landing_mode or demo_mode)),
         host=args.host,
         port=args.port,
+        token=os.environ.get("AGENTCANVAS_SERVER_TOKEN"),
         agent=getattr(args, "agent", None),
         demo_mode=demo_mode,
         landing_mode=landing_mode,
         session_id=getattr(args, "session_id", None),
+        supervised=bool(os.environ.get("AGENTCANVAS_SUPERVISED")),
     )
+    return 0
+
+
+def cmd_up(args: argparse.Namespace) -> int:
+    workspace = resolve_workspace(selected_workspace(args))
+    try:
+        if args.stop:
+            result = stop_server(workspace)
+        else:
+            result = ensure_server_up(
+                workspace,
+                host=args.host,
+                port=args.port,
+                port_end=args.port_end,
+                agent=getattr(args, "agent", None),
+                session_id=getattr(args, "session_id", None),
+                open_browser=bool(getattr(args, "open", False)) and not bool(getattr(args, "json", False)),
+            )
+    except SupervisorError as exc:
+        payload = exc.to_dict()
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"AgentCanvas could not start: {exc.message}", file=sys.stderr)
+            if exc.details.get("log"):
+                print(exc.details["log"], file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    elif args.stop:
+        print("AgentCanvas stopped." if result.get("stopped") else "AgentCanvas was not running.")
+    else:
+        print(f"Canvas ready: {result['url']}")
     return 0
 
 

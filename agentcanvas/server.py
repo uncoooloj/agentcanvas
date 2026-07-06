@@ -108,6 +108,7 @@ def run_server(
     demo_mode: bool = False,
     landing_mode: bool = False,
     session_id: Optional[str] = None,
+    supervised: bool = False,
 ) -> None:
     root = resolve_workspace(workspace)
     token = token or secrets.token_urlsafe(24)
@@ -150,8 +151,9 @@ def run_server(
     else:
         prefix = "AgentCanvas serving"
     print(f"{prefix} {root}", flush=True)
-    print(f"Open {url}", flush=True)
-    print("Press Ctrl-C to stop.", flush=True)
+    if not supervised:
+        print(f"Open {url}", flush=True)
+        print("Press Ctrl-C to stop.", flush=True)
 
     try:
         httpd.serve_forever()

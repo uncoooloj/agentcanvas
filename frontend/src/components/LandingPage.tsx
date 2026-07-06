@@ -178,11 +178,11 @@ function useDemo(active: boolean) {
 const STEPS = [
   {
     title: "Open your app",
-    body: "Point AgentCanvas at your project. It reads everything and lays your app out as plain flows.",
+    body: "Point AgentCanvas at your project. It indexes repo evidence and lays important app flows out plainly.",
   },
   {
     title: "See what it does",
-    body: "Every part of your app, written as plain steps you can read: when this happens, do that, with the branches in between.",
+    body: "The key behavior it can prove, written as plain steps you can read: when this happens, do that, with the branches in between.",
   },
   {
     title: "Change a step",
@@ -546,8 +546,8 @@ function AgentPrompt() {
         Already chatting with an AI coding agent?
       </h2>
       <p className="mx-auto mt-3 max-w-lg text-muted-foreground">
-        Paste this into your AI coding agent and it'll launch AgentCanvas and pick up the changes
-        you make. No setup from you.
+        Paste this into your AI coding agent. It can launch or connect AgentCanvas when your
+        setup allows it, and copy mode is there when it does not.
       </p>
       <div className="mx-auto mt-5 grid max-w-2xl gap-2 text-left sm:grid-cols-3">
         {LANDING_BOOTSTRAP_PERMISSION_PROMPTS.map((prompt) => (

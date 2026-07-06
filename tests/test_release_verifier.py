@@ -78,6 +78,18 @@ class ReleaseVerifierTests(unittest.TestCase):
                     path.read_text(encoding="utf-8"),
                 )
 
+    def test_landing_copy_avoids_unsupported_agent_and_repo_claims(self):
+        source = (PROJECT_ROOT / "frontend" / "src" / "components" / "LandingPage.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("Gemini", source)
+        self.assertNotIn("reads everything", source)
+        self.assertNotIn("Every part of your app", source)
+        self.assertNotIn("No setup from you", source)
+        self.assertIn("copy mode", source)
+        self.assertIn("indexes repo evidence", source)
+
     def test_phase5_issue_templates_exist(self):
         template_dir = PROJECT_ROOT / ".github" / "ISSUE_TEMPLATE"
 

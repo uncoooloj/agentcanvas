@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { BrandMark } from "@/components/BrandMark"
+import { CanvasV2FlowCanvas } from "@/components/CanvasV2FlowCanvas"
 import { FlowColumn } from "@/components/FlowCanvas"
 import { Overview } from "@/components/Overview"
 import { Inspector } from "@/components/Inspector"
@@ -45,6 +46,7 @@ import {
   CanvasSourceTone,
   CopyState,
   FlowAction,
+  FlowNodeKind,
   JourneyActivity,
   MapFreshnessStatus,
   MapHealthStatus,
@@ -52,6 +54,8 @@ import {
   type AppModel,
   type CanvasMapping,
   type CanvasSourceSummary,
+  type CanvasV2Document,
+  type CanvasV2Flow,
   type FlowNode,
   type Journey,
   type MapHealth,
@@ -83,6 +87,7 @@ type WorkspaceModelResult = {
   mapping?: CanvasMapping
   notice?: string
   revision?: number
+  canvasV2?: CanvasV2Document
 }
 
 type MapRefreshAction = {
@@ -125,6 +130,7 @@ export default function App() {
   const mappingActive = canvasState.kind === CanvasStateKind.Loading || canvasState.kind === CanvasStateKind.Reindexing
   const [mappingStage, setMappingStage] = useState(0)
   const [mapHealth, setMapHealth] = useState<MapHealth | null>(null)
+  const [canvasV2, setCanvasV2] = useState<CanvasV2Document | null>(null)
   const [authNotice, setAuthNotice] = useState<string | null>(null)
   const canvasSignatureRef = useRef<string | null>(null)
   const canvasRevisionRef = useRef<number | null>(null)
@@ -184,6 +190,7 @@ export default function App() {
   }
 
   function showWorkspaceResult(result: WorkspaceModelResult) {
+    setCanvasV2(result.canvasV2 ?? null)
     if (isUnreadyMap(result.mapping)) {
       setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
       setCanvasState({
@@ -218,6 +225,7 @@ export default function App() {
       setModel((current) => preserveLocalJourneyRecency(DEMO_MODEL, current))
       setSelectedId(null)
       setMapHealth(null)
+      setCanvasV2(null)
       setAuthNotice(null)
       canvasSignatureRef.current = null
       canvasRevisionRef.current = null
@@ -327,6 +335,10 @@ export default function App() {
   const activeJourney: Journey | null = useMemo(
     () => (view === HOME ? null : model.journeys.find((j) => j.id === view) ?? null),
     [model, view]
+  )
+  const activeCanvasV2Flow: CanvasV2Flow | null = useMemo(
+    () => (activeJourney ? canvasV2?.flows.find((flow) => flow.id === activeJourney.id) ?? null : null),
+    [activeJourney, canvasV2]
   )
   const orderedJourneys = useMemo(
     () => orderJourneysByEdit(model.journeys, orderingChanges),
@@ -540,6 +552,7 @@ export default function App() {
           ) : inJourney ? (
             <JourneyView
               journey={activeJourney!}
+              nativeFlow={activeCanvasV2Flow}
               selectedId={selectedId}
               locked={locked}
               onBack={() => {
@@ -610,6 +623,7 @@ async function loadWorkspaceModel(refresh: boolean): Promise<WorkspaceModelResul
     mapping: result.mapping,
     notice: mappingNotice(result.mapping),
     revision: result.revision,
+    canvasV2: result.canvasV2,
   }
 }
 
@@ -1180,6 +1194,7 @@ function preserveLocalJourneyRecency(next: AppModel, current: AppModel) {
 
 function JourneyView({
   journey,
+  nativeFlow,
   selectedId,
   locked,
   onBack,
@@ -1187,12 +1202,18 @@ function JourneyView({
   onAction,
 }: {
   journey: Journey
+  nativeFlow?: CanvasV2Flow | null
   selectedId: string | null
   locked: boolean
   onBack: () => void
   onSelect: (id: string) => void
   onAction: (action: FlowAction, node: FlowNode) => void
 }) {
+  const displayNodeForNativeId = useMemo(
+    () => (nativeId: string) => findNodeByNativeId(journey.nodes, nativeId),
+    [journey.nodes]
+  )
+
   return (
     <div className="mx-auto max-w-3xl px-6 py-7 pb-40">
       <button
@@ -1211,10 +1232,31 @@ function JourneyView({
         </p>
       </div>
       <div className={cn("transition-opacity", locked && "pointer-events-none opacity-60")}>
-        <FlowColumn nodes={journey.nodes} selectedId={selectedId} onSelect={onSelect} onAction={onAction} />
+        {nativeFlow ? (
+          <CanvasV2FlowCanvas
+            flow={nativeFlow}
+            selectedDisplayId={selectedId}
+            displayNodeForNativeId={displayNodeForNativeId}
+            onSelectDisplayNode={onSelect}
+            onAction={onAction}
+          />
+        ) : (
+          <FlowColumn nodes={journey.nodes} selectedId={selectedId} onSelect={onSelect} onAction={onAction} />
+        )}
       </div>
     </div>
   )
+}
+
+function findNodeByNativeId(nodes: FlowNode[], nativeId: string): FlowNode | null {
+  for (const node of nodes) {
+    if (node.native?.nodeId === nativeId) return node
+    if (node.kind === FlowNodeKind.Branch) {
+      const found = findNodeByNativeId(node.then, nativeId) ?? findNodeByNativeId(node.otherwise, nativeId)
+      if (found) return found
+    }
+  }
+  return null
 }
 
 function DemoBanner({ thin }: { thin?: boolean }) {

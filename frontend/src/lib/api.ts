@@ -7,14 +7,25 @@ import {
   CanvasV2EdgeKind,
   CanvasV2NodeKind,
   CanvasV2Schema,
+  ConversationRole,
+  ConversationTurnKind,
   FlowNodeKind,
   LegacyPendingStatus,
+  MapFreshnessStatus,
+  MapHealthReason,
+  MapHealthStatus,
   MappingStageStatus,
   PendingStatus,
   StepRole,
   type AppModel,
   type BranchNode,
+  type CanvasApplyBatch,
+  type CanvasApplyResult,
+  type CanvasHistoryEntry,
+  type CanvasHistoryResponse,
   type CanvasMapping,
+  type CanvasRestoreRequest,
+  type CanvasRestoreResult,
   type CanvasSourceMetadata,
   type CanvasV2Document,
   type CanvasV2Edge,
@@ -26,7 +37,11 @@ import {
   type FlowAction,
   type FlowNode,
   type Journey,
+  type MapHealth,
+  type MapHealthFileRef,
   type MappingStage,
+  type PendingConversationSummary,
+  type PendingConversationTurn,
   type PendingItem,
   type PendingStatusHistoryEntry,
   type StepNode,
@@ -35,12 +50,18 @@ import {
 export class ApiError extends Error {
   readonly path: string
   readonly status: number
+  readonly code?: string
+  readonly details?: unknown
+  readonly payload?: unknown
 
-  constructor(path: string, status: number, detail?: string) {
+  constructor(path: string, status: number, detail?: string, options: { code?: string; details?: unknown; payload?: unknown } = {}) {
     super(`${status}${detail ? `: ${detail}` : ""}`)
     this.name = "ApiError"
     this.path = path
     this.status = status
+    this.code = options.code
+    this.details = options.details
+    this.payload = options.payload
   }
 }
 
@@ -66,10 +87,41 @@ async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(url(path), { headers: { "content-type": "application/json" } })
   const data = (await res.json().catch(() => null)) as T | { error?: unknown } | null
   if (!res.ok) {
-    const error = recordValue(data)?.error
-    throw new ApiError(path, res.status, error ? String(error) : res.statusText)
+    throw apiError(path, res.status, data, res.statusText)
   }
   return data as T
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(url(path), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  const data = (await res.json().catch(() => null)) as T | { error?: unknown } | null
+  if (!res.ok) {
+    throw apiError(path, res.status, data, res.statusText)
+  }
+  return data as T
+}
+
+function apiError(path: string, status: number, payload: unknown, fallback: string): ApiError {
+  const root = recordValue(payload)
+  const error = recordValue(root?.error)
+  if (error) {
+    return new ApiError(
+      path,
+      status,
+      stringValue(error.message) || stringValue(error.code) || fallback,
+      {
+        code: stringValue(error.code),
+        details: error.details,
+        payload,
+      },
+    )
+  }
+  const plain = root?.error
+  return new ApiError(path, status, plain ? String(plain) : fallback, { payload })
 }
 
 export async function fetchCanvasModel(): Promise<AppModel> {
@@ -99,6 +151,44 @@ export async function fetchPending(): Promise<PendingItem[]> {
   return (data.pending || []).map(normalizePending)
 }
 
+export async function fetchPendingRequest(id: string, options: { since?: string } = {}): Promise<PendingItem> {
+  const path = pendingPath(id, options.since)
+  const data = await getJson<{ ok: boolean; pending: unknown }>(path)
+  return normalizePending(data.pending)
+}
+
+export async function answerPendingRequest(id: string, answer: string): Promise<PendingItem> {
+  const data = await postJson<{ ok: boolean; pending: unknown }>(`${pendingPath(id)}/answer`, {
+    answer,
+    sessionId: sessionId(),
+  })
+  return normalizePending(data.pending)
+}
+
+export async function fetchMapHealth(): Promise<MapHealth> {
+  const data = await getJson<{ ok: boolean; health: unknown }>("/api/health")
+  return normalizeMapHealth(data.health)
+}
+
+export async function fetchCanvasHistory(): Promise<CanvasHistoryResponse> {
+  const data = await getJson<unknown>("/api/canvas/history")
+  return normalizeCanvasHistory(data)
+}
+
+export async function applyCanvasBatch(batch: CanvasApplyBatch): Promise<CanvasApplyResult> {
+  const data = await postJson<unknown>("/api/canvas/apply", batch)
+  return normalizeCanvasApplyResult(data)
+}
+
+export async function restoreCanvasRevision(request: CanvasRestoreRequest): Promise<CanvasRestoreResult> {
+  const data = await postJson<unknown>("/api/canvas/restore", {
+    revision: request.revision,
+    base_revision: request.baseRevision,
+    authored_by: request.authoredBy,
+  })
+  return normalizeCanvasRestoreResult(data)
+}
+
 export async function reindex(): Promise<CodeGraph> {
   const res = await fetch(url("/api/reindex"), {
     method: "POST",
@@ -111,6 +201,12 @@ export async function reindex(): Promise<CodeGraph> {
   }
   const data = (await res.json()) as { graph: CodeGraph }
   return data.graph
+}
+
+function pendingPath(id: string, since?: string): string {
+  const path = `/api/pending/${encodeURIComponent(id)}`
+  if (!since) return path
+  return `${path}?since=${encodeURIComponent(since)}`
 }
 
 export async function reindexCanvas(): Promise<CanvasResponse> {
@@ -136,6 +232,70 @@ export function normalizeCanvasResponse(data: unknown): CanvasResponse {
     mapping: normalizeCanvasMapping(recordValue(root?.mapping)),
     revision,
     canvasV2,
+  }
+}
+
+export function normalizeMapHealth(value: unknown): MapHealth {
+  const health = recordValue(value)
+  const freshness = recordValue(health?.freshness)
+  return {
+    schema: "agentcanvas.map_health.v1",
+    workspacePath: stringValue(health?.workspacePath) || stringValue(health?.workspace_path) || "",
+    stateDir: normalizeMapHealthFile(health?.stateDir || health?.state_dir),
+    workflowIr: normalizeMapHealthFile(health?.workflowIr || health?.workflow_ir),
+    canvasIr: normalizeMapHealthFile(health?.canvasIr || health?.canvas_ir),
+    freshness: {
+      status: normalizeMapFreshnessStatus(freshness?.status),
+      stale: booleanOrNull(freshness?.stale),
+      reason: stringValue(freshness?.reason) || null,
+    },
+    pendingFiles: {
+      ...normalizeMapHealthFile(health?.pendingFiles || health?.pending_files),
+      fileCount: numberValue(recordValue(health?.pendingFiles || health?.pending_files)?.fileCount) ??
+        numberValue(recordValue(health?.pendingFiles || health?.pending_files)?.file_count) ??
+        0,
+      changeCount: numberValue(recordValue(health?.pendingFiles || health?.pending_files)?.changeCount) ??
+        numberValue(recordValue(health?.pendingFiles || health?.pending_files)?.change_count) ??
+        0,
+    },
+    status: normalizeMapHealthStatus(health?.status),
+    ready: booleanValue(health?.ready),
+    summary: stringList(health?.summary),
+  }
+}
+
+export function normalizeCanvasHistory(value: unknown): CanvasHistoryResponse {
+  const history = recordValue(value)
+  return {
+    ok: booleanValue(history?.ok),
+    currentRevision: numberValue(history?.current_revision) ?? numberValue(history?.currentRevision) ?? 0,
+    current: normalizeCanvasHistoryEntry(history?.current),
+    history: Array.isArray(history?.history)
+      ? history.history.map(normalizeCanvasHistoryEntry).filter((entry): entry is CanvasHistoryEntry => Boolean(entry))
+      : [],
+  }
+}
+
+export function normalizeCanvasApplyResult(value: unknown): CanvasApplyResult {
+  const result = recordValue(value)
+  return {
+    ok: booleanValue(result?.ok),
+    autoMigrated: booleanValue(result?.auto_migrated) || booleanValue(result?.autoMigrated),
+    dryRun: booleanValue(result?.dry_run) || booleanValue(result?.dryRun),
+    revision: numberValue(result?.revision) ?? 0,
+    baseRevision: numberValue(result?.base_revision) ?? numberValue(result?.baseRevision) ?? 0,
+    path: stringValue(result?.path),
+  }
+}
+
+export function normalizeCanvasRestoreResult(value: unknown): CanvasRestoreResult {
+  const result = recordValue(value)
+  return {
+    ok: booleanValue(result?.ok),
+    revision: numberValue(result?.revision) ?? 0,
+    baseRevision: numberValue(result?.base_revision) ?? numberValue(result?.baseRevision) ?? 0,
+    restoredRevision: numberValue(result?.restored_revision) ?? numberValue(result?.restoredRevision) ?? 0,
+    path: stringValue(result?.path),
   }
 }
 
@@ -215,6 +375,48 @@ function normalizePending(item: unknown): PendingItem {
           ? it.markdownPath
           : null,
     statusHistory: normalizeStatusHistory(it.status_history || it.statusHistory),
+    conversationSummary: normalizePendingConversationSummary(it.conversation_summary || it.conversationSummary),
+    conversation: normalizePendingConversation(it.conversation),
+  }
+}
+
+function normalizePendingConversation(value: unknown): PendingConversationTurn[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const turns = value.map(normalizePendingConversationTurn).filter((turn): turn is PendingConversationTurn => Boolean(turn))
+  return turns.length ? turns : undefined
+}
+
+function normalizePendingConversationTurn(value: unknown): PendingConversationTurn | null {
+  const turn = recordValue(value)
+  if (!turn) return null
+  const id = stringValue(turn.id)
+  const text = stringValue(turn.text)
+  if (!id || !text) return null
+  return {
+    id,
+    at: stringValue(turn.at),
+    role: normalizeConversationRole(turn.role),
+    kind: normalizeConversationTurnKind(turn.kind),
+    text,
+  }
+}
+
+function normalizePendingConversationSummary(value: unknown): PendingConversationSummary | undefined {
+  const summary = recordValue(value)
+  if (!summary) return undefined
+  const unanswered = recordValue(summary.unanswered_question || summary.unansweredQuestion)
+  return {
+    turns: numberValue(summary.turns) ?? 0,
+    lastRole: normalizeOptionalConversationRole(summary.last_role || summary.lastRole),
+    lastKind: normalizeOptionalConversationTurnKind(summary.last_kind || summary.lastKind),
+    lastAt: stringValue(summary.last_at) || stringValue(summary.lastAt),
+    unansweredQuestion: unanswered
+      ? {
+          id: stringValue(unanswered.id),
+          text: stringValue(unanswered.text),
+          at: stringValue(unanswered.at),
+        }
+      : undefined,
   }
 }
 
@@ -349,6 +551,35 @@ function normalizeCanvasV2Edge(value: unknown): CanvasV2Edge | null {
   }
 }
 
+function normalizeMapHealthFile(value: unknown): MapHealthFileRef {
+  const file = recordValue(value)
+  return {
+    path: stringValue(file?.path) || "",
+    relativePath: stringValue(file?.relativePath) || stringValue(file?.relative_path) || "",
+    exists: booleanValue(file?.exists),
+    readable: optionalBoolean(file?.readable),
+    reason: normalizeOptionalMapHealthReason(file?.reason),
+    error: stringValue(file?.error),
+  }
+}
+
+function normalizeCanvasHistoryEntry(value: unknown): CanvasHistoryEntry | undefined {
+  const entry = recordValue(value)
+  const revision = numberValue(entry?.revision)
+  if (!entry || revision === undefined) return undefined
+  return {
+    revision,
+    sha256: stringValue(entry.sha256),
+    updatedAt: stringValue(entry.updated_at) || stringValue(entry.updatedAt) || null,
+    authoredBy: stringValue(entry.authored_by) || stringValue(entry.authoredBy),
+    path: stringValue(entry.path),
+    sizeBytes: numberValue(entry.size_bytes) ?? numberValue(entry.sizeBytes),
+    opSummary: recordValue(entry.op_summary) || recordValue(entry.opSummary),
+    allowRewriteReason: stringValue(entry.allow_rewrite_reason) || stringValue(entry.allowRewriteReason) || null,
+    document: normalizeCanvasV2Document(entry.document),
+  }
+}
+
 const CANVAS_V2_NODE_KINDS = new Set<string>(Object.values(CanvasV2NodeKind))
 const CANVAS_V2_EDGE_KINDS = new Set<string>(Object.values(CanvasV2EdgeKind))
 
@@ -366,6 +597,11 @@ const CANVAS_MAPPING_MODES = new Set<string>(Object.values(CanvasMappingMode))
 const CANVAS_SOURCE_KINDS = new Set<string>(Object.values(CanvasSourceKind))
 const CANVAS_SOURCE_STATUSES = new Set<string>(Object.values(CanvasSourceStatus))
 const CANVAS_SOURCE_REASONS = new Set<string>(Object.values(CanvasSourceReason))
+const MAP_FRESHNESS_STATUSES = new Set<string>(Object.values(MapFreshnessStatus))
+const MAP_HEALTH_STATUSES = new Set<string>(Object.values(MapHealthStatus))
+const MAP_HEALTH_REASONS = new Set<string>(Object.values(MapHealthReason))
+const CONVERSATION_ROLES = new Set<string>(Object.values(ConversationRole))
+const CONVERSATION_TURN_KINDS = new Set<string>(Object.values(ConversationTurnKind))
 
 function normalizeCanvasMappingMode(value: unknown): CanvasMappingMode | undefined {
   const mode = stringValue(value)
@@ -385,6 +621,39 @@ function normalizeCanvasSourceStatus(value: unknown): CanvasSourceStatus | undef
 function normalizeCanvasSourceReason(value: unknown): CanvasSourceReason | undefined {
   const reason = stringValue(value)
   return reason && CANVAS_SOURCE_REASONS.has(reason) ? (reason as CanvasSourceReason) : undefined
+}
+
+function normalizeMapFreshnessStatus(value: unknown): MapFreshnessStatus {
+  const status = stringValue(value)
+  return status && MAP_FRESHNESS_STATUSES.has(status) ? (status as MapFreshnessStatus) : MapFreshnessStatus.Unknown
+}
+
+function normalizeMapHealthStatus(value: unknown): MapHealthStatus {
+  const status = stringValue(value)
+  return status && MAP_HEALTH_STATUSES.has(status) ? (status as MapHealthStatus) : MapHealthStatus.Ready
+}
+
+function normalizeOptionalMapHealthReason(value: unknown): MapHealthReason | undefined {
+  const reason = stringValue(value)
+  return reason && MAP_HEALTH_REASONS.has(reason) ? (reason as MapHealthReason) : undefined
+}
+
+function normalizeConversationRole(value: unknown): ConversationRole {
+  return normalizeOptionalConversationRole(value) || ConversationRole.Agent
+}
+
+function normalizeOptionalConversationRole(value: unknown): ConversationRole | undefined {
+  const role = stringValue(value)
+  return role && CONVERSATION_ROLES.has(role) ? (role as ConversationRole) : undefined
+}
+
+function normalizeConversationTurnKind(value: unknown): ConversationTurnKind {
+  return normalizeOptionalConversationTurnKind(value) || ConversationTurnKind.Note
+}
+
+function normalizeOptionalConversationTurnKind(value: unknown): ConversationTurnKind | undefined {
+  const kind = stringValue(value)
+  return kind && CONVERSATION_TURN_KINDS.has(kind) ? (kind as ConversationTurnKind) : undefined
 }
 
 function normalizeCanvasSource(value: unknown): CanvasSourceMetadata | undefined {
@@ -764,6 +1033,16 @@ function stringList(value: unknown): string[] {
 
 function booleanValue(value: unknown): boolean {
   return value === true || value === "true" || value === "1"
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  if (value === true || value === "true" || value === "1") return true
+  if (value === false || value === "false" || value === "0") return false
+  return undefined
+}
+
+function booleanOrNull(value: unknown): boolean | null {
+  return optionalBoolean(value) ?? null
 }
 
 function stringLooksStale(value: unknown): boolean {

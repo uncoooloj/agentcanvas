@@ -307,6 +307,105 @@ export enum CanvasSourceTone {
   Error = "error",
 }
 
+export enum MapFreshnessStatus {
+  Unknown = "unknown",
+  Stale = "stale",
+  Fresh = "fresh",
+}
+
+export enum MapHealthStatus {
+  Ready = "ready",
+  MissingWorkflowIr = "missing_workflow_ir",
+  MissingCanvasIr = "missing_canvas_ir",
+  UnreadableCanvasIr = "unreadable_canvas_ir",
+  StaleCanvasIr = "stale_canvas_ir",
+}
+
+export enum MapHealthReason {
+  Missing = "missing",
+  InvalidJson = "invalid_json",
+  InvalidShape = "invalid_shape",
+  Unreadable = "unreadable",
+}
+
+export interface MapHealthFileRef {
+  path: string
+  relativePath: string
+  exists: boolean
+  readable?: boolean
+  reason?: MapHealthReason
+  error?: string
+}
+
+export interface MapHealth {
+  schema: "agentcanvas.map_health.v1"
+  workspacePath: string
+  stateDir: MapHealthFileRef
+  workflowIr: MapHealthFileRef
+  canvasIr: MapHealthFileRef
+  freshness: {
+    status: MapFreshnessStatus
+    stale?: boolean | null
+    reason?: string | null
+  }
+  pendingFiles: MapHealthFileRef & {
+    fileCount: number
+    changeCount: number
+  }
+  status: MapHealthStatus
+  ready: boolean
+  summary: string[]
+}
+
+export interface CanvasHistoryEntry {
+  revision: number
+  sha256?: string
+  updatedAt?: string | null
+  authoredBy?: string
+  path?: string
+  sizeBytes?: number
+  opSummary?: Record<string, unknown>
+  allowRewriteReason?: string | null
+  document?: CanvasV2Document
+}
+
+export interface CanvasHistoryResponse {
+  ok: boolean
+  currentRevision: number
+  current?: CanvasHistoryEntry
+  history: CanvasHistoryEntry[]
+}
+
+export interface CanvasApplyBatch {
+  base_revision?: number
+  authored_by?: string
+  operations: Array<Record<string, unknown>>
+  allow_rewrite?: Record<string, unknown> | null
+}
+
+export interface CanvasApplyResult {
+  ok: boolean
+  autoMigrated?: boolean
+  dryRun?: boolean
+  revision: number
+  baseRevision: number
+  path?: string
+}
+
+export interface CanvasRestoreRequest {
+  revision: number
+  baseRevision?: number
+  authoredBy?: string
+}
+
+export interface CanvasRestoreResult {
+  ok: boolean
+  revision: number
+  baseRevision: number
+  restoredRevision: number
+  path?: string
+}
+
 export enum CopyState {
   Idle = "idle",
   Copied = "copied",
@@ -339,6 +438,37 @@ export enum LegacyPendingStatus {
   Queued = "queued",
 }
 
+export enum ConversationRole {
+  Agent = "agent",
+  User = "user",
+}
+
+export enum ConversationTurnKind {
+  Question = "question",
+  Answer = "answer",
+  Note = "note",
+}
+
+export interface PendingConversationTurn {
+  id: string
+  at?: string
+  role: ConversationRole
+  kind: ConversationTurnKind
+  text: string
+}
+
+export interface PendingConversationSummary {
+  turns: number
+  lastRole?: ConversationRole
+  lastKind?: ConversationTurnKind
+  lastAt?: string
+  unansweredQuestion?: {
+    id?: string
+    text?: string
+    at?: string
+  } | null
+}
+
 export enum ChangeKind {
   New = "new",
   Edited = "edited",
@@ -368,6 +498,8 @@ export interface PendingItem {
   jsonPath?: string | null
   markdownPath?: string | null
   statusHistory?: PendingStatusHistoryEntry[]
+  conversationSummary?: PendingConversationSummary
+  conversation?: PendingConversationTurn[]
 }
 
 // ---- helpers ----

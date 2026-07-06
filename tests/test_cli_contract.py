@@ -44,7 +44,7 @@ class AgentCanvasCliContractTests(unittest.TestCase):
 
     def _copy_sample_workspace(self, temp_root):
         workspace = Path(temp_root) / "sample-js-app"
-        shutil.copytree(SAMPLE_APP, workspace)
+        shutil.copytree(SAMPLE_APP, workspace, ignore=shutil.ignore_patterns(".agentcanvas"))
         return workspace
 
     def _run_agentcanvas(self, *args, cwd):
@@ -754,7 +754,7 @@ class AgentCanvasCliContractTests(unittest.TestCase):
 
             self.assertIn("source_facts", workflow_ir)
             self.assertEqual(canvas_ir["schema"], "agentcanvas.canvas.v2")
-            self.assertEqual(canvas_ir["revision"], 2)
+            self.assertEqual(canvas_ir["revision"], 1)
             self.assertEqual(canvas_ir["authored_by"], "apply-query")
             self.assertEqual(canvas_ir["app"]["name"], "Sample js app")
             self.assertEqual(len(canvas_ir["flows"]), 1)
@@ -764,8 +764,8 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 [node["title"] for node in flow["nodes"]],
                 ["Someone starts checkout", "Submit the order"],
             )
-            self.assertTrue((workspace / ".agentcanvas" / "history" / "canvas.pre-v2.json").is_file())
-            self.assertTrue((workspace / ".agentcanvas" / "history" / "canvas.1.json").is_file())
+            self.assertFalse((workspace / ".agentcanvas" / "history" / "canvas.pre-v2.json").exists())
+            self.assertTrue((workspace / ".agentcanvas" / "history" / "canvas.0.json").is_file())
 
 
 if __name__ == "__main__":

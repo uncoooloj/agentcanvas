@@ -55,6 +55,7 @@ from .core.behavior_canvas import (
     canvas_source_metadata,
 )
 from .core.workspace_profile import infer_workspace_profile
+from .failure_ids import FailureId, failure_payload
 from .progress import ProgressError, progress_status, safe_progress_status
 
 
@@ -800,7 +801,10 @@ def make_handler(
         def handle_api_get(self, parsed) -> None:
             if not self.authorized(parsed):
                 self.write_json(
-                    {"ok": False, "error": "missing or invalid token"},
+                    failure_payload(
+                        FailureId.TOKEN_INVALID,
+                        "missing or invalid token",
+                    ),
                     status=HTTPStatus.UNAUTHORIZED,
                 )
                 return
@@ -935,7 +939,10 @@ def make_handler(
         def handle_api_post(self, parsed) -> None:
             if not self.authorized(parsed):
                 self.write_json(
-                    {"ok": False, "error": "missing or invalid token"},
+                    failure_payload(
+                        FailureId.TOKEN_INVALID,
+                        "missing or invalid token",
+                    ),
                     status=HTTPStatus.UNAUTHORIZED,
                 )
                 return

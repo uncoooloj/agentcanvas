@@ -71,14 +71,22 @@ evidence matches the implementation.
 
 If launch fails, use the structured error:
 
-- `PORT_BUSY`: rerun `agentcanvas up` with a wider `--port-end`.
+- `uv_missing`: install uv, or use the pip fallback above.
+- `install_failed`: retry with the package named `use-agentcanvas` and inspect
+  the package-manager error.
+- `port_busy`: rerun `agentcanvas up` with a wider `--port-end`.
+- `token_invalid` or HTTP 401: rerun `agentcanvas up --json` and use the fresh
+  URL it returns.
+- `server_not_running`: run `agentcanvas up --json` for this workspace.
+- `agent_stalled`: check `.agentcanvas/progress.json` and resume from the latest
+  progress stage.
+- `workspace_unindexed`: run `agentcanvas index --workspace
+  $workspace_shell`.
+- `canvas_invalid`: validate the canvas and repair it through
+  `agentcanvas canvas apply`.
 - `NON_LOOPBACK_HOST`: use the default localhost host.
 - `READY_TIMEOUT`: read `.agentcanvas/server.log`, fix the startup issue, then
   rerun `agentcanvas up`.
-- `TOKEN_INVALID` or HTTP 401: rerun `agentcanvas up --json` and use the fresh
-  URL it returns.
-- Missing workspace evidence: run `agentcanvas index --workspace
-  $workspace_shell`.
 
 Keep visible canvas text in plain English for non-technical readers. Preserve
 evidence refs where possible, keep file paths and framework jargon out of

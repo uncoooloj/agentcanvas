@@ -33,6 +33,26 @@ class RuntimeSmokeTests(unittest.TestCase):
         self.assertIsNone(smoke.parse_launch_info("AgentCanvas serving workspace"))
         self.assertIsNone(smoke.parse_launch_info("Open http://127.0.0.1:54321/"))
 
+    def test_runtime_smoke_redacts_tokenized_urls_from_logs(self):
+        smoke = load_smoke_runtime()
+
+        redacted = smoke.redact_tokenized_urls(
+            "Open http://127.0.0.1:54321/?token=abc123&sessionId=session-1"
+        )
+        joined = smoke.joined_output(
+            [
+                (
+                    "stdout",
+                    "Open http://127.0.0.1:54321/?token=abc123&sessionId=session-1",
+                )
+            ]
+        )
+
+        self.assertIn("token=<redacted>", redacted)
+        self.assertIn("token=<redacted>", joined)
+        self.assertNotIn("abc123", redacted)
+        self.assertNotIn("abc123", joined)
+
     def test_validate_context_requires_workspace_mode_without_demo_content(self):
         smoke = load_smoke_runtime()
 

@@ -35,6 +35,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORKSPACE = PROJECT_ROOT / "examples" / "sample-js-app"
 DEFAULT_TIMEOUT_SECONDS = 20.0
 URL_RE = re.compile(r"https?://[^\s]+")
+TOKEN_QUERY_RE = re.compile(r"([?&]token=)[^&#\s]+")
 
 
 class SmokeError(RuntimeError):
@@ -79,6 +80,10 @@ def parse_launch_info(line: str) -> Optional[LaunchInfo]:
     if not parsed.scheme or not parsed.netloc or not token:
         return None
     return LaunchInfo(base_url=f"{parsed.scheme}://{parsed.netloc}", token=token)
+
+
+def redact_tokenized_urls(text: str) -> str:
+    return TOKEN_QUERY_RE.sub(r"\1<redacted>", text)
 
 
 def start_output_reader(
@@ -165,7 +170,7 @@ def read_until_launch(server: ServerProcess, timeout_seconds: float) -> LaunchIn
             continue
         lines.append((label, line))
         if label == "stdout":
-            print(f"server {label}: {line}", flush=True)
+            print(f"server {label}: {redact_tokenized_urls(line)}", flush=True)
         launch = parse_launch_info(line)
         if launch is not None:
             return launch
@@ -190,7 +195,9 @@ def drain_output(output: "queue.Queue[Tuple[str, str]]") -> List[Tuple[str, str]
 
 
 def joined_output(lines: Iterable[Tuple[str, str]]) -> str:
-    text = "\n".join(f"{label}: {line}" for label, line in lines if line)
+    text = "\n".join(
+        f"{label}: {redact_tokenized_urls(line)}" for label, line in lines if line
+    )
     return text or "No server output captured."
 
 

@@ -192,6 +192,19 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("onOpenFlow(node.flowRef)", canvas)
         self.assertIn("CanvasV2NodeKind.SubFlow && node.flowRef", canvas)
 
+    def test_native_v2_graph_cards_support_keyboard_navigation(self):
+        canvas = (PROJECT_ROOT / "frontend" / "src" / "components" / "CanvasV2FlowCanvas.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("export enum CanvasV2KeyboardDirection", canvas)
+        self.assertIn("keyboardDirectionFromKey", canvas)
+        self.assertIn("keyboardTargetForNode", canvas)
+        self.assertIn('data-canvas-v2-node-id={node.id}', canvas)
+        self.assertIn("onKeyDown={onKeyDown}", canvas)
+        self.assertIn("ArrowDown", canvas)
+        self.assertIn("ArrowUp", canvas)
+        self.assertIn("Home", canvas)
+        self.assertIn("End", canvas)
+
     def test_inspector_shows_native_v2_evidence_citations(self):
         inspector = (PROJECT_ROOT / "frontend" / "src" / "components" / "Inspector.tsx").read_text(encoding="utf-8")
         app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")

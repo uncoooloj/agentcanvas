@@ -1,6 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { CanvasV2FlowCanvas } from "./CanvasV2FlowCanvas"
+import {
+  CanvasV2FlowCanvas,
+  CanvasV2KeyboardDirection,
+  keyboardDirectionFromKey,
+  keyboardTargetForNode,
+} from "./CanvasV2FlowCanvas"
 import { TooltipProvider } from "./ui/tooltip"
 import { nativeNodeToDisplayNode } from "@/lib/nativeDisplay"
 import { CanvasV2EdgeKind, CanvasV2NodeKind, type CanvasV2Flow } from "@/lib/types"
@@ -76,8 +81,26 @@ describe("CanvasV2FlowCanvas", () => {
     expect(html).toContain("Take payment")
     expect(html).toContain("Send receipt")
     expect(html).toContain("Opens receipt")
+    expect(html).toContain('data-canvas-v2-node-id="n:start"')
     expect(html).toContain('aria-label="Change"')
     expect(html).toContain('aria-label="Add a step after"')
     expect(html).not.toContain('disabled=""')
+  })
+
+  it("maps keyboard keys to graph navigation targets", () => {
+    const layoutNodes = [
+      { id: "n:start", x: 0, y: 0, w: 260, h: 74 },
+      { id: "n:pay", x: 0, y: 100, w: 260, h: 74 },
+      { id: "n:receipt", x: 0, y: 200, w: 260, h: 74 },
+    ]
+
+    expect(keyboardDirectionFromKey("ArrowDown")).toBe(CanvasV2KeyboardDirection.Next)
+    expect(keyboardDirectionFromKey("ArrowLeft")).toBe(CanvasV2KeyboardDirection.Previous)
+    expect(keyboardDirectionFromKey("Home")).toBe(CanvasV2KeyboardDirection.First)
+    expect(keyboardDirectionFromKey("x")).toBeNull()
+    expect(keyboardTargetForNode(flow, layoutNodes, "n:start", CanvasV2KeyboardDirection.Next)).toBe("n:pay")
+    expect(keyboardTargetForNode(flow, layoutNodes, "n:receipt", CanvasV2KeyboardDirection.Previous)).toBe("n:pay")
+    expect(keyboardTargetForNode(flow, layoutNodes, "n:pay", CanvasV2KeyboardDirection.First)).toBe("n:start")
+    expect(keyboardTargetForNode(flow, layoutNodes, "n:pay", CanvasV2KeyboardDirection.Last)).toBe("n:receipt")
   })
 })

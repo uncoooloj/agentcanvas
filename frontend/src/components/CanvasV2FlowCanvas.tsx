@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from "react"
 import {
   CircleStop,
   Clock,
@@ -14,7 +14,7 @@ import {
   Workflow,
 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { layoutFlow, type CanvasV2Layout, type CanvasV2LayoutEdge } from "@/lib/canvasV2Layout"
+import { layoutFlow, type CanvasV2Layout, type CanvasV2LayoutEdge, type CanvasV2LayoutNode } from "@/lib/canvasV2Layout"
 import { cn } from "@/lib/utils"
 import {
   CanvasV2EdgeKind,
@@ -25,6 +25,13 @@ import {
   type CanvasV2Node,
   type FlowNode,
 } from "@/lib/types"
+
+export enum CanvasV2KeyboardDirection {
+  First = "first",
+  Last = "last",
+  Next = "next",
+  Previous = "previous",
+}
 
 interface Props {
   flow: CanvasV2Flow
@@ -47,6 +54,7 @@ export function CanvasV2FlowCanvas({
   const [layout, setLayout] = useState<CanvasV2Layout>(fallbackLayout)
   const layoutRequestRef = useRef(0)
   const nodes = useMemo(() => new Map(flow.nodes.map((node) => [node.id, node])), [flow.nodes])
+  const layoutOrder = useMemo(() => layout.nodes.map((node) => node.id), [layout.nodes])
 
   useEffect(() => {
     setLayout(fallbackLayout)
@@ -61,6 +69,22 @@ export function CanvasV2FlowCanvas({
     worker.postMessage({ id: requestId, flow })
     return () => worker.terminate()
   }, [fallbackLayout, flow])
+
+  function moveSelectionFrom(nodeId: string, direction: CanvasV2KeyboardDirection) {
+    const targetId = keyboardTargetForNode(flow, layout.nodes, nodeId, direction)
+    if (!targetId) return
+    const displayNode = displayNodeForNativeId(targetId)
+    if (!displayNode) return
+    onSelectDisplayNode(displayNode.id)
+    if (typeof document !== "undefined") {
+      window.requestAnimationFrame(() => {
+        const target = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-canvas-v2-node-id]")).find(
+          (button) => button.dataset.canvasV2NodeId === targetId
+        )
+        target?.focus()
+      })
+    }
+  }
 
   return (
     <div className="overflow-x-auto pb-4">
@@ -106,6 +130,7 @@ export function CanvasV2FlowCanvas({
                 node={node}
                 selected={selected}
                 displayNode={displayNode}
+                tabIndex={displayNode ? (selected || (!selectedDisplayId && layoutOrder[0] === node.id) ? 0 : -1) : undefined}
                 onSelect={() => {
                   if (node.kind === CanvasV2NodeKind.SubFlow && node.flowRef && onOpenFlow) {
                     onOpenFlow(node.flowRef)
@@ -113,6 +138,7 @@ export function CanvasV2FlowCanvas({
                   }
                   if (displayNode) onSelectDisplayNode(displayNode.id)
                 }}
+                onNavigate={(direction) => moveSelectionFrom(node.id, direction)}
                 onAction={onAction}
               />
             </div>
@@ -127,23 +153,37 @@ function NativeNodeCard({
   node,
   selected,
   displayNode,
+  tabIndex,
   onSelect,
+  onNavigate,
   onAction,
 }: {
   node: CanvasV2Node
   selected: boolean
   displayNode: FlowNode | null
+  tabIndex?: number
   onSelect: () => void
+  onNavigate: (direction: CanvasV2KeyboardDirection) => void
   onAction: (action: FlowAction, node: FlowNode) => void
 }) {
   const Icon = iconForKind(node.kind)
   const canEdit = Boolean(displayNode)
+  function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const direction = keyboardDirectionFromKey(event.key)
+    if (!direction) return
+    event.preventDefault()
+    onNavigate(direction)
+  }
+
   return (
     <div className="group relative">
       <button
         type="button"
         onClick={onSelect}
+        onKeyDown={onKeyDown}
         disabled={!displayNode}
+        tabIndex={tabIndex}
+        data-canvas-v2-node-id={node.id}
         className={cn(
           "flex min-h-[74px] w-full items-start gap-3 rounded-lg border bg-card px-3.5 py-3 text-left shadow-sm transition-all",
           selected ? "border-primary/70 ring-2 ring-primary/15" : "border-border hover:border-foreground/20",
@@ -193,6 +233,52 @@ function NativeNodeCard({
       )}
     </div>
   )
+}
+
+export function keyboardDirectionFromKey(key: string): CanvasV2KeyboardDirection | null {
+  switch (key) {
+    case "ArrowDown":
+    case "ArrowRight":
+      return CanvasV2KeyboardDirection.Next
+    case "ArrowUp":
+    case "ArrowLeft":
+      return CanvasV2KeyboardDirection.Previous
+    case "Home":
+      return CanvasV2KeyboardDirection.First
+    case "End":
+      return CanvasV2KeyboardDirection.Last
+    default:
+      return null
+  }
+}
+
+export function keyboardTargetForNode(
+  flow: CanvasV2Flow,
+  layoutNodes: CanvasV2LayoutNode[],
+  nodeId: string,
+  direction: CanvasV2KeyboardDirection
+): string | null {
+  const order = layoutNodes.map((node) => node.id)
+  const index = order.indexOf(nodeId)
+  if (direction === CanvasV2KeyboardDirection.First) return order[0] ?? null
+  if (direction === CanvasV2KeyboardDirection.Last) return order[order.length - 1] ?? null
+  if (direction === CanvasV2KeyboardDirection.Next) {
+    const outgoing = flow.edges
+      .filter((edge) => edge.source === nodeId)
+      .map((edge) => edge.target)
+      .sort((a, b) => orderIndex(order, a) - orderIndex(order, b))
+    return outgoing[0] ?? order[index + 1] ?? null
+  }
+  const incoming = flow.edges
+    .filter((edge) => edge.target === nodeId)
+    .map((edge) => edge.source)
+    .sort((a, b) => orderIndex(order, b) - orderIndex(order, a))
+  return incoming[0] ?? (index > 0 ? order[index - 1] : null)
+}
+
+function orderIndex(order: string[], id: string): number {
+  const index = order.indexOf(id)
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index
 }
 
 function NodeAction({

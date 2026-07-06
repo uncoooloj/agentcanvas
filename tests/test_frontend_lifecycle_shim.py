@@ -128,6 +128,17 @@ class FrontendLifecycleShimTests(unittest.TestCase):
         self.assertIn("flowSummary", types)
         self.assertIn("normalizeCanvasHistoryFlowSummary", api)
 
+    def test_native_v2_nodes_have_display_fallbacks(self):
+        app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+        canvas = (PROJECT_ROOT / "frontend" / "src" / "components" / "CanvasV2FlowCanvas.tsx").read_text(encoding="utf-8")
+
+        self.assertIn("nativeNodeToDisplayNode", app)
+        self.assertIn("findNativeDisplayNodeByDisplayId", app)
+        self.assertIn("nativeDisplayNodeId", app)
+        self.assertIn("findNodeByNativeId(journey.nodes, nativeId)", app)
+        self.assertIn("nativeNode ? nativeNodeToDisplayNode", app)
+        self.assertIn("disabled={!displayNode}", canvas)
+
     def test_inspector_shows_native_v2_evidence_citations(self):
         inspector = (PROJECT_ROOT / "frontend" / "src" / "components" / "Inspector.tsx").read_text(encoding="utf-8")
         app = (PROJECT_ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")

@@ -23,6 +23,18 @@ Validate matrix shape without claiming release readiness:
 python3.9 scripts/verify_dogfood_matrix.py tests/fixtures/dogfood-matrix/matrix.partial.json
 ```
 
+Print every missing release-gate pair while a matrix is still incomplete:
+
+```bash
+python3.9 scripts/verify_dogfood_matrix.py --details path/to/release-matrix.json
+```
+
+For dashboards, handoffs, or release notes, emit the same result as JSON:
+
+```bash
+python3.9 scripts/verify_dogfood_matrix.py --json path/to/release-matrix.json
+```
+
 Run the release gate:
 
 ```bash

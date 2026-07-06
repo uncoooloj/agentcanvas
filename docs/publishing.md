@@ -68,5 +68,17 @@ the gate:
 python3 scripts/verify_release.py --dogfood-matrix path/to/release-matrix.json --require-dogfood-gate
 ```
 
+If the gate is not ready yet, list the missing agent/workspace pairs:
+
+```bash
+python3 scripts/verify_dogfood_matrix.py --details path/to/release-matrix.json
+```
+
+For a machine-readable release handoff:
+
+```bash
+python3 scripts/verify_dogfood_matrix.py --json path/to/release-matrix.json
+```
+
 The checked-in dogfood matrix fixture is intentionally partial. It validates the
 shape of the evidence contract; it is not launch proof.

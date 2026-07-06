@@ -66,6 +66,19 @@ Validate the public template shape:
 python3.9 scripts/verify_dogfood_matrix.py docs/dogfood/release-matrix.template.json
 ```
 
+While filling the real release matrix, use the detailed view to see the exact
+agent/workspace pairs still missing two consecutive clean full-loop runs:
+
+```bash
+python3.9 scripts/verify_dogfood_matrix.py --details path/to/release-matrix.json
+```
+
+Use JSON output when another tool or release dashboard needs the same status:
+
+```bash
+python3.9 scripts/verify_dogfood_matrix.py --json path/to/release-matrix.json
+```
+
 Validate the real release matrix:
 
 ```bash

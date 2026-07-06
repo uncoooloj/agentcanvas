@@ -1,0 +1,17 @@
+{
+  "schema": "agentcanvas.dogfood_matrix.v1",
+  "agents": [
+    { "id": "claude-code", "name": "Claude Code", "public_claim": true },
+    { "id": "codex", "name": "Codex", "public_claim": true },
+    { "id": "cursor", "name": "Cursor", "public_claim": true },
+    { "id": "antigravity", "name": "Antigravity", "public_claim": true }
+  ],
+  "workspaces": [
+    { "id": "agentcanvas", "name": "AgentCanvas", "type": "agentcanvas", "gate": true },
+    { "id": "nextjs-vibe", "name": "Vibe-coded Next.js app", "type": "nextjs", "gate": true },
+    { "id": "fastapi-service", "name": "FastAPI service", "type": "fastapi", "gate": true },
+    { "id": "laravel-app", "name": "Laravel app", "type": "laravel", "gate": false },
+    { "id": "small-monorepo", "name": "Small monorepo", "type": "monorepo", "gate": false }
+  ],
+  "runs": []
+}

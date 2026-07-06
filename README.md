@@ -523,6 +523,16 @@ not verified there:
 python3 scripts/verify_release.py --skip-runtime-smoke
 ```
 
+Before a public release or PyPI publish, point the verifier at the real dogfood
+matrix and require the gate:
+
+```bash
+python3 scripts/verify_release.py --dogfood-matrix path/to/release-matrix.json --require-dogfood-gate
+```
+
+The checked-in dogfood matrix fixture is intentionally partial. It keeps the
+evidence contract tested without pretending the release dogfood gate has passed.
+
 Use the Python-only path only when the change cannot affect the browser app or
 packaged frontend assets, for example a docs-only change or a Python-only check
 while frontend dependencies are not installed:

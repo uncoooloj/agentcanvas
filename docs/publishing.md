@@ -60,3 +60,13 @@ python3 scripts/verify_release.py --skip-runtime-smoke
 
 If you skip it, say plainly that the live runtime API path was not verified in
 that environment.
+
+Before a public release or PyPI publish, use a real dogfood matrix and require
+the gate:
+
+```bash
+python3 scripts/verify_release.py --dogfood-matrix path/to/release-matrix.json --require-dogfood-gate
+```
+
+The checked-in dogfood matrix fixture is intentionally partial. It validates the
+shape of the evidence contract; it is not launch proof.

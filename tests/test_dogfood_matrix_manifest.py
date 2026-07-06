@@ -8,6 +8,7 @@ from scripts.verify_dogfood_matrix import DogfoodMatrixError, validate_matrix
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PARTIAL_MATRIX = PROJECT_ROOT / "tests" / "fixtures" / "dogfood-matrix" / "matrix.partial.json"
+TEMPLATE_MATRIX = PROJECT_ROOT / "docs" / "dogfood" / "release-matrix.template.json"
 VALID_PROOF = "tests/fixtures/dogfood-proof/manifest.valid.json"
 
 
@@ -27,6 +28,18 @@ class DogfoodMatrixManifestTests(unittest.TestCase):
             validate_matrix(PARTIAL_MATRIX, gate=True)
 
         self.assertIn("dogfood matrix gate is incomplete", str(raised.exception))
+
+    def test_public_release_matrix_template_validates_without_claiming_gate(self):
+        result = validate_matrix(TEMPLATE_MATRIX)
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["run_count"], 0)
+        self.assertEqual(result["required_pair_count"], 12)
+
+    def test_public_release_matrix_template_fails_gate_mode(self):
+        with self.assertRaises(DogfoodMatrixError):
+            validate_matrix(TEMPLATE_MATRIX, gate=True)
 
     def test_complete_matrix_requires_two_consecutive_clean_attempts_per_pair(self):
         with tempfile.TemporaryDirectory() as temp_root:

@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in AgentCanvas did not work as expected.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Say what you expected and what AgentCanvas did instead.
+      placeholder: I expected the map to show my signup flow, but it only showed one generic flow.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: AgentCanvas version
+      placeholder: agentcanvas --version
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent or editor
+      options:
+        - Codex
+        - Claude Code
+        - Cursor
+        - Antigravity
+        - Other
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest path that makes the issue happen again.
+      placeholder: |
+        1. Ran `agentcanvas up --workspace . --json`
+        2. Opened the URL
+        3. Clicked Sync
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant output, screenshots, or the last lines of `.agentcanvas/server.log`. Remove tokens before sharing.

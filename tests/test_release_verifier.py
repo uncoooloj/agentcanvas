@@ -63,6 +63,21 @@ class ReleaseVerifierTests(unittest.TestCase):
         self.assertIn("MCP tools can read and update AgentCanvas state", readme)
         self.assertNotIn("**MCP**: planned", readme)
 
+    def test_phase5_issue_templates_exist(self):
+        template_dir = PROJECT_ROOT / ".github" / "ISSUE_TEMPLATE"
+
+        expected = {
+            "bug.yml": ("Bug report", "bug"),
+            "dogfood.yml": ("Dogfood run", "dogfood"),
+            "agent-compat.yml": ("Agent compatibility", "agent-compat"),
+        }
+        for filename, (name, label) in expected.items():
+            with self.subTest(filename=filename):
+                source = (template_dir / filename).read_text(encoding="utf-8")
+                self.assertIn("name: %s" % name, source)
+                self.assertIn("- %s" % label, source)
+                self.assertIn("body:", source)
+
     def test_run_step_reports_missing_commands_in_plain_language(self):
         verifier = load_verifier()
 

@@ -1,0 +1,36 @@
+name: Agent compatibility
+description: Report setup or workflow differences for a coding agent.
+title: "[Agent compatibility]: "
+labels:
+  - agent-compat
+body:
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent or editor
+      options:
+        - Codex
+        - Claude Code
+        - Cursor
+        - Antigravity
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility-gap
+    attributes:
+      label: What did this agent need?
+      description: Include permission prompts, install friction, MCP setup, copy-mode fallback, or commands the agent could not run.
+      placeholder: Cursor needed a manual copy step because...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should AgentCanvas do differently?
+      placeholder: The bootstrap prompt should tell this agent to...
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Paste exact error text, screenshots, or redacted command output.

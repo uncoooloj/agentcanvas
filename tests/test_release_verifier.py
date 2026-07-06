@@ -219,6 +219,7 @@ class ReleaseVerifierTests(unittest.TestCase):
                 "Python unit tests",
                 "AgentCanvas CLI smoke test",
                 "AgentCanvas runtime API smoke test",
+                "AgentCanvas pending-loop smoke test",
                 "Dogfood proof manifest",
             ],
         )

@@ -271,6 +271,25 @@ def run_runtime_smoke(env):
     )
 
 
+def run_pending_loop_smoke(env):
+    run_step(
+        "AgentCanvas pending-loop smoke test",
+        [sys.executable, "scripts/smoke_pending_loop.py"],
+        PROJECT_ROOT,
+        env=env,
+        timeout=120,
+        returncode_messages={
+            2: (
+                "AgentCanvas pending-loop smoke test was blocked by local sandbox "
+                "permissions for localhost binding or requests. Rerun with "
+                "permission to bind/connect to 127.0.0.1, or use "
+                "`--skip-runtime-smoke` only when this environment cannot bind "
+                "localhost."
+            )
+        },
+    )
+
+
 def run_python_checks(skip_runtime_smoke=False):
     env = with_project_pythonpath()
     run_step(
@@ -290,8 +309,11 @@ def run_python_checks(skip_runtime_smoke=False):
     if skip_runtime_smoke:
         print("\n== AgentCanvas runtime API smoke test ==", flush=True)
         print("Skipped by --skip-runtime-smoke.", flush=True)
+        print("\n== AgentCanvas pending-loop smoke test ==", flush=True)
+        print("Skipped by --skip-runtime-smoke.", flush=True)
     else:
         run_runtime_smoke(env)
+        run_pending_loop_smoke(env)
     run_step(
         "Dogfood proof manifest",
         [sys.executable, "scripts/verify_dogfood_proof.py", str(DOGFOOD_PROOF_MANIFEST)],

@@ -420,7 +420,7 @@ function DemoFrame({ step }: { step: number }) {
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-sm font-medium">1 change ready</span>
                       <span className="relative inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground">
-                        <Send className="size-3" /> Send to agent
+                        <Send className="size-3" /> Preview send
                         <Cursor className="-bottom-1.5 -right-1.5" />
                       </span>
                     </div>
@@ -435,13 +435,13 @@ function DemoFrame({ step }: { step: number }) {
                 {step === 4 && !done && (
                   <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-3 text-sm">
                     <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
-                    <span className="text-muted-foreground">Your agent is making your change...</span>
+                    <span className="text-muted-foreground">Example agent run in progress...</span>
                   </div>
                 )}
                 {step === 4 && done && (
                   <div className="flex animate-fade-in items-center gap-2.5 rounded-xl border bg-background px-3 py-3 text-sm">
                     <CircleCheck className="size-4 shrink-0 text-act-fg" />
-                    <span className="font-medium">All set, your change is live</span>
+                    <span className="font-medium">Example change complete</span>
                   </div>
                 )}
               </div>

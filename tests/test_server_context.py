@@ -53,6 +53,9 @@ class ServerContextTests(unittest.TestCase):
             instruction = handoff["instruction"]
             self.assertIn(str(resolved), instruction)
             self.assertIn(".agentcanvas/canvas.ir.json", instruction)
+            self.assertIn("pip install use-agentcanvas", instruction)
+            self.assertNotRegex(instruction, r"pip install\s+agentcanvas\b")
+            self.assertNotIn("agentcanvas start", instruction)
             self.assertIn("ask clarifying questions", instruction)
             for agent_name in ["Codex", "Claude", "Cursor", "Antigravity"]:
                 self.assertNotIn(agent_name, instruction)
@@ -97,6 +100,7 @@ class ServerContextTests(unittest.TestCase):
             self.assertEqual(str(resolved), handoff["workspacePath"])
             self.assertIn(str(resolved), handoff["instruction"])
             self.assertIn(".agentcanvas/canvas.ir.json", handoff["instruction"])
+            self.assertNotIn("agentcanvas start", handoff["instruction"])
 
     def test_health_api_returns_map_health_summary(self):
         with tempfile.TemporaryDirectory() as temp_root:

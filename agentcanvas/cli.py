@@ -23,7 +23,7 @@ from .ir import (
     ConversationTurnKind,
     append_pending_conversation,
     atomic_write_json,
-    build_canvas_map_instruction,
+    build_bootstrap_prompt,
     canvas_ir_path,
     ensure_state_dirs,
     format_map_health,
@@ -135,6 +135,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prompt_parser.add_argument("path", nargs="?", help="workspace path to map")
     prompt_parser.add_argument("--workspace", help="workspace path to map")
+    prompt_parser.add_argument(
+        "--agent",
+        help="optional label for the coding agent that should receive the prompt",
+    )
     prompt_parser.set_defaults(func=cmd_prompt)
 
     status_parser = subparsers.add_parser(
@@ -382,9 +386,14 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 def cmd_prompt(args: argparse.Namespace) -> int:
     workspace = resolve_workspace(selected_workspace(args))
-    print("Copy this to the AI coding agent working in this project:")
+    agent = getattr(args, "agent", None)
+    if isinstance(agent, str) and agent.strip():
+        target = " ".join(agent.split())[:80]
+    else:
+        target = "the AI coding agent working in this project"
+    print(f"Copy this to {target}:")
     print()
-    print(build_canvas_map_instruction(workspace))
+    print(build_bootstrap_prompt(workspace, agent=agent))
     return 0
 
 

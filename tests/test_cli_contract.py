@@ -489,16 +489,48 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 completed.stdout + completed.stderr,
             )
             self.assertIn("Copy this to the AI coding agent", completed.stdout)
+            self.assertIn("Calling agent: the calling coding agent.", completed.stdout)
             self.assertIn(str(workspace.resolve()), completed.stdout)
             self.assertIn(
                 str(workspace.resolve() / ".agentcanvas" / "canvas.ir.json"),
                 completed.stdout,
             )
             self.assertIn("`.agentcanvas/canvas.ir.json`", completed.stdout)
+            self.assertIn("pip install use-agentcanvas", completed.stdout)
+            self.assertNotRegex(completed.stdout, r"pip install\s+agentcanvas\b")
+            self.assertNotIn("agentcanvas start", completed.stdout)
+            self.assertIn("python -m agentcanvas health", completed.stdout)
             self.assertIn("plain English", completed.stdout)
             self.assertIn("ask clarifying questions", completed.stdout)
             for agent_name in ["Codex", "Claude", "Cursor", "Antigravity"]:
                 self.assertNotIn(agent_name, completed.stdout)
+            self.assertFalse((workspace / ".agentcanvas").exists())
+
+    def test_prompt_command_renders_requested_agent_label(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace-to-map"
+            workspace.mkdir()
+
+            completed = self._run_agentcanvas(
+                "prompt",
+                str(workspace),
+                "--agent",
+                "Claude Code",
+                cwd=temp_root,
+            )
+            self._skip_if_cli_scaffold(completed)
+
+            self.assertEqual(
+                completed.returncode,
+                0,
+                completed.stdout + completed.stderr,
+            )
+            self.assertIn("Copy this to Claude Code:", completed.stdout)
+            self.assertIn("Calling agent: Claude Code.", completed.stdout)
+            self.assertIn("AgentCanvas is agent-agnostic", completed.stdout)
+            self.assertNotIn("Codex", completed.stdout)
+            self.assertNotIn("Cursor", completed.stdout)
+            self.assertNotIn("agentcanvas start", completed.stdout)
             self.assertFalse((workspace / ".agentcanvas").exists())
 
     def test_pending_handoff_markdown_includes_canvas_map_instruction(self):
@@ -522,6 +554,9 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 markdown,
             )
             self.assertIn("`.agentcanvas/canvas.ir.json`", markdown)
+            self.assertIn("pip install use-agentcanvas", markdown)
+            self.assertNotRegex(markdown, r"pip install\s+agentcanvas\b")
+            self.assertNotIn("agentcanvas start", markdown)
             self.assertIn("ask clarifying questions", markdown)
             for agent_name in ["Codex", "Claude", "Cursor", "Antigravity"]:
                 self.assertNotIn(agent_name, markdown)

@@ -10,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from agentcanvas.bootstrap import render_bootstrap_prompt
 from agentcanvas.lifecycle import (
     DONE,
     IN_PROGRESS,
@@ -150,24 +151,23 @@ def load_canvas_ir(workspace: str | Path) -> Dict[str, Any]:
         return json.load(handle)
 
 
-def build_canvas_map_instruction(workspace: str | Path) -> str:
-    """Return copyable instructions for authoring a missing canvas map."""
+def build_bootstrap_prompt(workspace: str | Path, *, agent: str | None = None) -> str:
+    """Return copyable AgentCanvas bootstrap instructions."""
 
     root = resolve_workspace(workspace)
-    relative_output = f"{STATE_DIR_NAME}/{CANVAS_IR_FILENAME}"
-    output_path = canvas_ir_path(root)
-    return (
-        f"Read the workspace at {root}. If there is no readable canvas map, "
-        "refresh or author the AgentCanvas behavior map from the current "
-        "workspace evidence. Update the stored canvas through "
-        "`agentcanvas canvas apply --base-revision <revision> --input <ops.json>` "
-        f"so revision checks, history, and pending refs stay intact; the result "
-        f"is stored at {output_path} (`{relative_output}`). Describe "
-        "user-visible behavior in plain English, keep the map grounded in the "
-        "files you inspected, and ask clarifying questions before executing any "
-        "user-requested edits when scope, expected behavior, or missing details "
-        "are unclear."
+    return render_bootstrap_prompt(
+        workspace=root,
+        agent_label=agent,
+        workflow_relative_path=f"{STATE_DIR_NAME}/{IR_FILENAME}",
+        canvas_relative_path=f"{STATE_DIR_NAME}/{CANVAS_IR_FILENAME}",
+        canvas_path=canvas_ir_path(root),
     )
+
+
+def build_canvas_map_instruction(workspace: str | Path) -> str:
+    """Return compatibility copy for missing-canvas handoffs."""
+
+    return build_bootstrap_prompt(workspace)
 
 
 def canvas_map_handoff(workspace: str | Path) -> Dict[str, Any]:

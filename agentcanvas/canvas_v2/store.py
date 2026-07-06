@@ -24,7 +24,7 @@ from agentcanvas.ir import (
     resolve_workspace,
     state_paths,
 )
-from agentcanvas.lifecycle import REF_PROTECTING
+from agentcanvas.lifecycle import PENDING, is_ref_protecting
 from agentcanvas.workspace_lock import (
     DEFAULT_LOCK_LEASE_SECONDS,
     WorkspaceLockBusy,
@@ -54,7 +54,6 @@ KNOWN_EDGE_KINDS = {
     "error",
     "async",
 }
-OPEN_PENDING_STATUSES = REF_PROTECTING
 HISTORY_DIR_NAME = "history"
 HISTORY_HEAD_FILENAME = "canvas.head.json"
 HISTORY_TXN_FILENAME = "canvas.txn.json"
@@ -611,7 +610,7 @@ def _open_pending_refs(workspace: Path) -> Set[Tuple[str, str]]:
             continue
         if not isinstance(item, Mapping):
             continue
-        if item.get("status", "pending") not in OPEN_PENDING_STATUSES:
+        if not is_ref_protecting(item.get("status", PENDING)):
             continue
         refs = item.get("refs")
         if not isinstance(refs, list):

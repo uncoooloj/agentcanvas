@@ -18,7 +18,6 @@ from .adapters import (
 from .demo import demo_workspace
 from .indexer import format_index_summary, index_workspace
 from .ir import (
-    PENDING_STATUSES,
     ConversationRole,
     ConversationTurnKind,
     append_pending_conversation,
@@ -37,6 +36,7 @@ from .ir import (
     state_paths,
     update_pending_status,
 )
+from .lifecycle import PENDING, PENDING_STATUSES
 from .core import build_agent_authored_canvas
 from .canvas_v2 import (
     CANVAS_V2_SCHEMA,
@@ -281,7 +281,7 @@ def cmd_pending(args: argparse.Namespace) -> int:
             Path(path).name for path in [markdown, json_path] if isinstance(path, str)
         )
         suffix = f" - {paths}" if paths else ""
-        print(f"- {item.get('id')} [{item.get('status', 'pending')}] {title} ({created}){suffix}")
+        print(f"- {item.get('id')} [{item.get('status', PENDING)}] {title} ({created}){suffix}")
     return 0
 
 
@@ -380,7 +380,7 @@ def cmd_reply(args: argparse.Namespace) -> int:
         print(f"Could not append pending reply: {exc}")
         return 1
 
-    print(f"Added {kind} to {item['id']} [{item.get('status', 'pending')}]")
+    print(f"Added {kind} to {item['id']} [{item.get('status', PENDING)}]")
     summary = item.get("conversation_summary") or {}
     unanswered = summary.get("unanswered_question")
     if isinstance(unanswered, dict) and unanswered.get("text"):

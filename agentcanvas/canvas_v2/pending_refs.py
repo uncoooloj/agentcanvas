@@ -13,11 +13,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from agentcanvas.ir import STATE_DIR_NAME, atomic_write_json, now_utc, resolve_workspace
-from agentcanvas.lifecycle import REF_PROTECTING
+from agentcanvas.lifecycle import PENDING, is_ref_protecting
 from agentcanvas.workspace_lock import workspace_write_lock
 
-
-OPEN_PENDING_STATUSES = REF_PROTECTING
 
 _FLOW_KEYS = {
     "flow",
@@ -117,7 +115,7 @@ def list_open_referenced_ids(workspace: str | Path) -> Set[Tuple[str, str]]:
 
     references = set()
     for record in migrate_pending_refs(workspace, write=False):
-        if record.get("status", "pending") not in OPEN_PENDING_STATUSES:
+        if not is_ref_protecting(record.get("status", PENDING)):
             continue
         for ref in record.get("refs") or []:
             if not isinstance(ref, Mapping):
@@ -193,7 +191,7 @@ def _tombstone_deleted_refs_locked(
         if record is None:
             continue
         normalized = normalize_pending_record(record)
-        if normalized.get("status", "pending") not in OPEN_PENDING_STATUSES:
+        if not is_ref_protecting(normalized.get("status", PENDING)):
             normalized["json_path"] = str(json_path)
             updated_records.append(normalized)
             continue

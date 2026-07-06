@@ -120,6 +120,26 @@ class CanvasV2PendingRefsTests(unittest.TestCase):
 
             self.assertEqual(refs, {("flow", "flow:signup"), ("node", "n:email")})
 
+    def test_lists_null_status_as_pending_reference(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            pending_dir = workspace / ".agentcanvas" / "pending"
+            pending_dir.mkdir(parents=True)
+            (pending_dir / "legacy-null-status.json").write_text(
+                json.dumps(
+                    {
+                        "id": "legacy-null-status",
+                        "status": None,
+                        "refs": [{"kind": "node", "id": "n:legacy", "flow": "flow:signup"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            refs = list_open_referenced_ids(workspace)
+
+            self.assertEqual(refs, {("node", "n:legacy")})
+
     def test_tombstones_deleted_node_and_flow_refs(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "workspace"

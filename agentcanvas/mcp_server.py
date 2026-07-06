@@ -33,7 +33,7 @@ from .ir import (
     resolve_workspace,
     update_pending_status,
 )
-from .lifecycle import PENDING_STATUSES
+from .lifecycle import LifecycleError, PENDING, PENDING_STATUSES, validate_status
 
 
 MCP_EXTRA_INSTALL_HINT = (
@@ -57,7 +57,11 @@ def get_workspace_status(workspace: str = ".") -> Dict[str, Any]:
     status_counts: Dict[str, int] = {status: 0 for status in sorted(PENDING_STATUSES)}
     status_counts["unreadable"] = 0
     for item in pending:
-        status = str(item.get("status") or "pending")
+        raw_status = item.get("status", PENDING)
+        try:
+            status = validate_status(raw_status)
+        except LifecycleError:
+            status = str(raw_status or PENDING)
         status_counts[status] = status_counts.get(status, 0) + 1
 
     canvas_summary: Dict[str, Any] = {

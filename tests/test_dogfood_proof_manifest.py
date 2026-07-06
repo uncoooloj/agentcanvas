@@ -31,6 +31,27 @@ class DogfoodProofManifestTests(unittest.TestCase):
             stable_directory_sha256(PROJECT_ROOT / manifest["workspace"]["fixture_path"]),
         )
 
+    def test_fixture_hash_ignores_runtime_and_vcs_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            (root / "app").mkdir()
+            (root / "app" / "main.py").write_text("print('stable')\n", encoding="utf-8")
+            before = stable_directory_sha256(root)
+
+            for relative_path in [
+                ".agentcanvas/workflow.ir.json",
+                ".git/HEAD",
+                ".pytest_cache/README.md",
+                "__pycache__/main.cpython-39.pyc",
+                "node_modules/example/package.json",
+                "dist/build.txt",
+            ]:
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("volatile\n", encoding="utf-8")
+
+            self.assertEqual(before, stable_directory_sha256(root))
+
     def test_manifest_rejects_stale_fixture_hash(self):
         with tempfile.TemporaryDirectory() as temp_root:
             manifest_path = Path(temp_root) / "manifest.json"

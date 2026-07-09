@@ -1,7 +1,8 @@
 # Agent Adapters
 
-Adapters are optional. The base product is just local files, a small CLI, and a
-local API.
+Adapters are optional. The recommended smooth/live path is MCP when an agent can
+use it. The prompt/CLI path stays the instant start, and copy mode stays the
+portable fallback when no live adapter is connected.
 
 The stable file contract is:
 
@@ -20,7 +21,8 @@ refs, and automatic legacy migration run before the browser reads it. Pending
 Markdown and JSON files are for explicit source-code implementation requests.
 Conversation JSONL files store questions, answers, and notes for those requests.
 
-An adapter should do two small jobs:
+The base product is still just local files, a small CLI, and a local API. An
+adapter should do two small jobs:
 
 - For canvas edits, help the agent run `agentcanvas canvas apply`.
 - For implementation requests, help the agent clarify, implement, verify,
@@ -28,7 +30,49 @@ An adapter should do two small jobs:
 
 ## Four Paths
 
-### 1. Skill
+### 1. MCP
+
+Use this when an agent can call tools. MCP is the preferred live integration
+because AgentCanvas can expose canvas, evidence, pending requests, questions,
+progress, and status as structured local tools instead of making the user copy
+notes between apps.
+
+Install MCP support with the optional extra:
+
+```bash
+pip install 'use-agentcanvas[mcp]'
+```
+
+Then run:
+
+```bash
+uvx --from 'use-agentcanvas[mcp]' agentcanvas mcp --workspace <workspace>
+```
+
+MCP exposes the same local state and lifecycle as the CLI:
+
+- `agentcanvas_workspace_status`
+- `agentcanvas_get_canvas`
+- `agentcanvas_get_evidence`
+- `agentcanvas_record_progress`
+- `agentcanvas_apply_canvas`
+- `agentcanvas_validate_canvas`
+- `agentcanvas_list_requests`
+- `agentcanvas_get_request`
+- `agentcanvas_update_request`
+- `agentcanvas_ask_user`
+- `agentcanvas_get_answers`
+- `agentcanvas_record_sync`
+
+Do not make MCP smarter than the product contract. It is a smoother live handle
+for the same local state, not a separate source of truth.
+
+If you already installed AgentCanvas locally with the MCP extra, `agentcanvas mcp
+--workspace <workspace>` is equivalent. If the optional MCP dependency is
+missing, `agentcanvas mcp` exits with code `3`, prints nothing to stdout, and
+prints the install hint to stderr.
+
+### 2. Skill
 
 Use this when an agent supports skills.
 
@@ -60,10 +104,10 @@ Legacy display canvases from older AgentCanvas builds auto-migrate on
 `agentcanvas canvas apply`. Use `agentcanvas canvas migrate --dry-run` for
 diagnostics, not as a normal user step.
 
-This is the best first integration because it stays portable and does not need a
-server-to-agent bridge.
+This is the best portable adapter when MCP is not available because it keeps the
+AgentCanvas rules close to the agent without requiring a server-to-agent bridge.
 
-### 2. Local API
+### 3. Local API
 
 Use this when the browser or a local tool is already talking to the AgentCanvas
 server.
@@ -82,46 +126,7 @@ The API is local and token-protected. It should mirror the same state in
 `.agentcanvas/`; it should not become a separate source of truth. Re-indexing
 refreshes `workflow.ir.json`; it should not be required for canvas-only edits.
 
-### 3. MCP
-
-Use this when an agent prefers tools instead of shell commands or raw HTTP.
-
-Install MCP support with the optional extra:
-
-```bash
-pip install 'use-agentcanvas[mcp]'
-```
-
-Then run:
-
-```bash
-uvx --from 'use-agentcanvas[mcp]' agentcanvas mcp --workspace <workspace>
-```
-
-MCP exposes the same local state and lifecycle as the CLI:
-
-- `agentcanvas_workspace_status`
-- `agentcanvas_get_canvas`
-- `agentcanvas_get_evidence`
-- `agentcanvas_record_progress`
-- `agentcanvas_apply_canvas`
-- `agentcanvas_validate_canvas`
-- `agentcanvas_list_requests`
-- `agentcanvas_get_request`
-- `agentcanvas_update_request`
-- `agentcanvas_ask_user`
-- `agentcanvas_get_answers`
-- `agentcanvas_record_sync`
-
-Do not make MCP smarter than the product contract. It is a nicer handle for the
-same local state.
-
-If you already installed AgentCanvas locally with the MCP extra, `agentcanvas mcp
---workspace <workspace>` is equivalent. If the optional MCP dependency is
-missing, `agentcanvas mcp` exits with code `3`, prints nothing to stdout, and
-prints the install hint to stderr.
-
-### 3.1 Setup
+### Setup
 
 Use setup when you want AgentCanvas to place the right local instructions for a
 specific agent:
@@ -151,6 +156,13 @@ Re-running setup is idempotent. Codex global config is not written unless
 `--write-codex-config` is passed; by default AgentCanvas prints the snippet
 instead.
 
+Codex setup returns a `codex_mcp_setup` object. By default that object is a
+nudge: it includes the MCP config snippet and the explicit
+`agentcanvas setup --agent codex --workspace <workspace> --write-codex-config`
+command to run if the user wants AgentCanvas to write the config. The flag is
+opt-in because `~/.codex/config.toml` is global Codex configuration, not an
+AgentCanvas workspace file.
+
 ### 4. Webhooks
 
 Use this when an outside system needs to report back.
@@ -169,7 +181,8 @@ should not patch source code.
 
 ## Copy Fallback
 
-Copy mode is always valid.
+Copy mode is always valid. MCP is the recommended smooth/live path, but copy is
+the fallback that keeps AgentCanvas useful anywhere.
 
 If no adapter is installed and no live session is connected, AgentCanvas should
 still keep canvas-only edits in `.agentcanvas/canvas.ir.json`. For source-code
@@ -177,7 +190,8 @@ implementation, it should create the pending request and show a prompt the user
 can paste into any coding agent.
 
 This is not a failure state. It is the portable path for nontechnical users who
-want a clear handoff without caring which agent receives it.
+want a clear handoff without caring which agent receives it, and it preserves
+the prompt/CLI instant-start onboarding path.
 
 The implementation prompt should include:
 
@@ -242,6 +256,9 @@ agentcanvas status --workspace <workspace> <pending-id> --status done --note "Do
 
 - Keep adapters optional.
 - Keep files and CLI commands usable without adapters.
+- Prefer MCP for live agent sessions when tools are available.
+- Keep prompt/CLI onboarding instant, and treat copy as the fallback when no
+  live session is connected.
 - Treat the readable canvas as agent-authored. Indexers and parsers provide
   evidence; they do not replace the plain-English map.
 - Prefer the Markdown request as the readable source for implementation work.

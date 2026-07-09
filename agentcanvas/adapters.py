@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import shlex
 import shutil
 from dataclasses import dataclass
 from importlib import resources
@@ -195,6 +196,7 @@ def _setup_codex(
         "written": [str(agents_path)],
         "codex_config_snippet": CODEX_CONFIG_SNIPPET,
         "codex_config_written": False,
+        "codex_mcp_setup": _codex_mcp_setup_nudge(root),
     }
     if write_codex_config:
         config_path = Path(codex_config_path or Path.home() / ".codex" / "config.toml").expanduser()
@@ -216,7 +218,34 @@ def _setup_codex(
                 tofile="after",
             )
         )
+        result["codex_mcp_setup"] = {
+            "configured": True,
+            "requires_restart": True,
+            "path": str(config_path),
+            "backup": str(backup_path) if backup_path else None,
+            "next_step": "Restart or open a new Codex session so it can load the AgentCanvas MCP server.",
+            "snippet": CODEX_CONFIG_SNIPPET,
+        }
     return result
+
+
+def _codex_mcp_write_command(root: Path) -> str:
+    return "agentcanvas setup --agent codex --workspace %s --write-codex-config" % shlex.quote(str(root))
+
+
+def _codex_mcp_setup_nudge(root: Path) -> Dict[str, Any]:
+    command = _codex_mcp_write_command(root)
+    return {
+        "configured": False,
+        "requires_opt_in": True,
+        "config_scope": "global",
+        "config_path": "~/.codex/config.toml",
+        "reason": "Codex MCP config lives in ~/.codex/config.toml and is global, so AgentCanvas does not write it without explicit opt-in.",
+        "next_step": "Ask the user whether to enable AgentCanvas MCP for future Codex sessions, then run opt_in_command if they agree.",
+        "command": command,
+        "opt_in_command": command,
+        "snippet": CODEX_CONFIG_SNIPPET,
+    }
 
 
 def _setup_cursor(root: Path) -> Dict[str, Any]:

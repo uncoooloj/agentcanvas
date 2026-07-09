@@ -53,7 +53,7 @@ class AdapterSetupTests(unittest.TestCase):
 
     def test_setup_codex_writes_marked_section_and_preserves_outside_content(self):
         with tempfile.TemporaryDirectory() as temp_root:
-            workspace = Path(temp_root) / "workspace"
+            workspace = Path(temp_root) / "workspace with spaces"
             workspace.mkdir()
             agents_path = workspace / "AGENTS.md"
             agents_path.write_text("# Project Rules\n\nKeep this.\n", encoding="utf-8")
@@ -73,6 +73,23 @@ class AdapterSetupTests(unittest.TestCase):
             self.assertIn("agentcanvas_workspace_status", text)
             self.assertIn("codex_config_snippet", result)
             self.assertFalse(result["codex_config_written"])
+            expected_command = "agentcanvas setup --agent codex --workspace '%s' --write-codex-config" % result["workspace"]
+            self.assertEqual(
+                result["codex_mcp_setup"],
+                {
+                    "configured": False,
+                    "requires_opt_in": True,
+                    "config_scope": "global",
+                    "config_path": "~/.codex/config.toml",
+                    "reason": "Codex MCP config lives in ~/.codex/config.toml and is global, so AgentCanvas does not write it without explicit opt-in.",
+                    "next_step": "Ask the user whether to enable AgentCanvas MCP for future Codex sessions, then run opt_in_command if they agree.",
+                    "command": expected_command,
+                    "opt_in_command": expected_command,
+                    "snippet": result["codex_config_snippet"],
+                },
+            )
+            self.assertIn("--write-codex-config", text)
+            self.assertIn("offer MCP enablement before falling back to", text)
 
     def test_setup_claude_and_cursor_merge_mcp_config_idempotently(self):
         with tempfile.TemporaryDirectory() as temp_root:
@@ -232,9 +249,16 @@ class AdapterSetupTests(unittest.TestCase):
                 codex_config_path=config_path,
             )
             self.assertTrue(result["codex_config_written"])
+            self.assertTrue(result["codex_mcp_setup"]["configured"])
+            self.assertTrue(result["codex_mcp_setup"]["requires_restart"])
             self.assertTrue(Path(result["codex_config_backup"]).is_file())
             self.assertIn("[mcp_servers.agentcanvas]", config_path.read_text(encoding="utf-8"))
             self.assertIn("[mcp_servers.agentcanvas]", result["codex_config_diff"])
+            self.assertEqual(result["codex_mcp_setup"]["path"], str(config_path))
+            self.assertEqual(
+                result["codex_mcp_setup"]["next_step"],
+                "Restart or open a new Codex session so it can load the AgentCanvas MCP server.",
+            )
 
     def test_repo_skill_is_generated_from_packaged_template(self):
         skill_path = PROJECT_ROOT / "skill" / "agentcanvas" / "SKILL.md"

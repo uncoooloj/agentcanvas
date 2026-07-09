@@ -5,6 +5,9 @@ Calling agent: $agent_label.
 
 AgentCanvas is agent-agnostic. Use it as the local workflow canvas and evidence
 handoff for this project; do not assume a specific coding-agent vendor or UI.
+Prefer the MCP path when your agent can use MCP tools, because that lets the
+canvas send requests and receive progress/status without making the user copy
+notes around. Keep the prompt/CLI path as the instant fallback.
 
 Use the smallest setup path that works in your environment:
 
@@ -35,6 +38,15 @@ files; the web server binds to localhost only. Do not bypass your harness's
 permission prompts. Explain each install/run request before asking the user to
 approve it.
 
+If setup returns an MCP nudge, surface it to the user. Some agents store MCP
+configuration globally, so only write global agent config after explicit user
+approval. Use the opt-in command from the setup response instead of inventing
+one.
+
+After MCP config is written, tell the user to open a fresh agent session if
+their agent needs to reload MCP servers. If MCP is not available, continue with
+the CLI and local files instead of blocking onboarding.
+
 After launch, relay the JSON `url` to the user so they can open the canvas. Then
 start with read-only context:
 
@@ -57,7 +69,8 @@ agentcanvas progress --workspace $workspace_shell --stage surveying --message "R
 ```
 
 If you are using MCP, call `agentcanvas_record_progress` with the same stage,
-message, and optional current/total counts.
+message, and optional current/total counts. If you are not using MCP, use the
+CLI `agentcanvas progress` command above.
 
 If workflow evidence is missing and the user asked you to initialize or refresh
 AgentCanvas, run:

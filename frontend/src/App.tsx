@@ -30,7 +30,7 @@ import { PendingRequestDialog } from "@/components/PendingRequestDialog"
 import { Provenance } from "@/components/Provenance"
 import { BottomDock } from "@/components/BottomDock"
 import { LandingPage } from "@/components/LandingPage"
-import { WorkspaceMappingState } from "@/components/WorkspaceMappingState"
+import { MappingRequestStatus, WorkspaceMappingState } from "@/components/WorkspaceMappingState"
 import { DEMO_MODEL, emptyAppModel } from "@/lib/behavioral"
 import {
   HandoffItemStatus,
@@ -155,6 +155,9 @@ export default function App() {
   const [mapHealth, setMapHealth] = useState<MapHealth | null>(null)
   const [canvasV2, setCanvasV2] = useState<CanvasV2Document | null>(null)
   const [authNotice, setAuthNotice] = useState<string | null>(null)
+  const [mapRequestStatus, setMapRequestStatus] = useState<MappingRequestStatus>(MappingRequestStatus.Idle)
+  const [mapRequestError, setMapRequestError] = useState<string | null>(null)
+  const [mapRequestPendingId, setMapRequestPendingId] = useState<string | null>(null)
   const [onboardingVisible, setOnboardingVisible] = useState(false)
   const canvasSignatureRef = useRef<string | null>(null)
   const canvasRevisionRef = useRef<number | null>(null)
@@ -197,6 +200,12 @@ export default function App() {
   useEffect(() => {
     setMappingProgress(context.progress ?? null)
   }, [context.progress])
+
+  useEffect(() => {
+    setMapRequestStatus(MappingRequestStatus.Idle)
+    setMapRequestError(null)
+    setMapRequestPendingId(null)
+  }, [context.workspacePath, context.workspace])
 
   // Switching flows (or returning to All Flows) clears any in-progress step
   // edit, so the composer never lingers on a page where it has no context.
@@ -243,6 +252,9 @@ export default function App() {
     } else {
       setModel((current) => preserveLocalJourneyRecency(result.model, current))
       setCanvasState({ kind: CanvasStateKind.Ready, notice: result.notice, mapping: result.mapping })
+      setMapRequestStatus(MappingRequestStatus.Idle)
+      setMapRequestError(null)
+      setMapRequestPendingId(null)
     }
   }
 
@@ -575,6 +587,50 @@ export default function App() {
     useChanges.getState().dismissHandoff()
   }
 
+  async function requestMapFromAssistant() {
+    if (canvasState.kind !== CanvasStateKind.Empty || mapRequestStatus === MappingRequestStatus.Sending) return
+
+    const workspace = context.workspace || model.appName || "this project"
+    const assistant = context.assistant || "your assistant"
+    const clientChangeId = `map-request-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+    const instruction =
+      canvasState.fallbackPrompt ||
+      [
+        `Please write the AgentCanvas map for ${workspace}.`,
+        "Use the current project as the source of truth.",
+        "If anything is unclear, ask me a focused question before changing files.",
+        "Name the main user flows in plain English, save the AgentCanvas map to .agentcanvas/canvas.ir.json, and update AgentCanvas progress/status while you work.",
+      ].join(" ")
+
+    setMapRequestStatus(MappingRequestStatus.Sending)
+    setMapRequestError(null)
+    try {
+      const pending = await postChange({
+        changeId: clientChangeId,
+        clientChangeId,
+        kind: kindForAction(FlowAction.Change),
+        action: FlowAction.Change,
+        title: `Write the AgentCanvas map for ${workspace}`,
+        summary: instruction,
+        journey: "All flows",
+        journeyId: "map",
+        journeyTitle: "All flows",
+        targetStep: null,
+        targetNodeId: null,
+        refs: [],
+        text1: `Create or refresh the plain-English AgentCanvas map for ${workspace}.`,
+        text2: `Assigned to ${assistant}.`,
+      })
+      setMapRequestPendingId(pending.id)
+      setMapRequestStatus(MappingRequestStatus.Sent)
+      await refreshHandoff()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AgentCanvas could not create the map request."
+      setMapRequestError(message)
+      setMapRequestStatus(MappingRequestStatus.Failed)
+    }
+  }
+
   const inJourney = view !== HOME && !!activeJourney
   const appAvailable = !contextLoading && context.mode !== AppContextMode.Landing
   const landing =
@@ -763,6 +819,11 @@ export default function App() {
               fallbackPrompt={workspaceState.fallbackPrompt}
               progress={mappingProgress}
               source={canvasSource}
+              assistantName={context.assistant || "your assistant"}
+              requestStatus={mapRequestStatus}
+              requestError={mapRequestError ?? undefined}
+              requestPendingId={mapRequestPendingId ?? undefined}
+              onRequestMap={context.mode === AppContextMode.Workspace ? requestMapFromAssistant : undefined}
               onRetry={() => load({ refresh: true })}
             />
           ) : inJourney ? (

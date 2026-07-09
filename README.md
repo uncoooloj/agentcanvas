@@ -84,6 +84,12 @@ The package name is `use-agentcanvas`, but the command is `agentcanvas`.
 The public package page is
 [pypi.org/project/use-agentcanvas](https://pypi.org/project/use-agentcanvas/).
 
+For the smooth live-agent path, use AgentCanvas through MCP when your agent
+supports it. MCP gives the agent structured local tools for canvas, evidence,
+pending requests, questions, progress, and status. The prompt/CLI path is still
+the instant start: install the package, run `agentcanvas up`, and copy a prompt
+into any coding agent when no live adapter is connected.
+
 For development, install from the source repo:
 
 ```bash
@@ -326,7 +332,8 @@ happened."
 
 ## Copy-Prompt Fallback
 
-Copy mode is a core feature, not a backup plan.
+MCP is the recommended path for a smooth live loop, but copy mode is still a
+core low-friction fallback.
 
 If no live agent or adapter is connected, AgentCanvas still creates the pending
 files for implementation requests and shows a clean prompt the user can paste
@@ -334,10 +341,11 @@ into any coding agent. The prompt includes the workspace, pending file paths,
 acceptance details, status commands, and the reminder to test and re-index after
 code changes.
 
-This keeps AgentCanvas useful before deeper integrations exist. The copy prompt
-should also remind the receiving agent to inspect the current workspace and ask
-one clear question before editing if the requested change, affected flow,
-acceptance criteria, or verification path is unclear.
+This keeps AgentCanvas useful before deeper integrations exist and preserves the
+instant prompt/CLI onboarding path. The copy prompt should also remind the
+receiving agent to inspect the current workspace and ask one clear question
+before editing if the requested change, affected flow, acceptance criteria, or
+verification path is unclear.
 
 ## Agent-Agnostic By Design
 
@@ -345,18 +353,24 @@ AgentCanvas should work with any coding agent.
 
 Current and planned integration paths:
 
+- **MCP**: recommended smooth/live path. It exposes structured local tools for
+  agents that prefer tool calls over shell commands or pasted prompts.
 - **Skill**: install `skill/agentcanvas/` into an agent that supports skills.
 - **Local API**: the browser/server path uses `/api/context`, `/api/graph`,
   `/api/pending`, `/api/changes`, `/api/status`, and `/api/reindex`.
-- **MCP**: structured local tools for agents that prefer tool calls over shell
-  commands.
 - **Webhooks**: planned callback path for outside tools to report status,
   questions, or completion.
-- **Copy prompt**: always available, even with no adapter installed.
+- **Prompt/CLI and copy prompt**: always available, even with no adapter
+  installed. This is the instant-start fallback.
 
 The file contract stays the same across all of them: `workflow.ir.json` grounds
 the repo evidence, `canvas.ir.json` is the display canvas, and pending files are
 for explicit implementation requests.
+
+Codex setup returns a `codex_mcp_setup` object with the MCP snippet and command
+to use next. AgentCanvas does not write Codex MCP config by default:
+`--write-codex-config` is explicit opt-in because `~/.codex/config.toml` is a
+global Codex file, not workspace-local state.
 
 See [docs/adapters.md](docs/adapters.md) for adapter notes and prompt snippets.
 
@@ -411,9 +425,9 @@ The intended flow is:
    provenance or supporting details, not top-level journeys.
 5. Validate, then apply the result to `.agentcanvas/canvas.ir.json`.
 
-If no live model adapter is available, the same prompt can be copied into a
-manual agent/model flow. Progressive partial mapping is acceptable when only
-some flows are grounded.
+MCP is the preferred live path when available. If no live model adapter is
+available, the same prompt can be copied into a manual agent/model flow.
+Progressive partial mapping is acceptable when only some flows are grounded.
 
 Validate a projected canvas first:
 

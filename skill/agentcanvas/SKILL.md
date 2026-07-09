@@ -137,6 +137,14 @@ should preserve ids and provenance.
 
 ## Copy Fallback
 
-If MCP or a live adapter is not available, give the user a copyable prompt that
-names the workspace, pending request files, acceptance criteria, status
-commands, and the verification expectation.
+If MCP or a live adapter is not available, offer agent-specific MCP enablement
+before giving the user a copyable prompt. For Codex, say that AgentCanvas can
+write the global `~/.codex/config.toml` only after opt-in:
+
+```bash
+agentcanvas setup --agent codex --workspace <workspace> --write-codex-config
+```
+
+If the user does not opt in, give a copyable prompt that names the workspace,
+pending request files, acceptance criteria, status commands, and the
+verification expectation.

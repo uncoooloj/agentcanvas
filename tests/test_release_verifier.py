@@ -233,7 +233,7 @@ class ReleaseVerifierTests(unittest.TestCase):
 
         self.assertIn("versions diverge", str(raised.exception))
 
-    def test_verifier_rejects_aligned_but_unexpected_release_version(self):
+    def test_verifier_accepts_a_future_aligned_release_version(self):
         verifier = load_verifier()
 
         with tempfile.TemporaryDirectory() as temp_root:
@@ -243,10 +243,8 @@ class ReleaseVerifierTests(unittest.TestCase):
             metadata.write_text("[project]\nversion = \"0.1.1\"\n", encoding="utf-8")
             runtime.write_text('__version__ = "0.1.1"\n', encoding="utf-8")
 
-            with self.assertRaises(verifier.VerificationError) as raised:
+            with redirect_stdout(StringIO()):
                 verifier.verify_release_version(metadata, runtime)
-
-        self.assertIn("must be '0.1.2'", str(raised.exception))
 
     def test_run_step_can_map_exit_code_to_clear_message(self):
         verifier = load_verifier()

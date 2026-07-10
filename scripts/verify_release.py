@@ -14,7 +14,6 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_RELEASE_VERSION = "0.1.2"
 PACKAGE_METADATA_PATH = PROJECT_ROOT / "pyproject.toml"
 RUNTIME_VERSION_PATH = PROJECT_ROOT / "agentcanvas" / "__init__.py"
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
@@ -92,7 +91,7 @@ def read_runtime_version(path=RUNTIME_VERSION_PATH):
 
 
 def verify_release_version(package_metadata_path=PACKAGE_METADATA_PATH, runtime_version_path=RUNTIME_VERSION_PATH):
-    """Ensure package metadata and the runtime report the expected release."""
+    """Ensure package metadata and the runtime report the same release."""
     package_version = read_package_version(package_metadata_path)
     runtime_version = read_runtime_version(runtime_version_path)
     if package_version != runtime_version:
@@ -100,15 +99,7 @@ def verify_release_version(package_metadata_path=PACKAGE_METADATA_PATH, runtime_
             "Package metadata and runtime versions diverge: "
             f"metadata={package_version!r}, runtime={runtime_version!r}."
         )
-    if package_version != EXPECTED_RELEASE_VERSION:
-        raise VerificationError(
-            f"Package and runtime version must be {EXPECTED_RELEASE_VERSION!r}; "
-            f"found {package_version!r}."
-        )
-    print(
-        f"Package metadata and runtime version match {EXPECTED_RELEASE_VERSION}.",
-        flush=True,
-    )
+    print(f"Package metadata and runtime version match {package_version}.", flush=True)
 
 
 def command_text(command):

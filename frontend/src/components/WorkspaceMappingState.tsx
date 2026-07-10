@@ -99,10 +99,27 @@ export function WorkspaceMappingState({
   const requestSent = requestStatus === MappingRequestStatus.Sent
   const requestSending = requestStatus === MappingRequestStatus.Sending
   const requestFailed = requestStatus === MappingRequestStatus.Failed
+  const requestAnnouncement = requestSending
+    ? `Sending a mapping request to ${assistantName}.`
+    : requestSent
+      ? `Mapping request sent to ${assistantName}. Waiting for mapping progress.`
+      : requestFailed
+        ? `Mapping request failed. ${requestError || "Try again."}`
+        : active
+          ? `Mapping progress: ${stageLabel(liveStage)}.`
+          : ""
 
   return (
-    <div className="flex min-h-full items-center justify-center px-6 py-16" aria-live="polite">
+    <div
+      className="flex min-h-full items-center justify-center px-6 py-16"
+      role="region"
+      aria-labelledby="workspace-mapping-state-title"
+      aria-busy={active || requestSending}
+    >
       <div className="w-full max-w-xl rounded-2xl border bg-card/85 p-6 shadow-sm">
+        <div className="sr-only" role="status" aria-live="polite">
+          {requestAnnouncement}
+        </div>
         <div className="flex items-start gap-4">
           <span
             className={cn(
@@ -110,10 +127,12 @@ export function WorkspaceMappingState({
               kind === CanvasStateKind.Error ? "bg-destructive/10 text-destructive" : "bg-when-bg text-when-fg"
             )}
           >
-            {active ? <Loader2 className="size-5 animate-spin" /> : <Icon className="size-5" />}
+            {active ? <Loader2 aria-hidden="true" className="size-5 animate-spin" /> : <Icon aria-hidden="true" className="size-5" />}
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-base font-medium tracking-tight">{title}</p>
+            <h2 id="workspace-mapping-state-title" className="text-base font-medium tracking-tight">
+              {title}
+            </h2>
             <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{body}</p>
             {source && (
               <p
@@ -135,7 +154,19 @@ export function WorkspaceMappingState({
 
         {active ? (
           <div className="mt-6">
-            <Progress value={progressPercent} className="h-2" />
+            <Progress
+              value={progressPercent}
+              aria-label="Mapping progress"
+              aria-valuetext={`${Math.round(progressPercent)}% complete`}
+              className="h-2"
+            />
+            {(requestSending || requestSent) && (
+              <p className="mt-3 text-sm text-muted-foreground" role="status" aria-live="polite">
+                {requestSending
+                  ? `Sending the mapping request to ${assistantName}...`
+                  : `Mapping request sent to ${assistantName}. Waiting for progress.`}
+              </p>
+            )}
             {liveProgress && (
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span>{stageLabel(liveProgress.stage)}</span>
@@ -227,7 +258,8 @@ export function WorkspaceMappingState({
                 <Button
                   type="button"
                   onClick={onRequestMap}
-                  disabled={requestSending}
+                  disabled={requestSending || requestSent}
+                  aria-label={requestSent ? `Mapping request sent to ${assistantName}` : `Send map request to ${assistantName}`}
                   className="w-full gap-2 sm:w-auto"
                 >
                   {requestSending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}

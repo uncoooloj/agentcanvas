@@ -161,6 +161,8 @@ export default function App() {
   const [onboardingVisible, setOnboardingVisible] = useState(false)
   const canvasSignatureRef = useRef<string | null>(null)
   const canvasRevisionRef = useRef<number | null>(null)
+  const lastUsableWorkspaceResultRef = useRef<WorkspaceModelResult | null>(null)
+  const mapRequestInFlightRef = useRef(false)
   const pollBlockedRef = useRef(false)
 
   const phase = useChanges((s) => s.handoff.phase)
@@ -205,6 +207,8 @@ export default function App() {
     setMapRequestStatus(MappingRequestStatus.Idle)
     setMapRequestError(null)
     setMapRequestPendingId(null)
+    lastUsableWorkspaceResultRef.current = null
+    mapRequestInFlightRef.current = false
   }, [context.workspacePath, context.workspace])
 
   // Switching flows (or returning to All Flows) clears any in-progress step
@@ -229,6 +233,9 @@ export default function App() {
 
   function showWorkspaceResult(result: WorkspaceModelResult) {
     setCanvasV2(result.canvasV2 ?? null)
+    if (!isUnreadyMap(result.mapping) && result.model.journeys.length > 0) {
+      lastUsableWorkspaceResultRef.current = result
+    }
     if (isUnreadyMap(result.mapping)) {
       setModel(emptyAppModel(result.model.appName || context.workspace || "Your app"))
       setCanvasState({
@@ -285,12 +292,23 @@ export default function App() {
       setAuthNotice(null)
     } catch (error) {
       if (isApiAuthExpired(error)) setAuthNotice(AUTH_EXPIRED_NOTICE)
-      setModel(emptyAppModel(context.workspace || model.appName || "Your app"))
-      setCanvasState({
-        kind: CanvasStateKind.Error,
-        message: "Couldn't open the project map",
-        detail: plainLoadError(error),
-      })
+      const lastUsable = lastUsableWorkspaceResultRef.current
+      if (refresh && lastUsable) {
+        setModel(lastUsable.model)
+        setCanvasV2(lastUsable.canvasV2 ?? null)
+        setCanvasState({
+          kind: CanvasStateKind.Ready,
+          notice: refreshLoadErrorNotice(error),
+          mapping: lastUsable.mapping,
+        })
+      } else {
+        setModel(emptyAppModel(context.workspace || model.appName || "Your app"))
+        setCanvasState({
+          kind: CanvasStateKind.Error,
+          message: "Couldn't open the project map",
+          detail: plainLoadError(error),
+        })
+      }
     } finally {
       setSelectedId(null)
     }
@@ -588,7 +606,16 @@ export default function App() {
   }
 
   async function requestMapFromAssistant() {
-    if (canvasState.kind !== CanvasStateKind.Empty || mapRequestStatus === MappingRequestStatus.Sending) return
+    if (
+      canvasState.kind !== CanvasStateKind.Empty ||
+      mapRequestInFlightRef.current ||
+      mapRequestStatus === MappingRequestStatus.Sending ||
+      mapRequestStatus === MappingRequestStatus.Sent
+    ) {
+      return
+    }
+
+    mapRequestInFlightRef.current = true
 
     const workspace = context.workspace || model.appName || "this project"
     const assistant = context.assistant || "your assistant"
@@ -623,11 +650,24 @@ export default function App() {
       })
       setMapRequestPendingId(pending.id)
       setMapRequestStatus(MappingRequestStatus.Sent)
-      await refreshHandoff()
+      setMappingStage(0)
+      setMappingProgress(context.progress ?? null)
+      setCanvasState({
+        kind: CanvasStateKind.Reindexing,
+        message: "Map request sent",
+        detail: `Waiting for ${assistant} to write the map. This page will show progress as it arrives.`,
+      })
+      try {
+        await refreshHandoff()
+      } catch (refreshError) {
+        if (isApiAuthExpired(refreshError)) setAuthNotice(AUTH_EXPIRED_NOTICE)
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "AgentCanvas could not create the map request."
       setMapRequestError(message)
       setMapRequestStatus(MappingRequestStatus.Failed)
+    } finally {
+      mapRequestInFlightRef.current = false
     }
   }
 
@@ -1411,6 +1451,10 @@ function plainLoadError(error: unknown): string {
     }
   }
   return "Try again, or restart AgentCanvas if the local app stopped."
+}
+
+function refreshLoadErrorNotice(error: unknown): string {
+  return `Couldn't refresh the project map. Showing the last saved map. ${plainLoadError(error)}`
 }
 
 function MapRefreshNotice({

@@ -113,6 +113,7 @@ export function StepComposer({ request, onSubmit, onCancel }: Props) {
         <div className="flex flex-col gap-2">
           <Input
             ref={firstRef}
+            aria-label={meta.firstPlaceholder || meta.title}
             placeholder={meta.firstPlaceholder}
             value={first}
             onChange={(e) => setFirst(e.target.value)}
@@ -120,6 +121,7 @@ export function StepComposer({ request, onSubmit, onCancel }: Props) {
           />
           <div className="flex items-center gap-2">
             <Input
+              aria-label={meta.secondPlaceholder || `${meta.title} second value`}
               placeholder={meta.secondPlaceholder}
               value={second}
               onChange={(e) => setSecond(e.target.value)}
@@ -134,13 +136,14 @@ export function StepComposer({ request, onSubmit, onCancel }: Props) {
         <div className="flex items-center gap-2">
           <Input
             ref={firstRef}
+            aria-label={meta.firstPlaceholder || meta.title}
             placeholder={meta.firstPlaceholder}
             value={first}
             onChange={(e) => setFirst(e.target.value)}
             onKeyDown={onKey}
           />
           <Button variant="destructive" onClick={() => submit()} className="shrink-0">
-            <Trash2 className="h-4 w-4" />
+            <Trash2 aria-hidden="true" className="h-4 w-4" />
             {request.changeId ? "Update" : meta.cta}
           </Button>
         </div>
@@ -149,6 +152,7 @@ export function StepComposer({ request, onSubmit, onCancel }: Props) {
           <div className="flex items-center gap-2">
             <Input
               ref={firstRef}
+              aria-label={meta.firstPlaceholder || meta.title}
               placeholder={meta.firstPlaceholder}
               value={first}
               onChange={(e) => setFirst(e.target.value)}
@@ -164,7 +168,7 @@ export function StepComposer({ request, onSubmit, onCancel }: Props) {
               {canSaveToMap ? (
                 delivery === EditDelivery.CanvasMap ? "Save to map" : "Ask agent"
               ) : (
-                <ArrowUp className="h-4 w-4" />
+                <ArrowUp aria-hidden="true" className="h-4 w-4" />
               )}
             </Button>
           </div>
@@ -189,6 +193,8 @@ function DeliveryOption({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
+      aria-label={`${title}: ${detail}`}
       className={cn(
         "rounded-md px-3 py-2 text-left transition-colors",
         active ? "bg-card shadow-sm" : "text-muted-foreground hover:bg-background/60"

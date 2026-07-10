@@ -11,7 +11,7 @@ class AgentCanvasImportTests(unittest.TestCase):
     def test_import_agentcanvas(self):
         import agentcanvas
 
-        self.assertEqual(agentcanvas.__version__, "0.1.2")
+        self.assertEqual(agentcanvas.__version__, "0.1.3")
 
     def test_cli_reports_release_version(self):
         completed = subprocess.run(
@@ -22,7 +22,7 @@ class AgentCanvasImportTests(unittest.TestCase):
             check=True,
         )
 
-        self.assertEqual(completed.stdout.strip(), "agentcanvas 0.1.2")
+        self.assertEqual(completed.stdout.strip(), "agentcanvas 0.1.3")
 
 
 if __name__ == "__main__":

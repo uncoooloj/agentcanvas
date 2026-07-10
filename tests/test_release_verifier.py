@@ -212,6 +212,42 @@ class ReleaseVerifierTests(unittest.TestCase):
 
         verifier.require_supported_python((3, 9, 0))
 
+    def test_package_metadata_and_runtime_versions_match_release(self):
+        verifier = load_verifier()
+
+        with redirect_stdout(StringIO()):
+            verifier.verify_release_version()
+
+    def test_verifier_rejects_divergent_package_and_runtime_versions(self):
+        verifier = load_verifier()
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            metadata = root / "pyproject.toml"
+            runtime = root / "__init__.py"
+            metadata.write_text("[project]\nversion = \"0.1.1\"\n", encoding="utf-8")
+            runtime.write_text('__version__ = "0.1.2"\n', encoding="utf-8")
+
+            with self.assertRaises(verifier.VerificationError) as raised:
+                verifier.verify_release_version(metadata, runtime)
+
+        self.assertIn("versions diverge", str(raised.exception))
+
+    def test_verifier_rejects_aligned_but_unexpected_release_version(self):
+        verifier = load_verifier()
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            root = Path(temp_root)
+            metadata = root / "pyproject.toml"
+            runtime = root / "__init__.py"
+            metadata.write_text("[project]\nversion = \"0.1.1\"\n", encoding="utf-8")
+            runtime.write_text('__version__ = "0.1.1"\n', encoding="utf-8")
+
+            with self.assertRaises(verifier.VerificationError) as raised:
+                verifier.verify_release_version(metadata, runtime)
+
+        self.assertIn("must be '0.1.2'", str(raised.exception))
+
     def test_run_step_can_map_exit_code_to_clear_message(self):
         verifier = load_verifier()
 

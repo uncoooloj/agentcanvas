@@ -2,6 +2,7 @@
 """Run AgentCanvas checks before GitHub, PyPI, or Cloudflare publishing."""
 
 import argparse
+import ast
 import json
 import os
 import shlex
@@ -13,6 +14,9 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_RELEASE_VERSION = "0.1.2"
+PACKAGE_METADATA_PATH = PROJECT_ROOT / "pyproject.toml"
+RUNTIME_VERSION_PATH = PROJECT_ROOT / "agentcanvas" / "__init__.py"
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 PACKAGED_WEB_DIR = PROJECT_ROOT / "agentcanvas" / "web"
 WRANGLER_CONFIG = PROJECT_ROOT / "wrangler.jsonc"
@@ -34,6 +38,77 @@ def require_supported_python(version_info=None):
             "Run `python3.9 scripts/verify_release.py` or use the Python version "
             "configured in CI."
         )
+
+
+def read_package_version(path=PACKAGE_METADATA_PATH):
+    """Read the release version from the package's PEP 621 metadata."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        try:
+            import tomli as tomllib
+        except ModuleNotFoundError:
+            raise VerificationError(
+                "Release verification needs `tomllib` or `tomli` to read pyproject.toml."
+            )
+
+    try:
+        with path.open("rb") as stream:
+            document = tomllib.load(stream)
+    except OSError as error:
+        raise VerificationError(f"Could not read package metadata at {path}: {error}")
+    except Exception as error:
+        raise VerificationError(f"Could not parse package metadata at {path}: {error}")
+
+    project = document.get("project")
+    version = project.get("version") if isinstance(project, dict) else None
+    if not isinstance(version, str) or not version:
+        raise VerificationError(f"Package metadata at {path} has no project.version.")
+    return version
+
+
+def read_runtime_version(path=RUNTIME_VERSION_PATH):
+    """Read the version reported by the runtime package source."""
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+    except OSError as error:
+        raise VerificationError(f"Could not read runtime version at {path}: {error}")
+    except SyntaxError as error:
+        raise VerificationError(f"Could not parse runtime version at {path}: {error}")
+
+    for statement in tree.body:
+        if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+        if not any(isinstance(target, ast.Name) and target.id == "__version__" for target in targets):
+            continue
+        value = statement.value
+        if isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value:
+            return value.value
+        raise VerificationError(f"Runtime version at {path} is not a non-empty string.")
+
+    raise VerificationError(f"Runtime version at {path} does not define __version__.")
+
+
+def verify_release_version(package_metadata_path=PACKAGE_METADATA_PATH, runtime_version_path=RUNTIME_VERSION_PATH):
+    """Ensure package metadata and the runtime report the expected release."""
+    package_version = read_package_version(package_metadata_path)
+    runtime_version = read_runtime_version(runtime_version_path)
+    if package_version != runtime_version:
+        raise VerificationError(
+            "Package metadata and runtime versions diverge: "
+            f"metadata={package_version!r}, runtime={runtime_version!r}."
+        )
+    if package_version != EXPECTED_RELEASE_VERSION:
+        raise VerificationError(
+            f"Package and runtime version must be {EXPECTED_RELEASE_VERSION!r}; "
+            f"found {package_version!r}."
+        )
+    print(
+        f"Package metadata and runtime version match {EXPECTED_RELEASE_VERSION}.",
+        flush=True,
+    )
 
 
 def command_text(command):
@@ -385,6 +460,7 @@ def main(argv=None):
 
     try:
         require_supported_python()
+        verify_release_version()
         verify_cloudflare_config()
         run_python_checks(
             skip_runtime_smoke=args.skip_runtime_smoke,

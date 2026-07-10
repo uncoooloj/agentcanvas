@@ -287,6 +287,9 @@ class McpServerContractTests(unittest.TestCase):
             self.assertEqual(answers["answers"][0]["text"], "Checkout screen only.")
             self.assertEqual(answers["answers"][0]["request_id"], pending["id"])
 
+            with self.assertRaises(FileNotFoundError):
+                get_answers(pending["id"], workspace=str(workspace), session_id="session-2")
+
 
 if __name__ == "__main__":
     unittest.main()

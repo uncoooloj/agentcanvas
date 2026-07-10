@@ -1141,6 +1141,7 @@ def make_handler(
                         note=note if isinstance(note, str) else None,
                         actor=actor.strip() if isinstance(actor, str) and actor.strip() else assistant_id,
                         evidence=evidence,
+                        enforce_transitions=True,
                         session_id=self.request_session_id(parsed, payload),
                     )
                 except (FileNotFoundError, ValueError) as exc:
@@ -1165,13 +1166,15 @@ def make_handler(
                     )
                     return
                 try:
+                    answer_session_id = self.request_session_id(parsed, payload)
                     pending = append_pending_conversation(
                         workspace,
                         answer_pending_id,
                         role=ConversationRole.USER.value,
                         kind=ConversationTurnKind.ANSWER.value,
                         text=text,
-                        actor=self.request_session_id(parsed, payload) or "agentcanvas-web",
+                        actor=answer_session_id or "agentcanvas-web",
+                        session_id=answer_session_id,
                     )
                 except (FileNotFoundError, ValueError) as exc:
                     self.write_json(

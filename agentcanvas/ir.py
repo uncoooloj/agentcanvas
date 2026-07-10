@@ -530,7 +530,12 @@ def _pending_record_for_write(record: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _pending_matches_session(item: Dict[str, Any], session_id: str) -> bool:
-    return item.get("sessionId") == session_id or item.get("session_id") == session_id
+    # Prefer the canonical key when both spellings are present so a stale alias
+    # cannot broaden access to another session.
+    owner = item.get("sessionId")
+    if owner is None:
+        owner = item.get("session_id")
+    return owner == session_id
 
 
 def _resolve_pending_json_path(pending_dir: Path, pending_id: str) -> Path:
@@ -789,11 +794,7 @@ def append_pending_conversation(
         }
         conversation_path = conversation_path_for_json(json_path)
         conversation_path.parent.mkdir(parents=True, exist_ok=True)
-        with conversation_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(turn, sort_keys=True) + "\n")
 
-        conversation = read_pending_conversation(json_path, limit=1000000)
-        record["conversation_summary"] = _conversation_summary(conversation_path)
         if (
             role == ConversationRole.AGENT.value
             and kind == ConversationTurnKind.QUESTION.value
@@ -804,13 +805,14 @@ def append_pending_conversation(
                 at=turn["at"],
                 actor=actor,
                 note=text.strip(),
-                enforce_transitions=False,
+                enforce_transitions=True,
             )
         elif (
             role == ConversationRole.USER.value
             and kind == ConversationTurnKind.ANSWER.value
-            and record.get("status") == NEEDS_INPUT
         ):
+            if record.get("status") != NEEDS_INPUT:
+                raise ValueError("answers require a pending request in needs_input status")
             record = transition_record(
                 record,
                 IN_PROGRESS,
@@ -819,6 +821,12 @@ def append_pending_conversation(
                 note="User answered in AgentCanvas.",
                 enforce_transitions=True,
             )
+
+        with conversation_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(turn, sort_keys=True) + "\n")
+
+        conversation = read_pending_conversation(json_path, limit=1000000)
+        record["conversation_summary"] = _conversation_summary(conversation_path)
         from agentcanvas.canvas_v2.pending_refs import normalize_pending_record
 
         record = normalize_pending_record(record)

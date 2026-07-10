@@ -12,7 +12,7 @@ from agentcanvas.ir import (
     update_pending_status,
     write_pending_change,
 )
-from agentcanvas.lifecycle import IN_PROGRESS, NEEDS_INPUT, VERIFIED
+from agentcanvas.lifecycle import IMPLEMENTED, IN_PROGRESS, NEEDS_INPUT, SENT, VERIFIED
 from agentcanvas.server import make_handler
 
 
@@ -114,6 +114,7 @@ class ServerPendingApiTests(unittest.TestCase):
                     "targetNodeId": "n:checkout:text",
                 },
                 workflow_ir=None,
+                session_id="user-session",
             )
             append_pending_conversation(
                 workspace,
@@ -152,6 +153,59 @@ class ServerPendingApiTests(unittest.TestCase):
             markdown = Path(answered["markdown_path"]).read_text(encoding="utf-8")
             self.assertIn("## Conversation", markdown)
             self.assertIn("SMS only for now.", markdown)
+
+    def test_status_route_rejects_illegal_transition(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            pending = write_pending_change(
+                workspace,
+                {"title": "Illegal transition", "summary": "Must stay pending."},
+                workflow_ir=None,
+                session_id="session-1",
+            )
+            handler_cls = self._handler_cls(workspace)
+            fake = _FakeHandler(
+                handler_cls,
+                {"id": pending["id"], "status": VERIFIED, "sessionId": "session-1"},
+            )
+
+            handler_cls.handle_api_post(fake, urlparse("/api/status?token=token"))
+
+            self.assertEqual(fake.response["status"], 400)
+            self.assertIn("illegal status transition", fake.response["payload"]["error"])
+
+    def test_answer_route_rejects_wrong_session_without_writing(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            pending = write_pending_change(
+                workspace,
+                {"title": "Session answer", "summary": "Only one session may answer."},
+                workflow_ir=None,
+                session_id="session-1",
+            )
+            append_pending_conversation(
+                workspace,
+                pending["id"],
+                role=ConversationRole.AGENT.value,
+                kind=ConversationTurnKind.QUESTION.value,
+                text="Which copy should ship?",
+                session_id="session-1",
+            )
+            handler_cls = self._handler_cls(workspace)
+            fake = _FakeHandler(
+                handler_cls,
+                {"answer": "Wrong session", "sessionId": "session-2"},
+            )
+
+            handler_cls.handle_api_post(
+                fake,
+                urlparse(f"/api/pending/{pending['id']}/answer?token=token"),
+            )
+
+            self.assertEqual(fake.response["status"], 400)
+            self.assertIn("not found for session", fake.response["payload"]["error"])
+            conversation_path = workspace / ".agentcanvas" / "pending" / f"{pending['id']}.conversation.jsonl"
+            self.assertEqual(len(conversation_path.read_text(encoding="utf-8").strip().splitlines()), 1)
 
     def test_pending_routes_are_scoped_to_session_id(self):
         with tempfile.TemporaryDirectory() as temp_root:
@@ -214,6 +268,9 @@ class ServerPendingApiTests(unittest.TestCase):
                 workflow_ir=None,
                 session_id="session-1",
             )
+            update_pending_status(workspace, pending["id"], SENT, enforce_transitions=True)
+            update_pending_status(workspace, pending["id"], IN_PROGRESS, enforce_transitions=True)
+            update_pending_status(workspace, pending["id"], IMPLEMENTED, enforce_transitions=True)
             handler_cls = self._handler_cls(workspace)
             evidence = {
                 "actor": "codex",
@@ -252,6 +309,9 @@ class ServerPendingApiTests(unittest.TestCase):
                 },
                 workflow_ir=None,
             )
+            update_pending_status(workspace, pending["id"], SENT, enforce_transitions=True)
+            update_pending_status(workspace, pending["id"], IN_PROGRESS, enforce_transitions=True)
+            update_pending_status(workspace, pending["id"], IMPLEMENTED, enforce_transitions=True)
             handler_cls = self._handler_cls(workspace)
             fake = _FakeHandler(handler_cls, {"id": pending["id"], "status": VERIFIED})
 

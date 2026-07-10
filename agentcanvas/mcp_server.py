@@ -340,16 +340,17 @@ def get_answers(
     *,
     workspace: str = ".",
     since: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return user answers from one request or all pending request threads."""
 
     root = resolve_workspace(workspace)
     answers: List[Dict[str, Any]] = []
     if request_id:
-        request = get_pending_request(root, request_id, since=since)
+        request = get_pending_request(root, request_id, since=since, session_id=session_id)
         answers.extend(_answer_turns(request, request.get("id")))
     else:
-        for item in list_pending(root, summary=True):
+        for item in list_pending(root, summary=True, session_id=session_id):
             json_path = item.get("json_path")
             if not isinstance(json_path, str):
                 continue
@@ -556,8 +557,9 @@ def run_mcp_server(default_workspace: str = ".") -> int:
         request_id: Optional[str] = None,
         workspace: str = default_workspace,
         since: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return get_answers(request_id, workspace=workspace, since=since)
+        return get_answers(request_id, workspace=workspace, since=since, session_id=session_id)
 
     @server.tool()
     def agentcanvas_record_sync(

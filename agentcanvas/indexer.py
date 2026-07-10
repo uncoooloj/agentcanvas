@@ -17,6 +17,7 @@ from .core import (
     app_surface_for_path,
     detect_app_surfaces,
     enrich_app_surfaces,
+    prioritize_facts,
 )
 from .core.app_surface import SUPPORTED_MANIFESTS
 from .ir import SCHEMA, now_utc, resolve_workspace, save_ir, summarize_ir
@@ -228,6 +229,12 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
     source_facts = build_source_facts(root, source_paths, workflow_ir)
     workflow_ir["source_facts"] = source_facts
     workflow_ir["summary"]["language_facts"] = len(source_facts.get("facts") or [])
+    workflow_ir["summary"]["language_facts_total"] = source_facts.get("fact_selection", {}).get(
+        "total_facts", len(source_facts.get("facts") or [])
+    )
+    workflow_ir["summary"]["language_facts_omitted"] = source_facts.get("fact_selection", {}).get(
+        "omitted_facts", 0
+    )
     workflow_ir["summary"]["language_modules"] = sorted(
         {
             fact.get("attributes", {}).get("language")
@@ -449,17 +456,20 @@ def build_source_facts(
     )
     facts.extend(mark_projection_roles(fact) for fact in base_bundle.get("facts") or [])
 
-    if len(facts) > MAX_SOURCE_FACTS:
+    facts, fact_selection = prioritize_facts(facts, MAX_SOURCE_FACTS)
+    if fact_selection["omitted_facts"]:
         warnings.append(
-            f"Source facts truncated from {len(facts)} to {MAX_SOURCE_FACTS} facts."
+            "Source facts were prioritized; "
+            f"{fact_selection['omitted_facts']} of {fact_selection['total_facts']} facts "
+            "are omitted from this bounded fact payload."
         )
-        facts = facts[:MAX_SOURCE_FACTS]
 
     return {
         "schema": SOURCE_FACTS_SCHEMA,
         "version": "0.1.0",
         "repo": repo,
         "facts": facts,
+        "fact_selection": fact_selection,
         "warnings": warnings,
     }
 

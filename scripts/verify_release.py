@@ -5,6 +5,7 @@ import argparse
 import ast
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -40,30 +41,25 @@ def require_supported_python(version_info=None):
 
 
 def read_package_version(path=PACKAGE_METADATA_PATH):
-    """Read the release version from the package's PEP 621 metadata."""
+    """Read the package's simple PEP 621 version without a runtime TOML dependency."""
     try:
-        import tomllib
-    except ModuleNotFoundError:
-        try:
-            import tomli as tomllib
-        except ModuleNotFoundError:
-            raise VerificationError(
-                "Release verification needs `tomllib` or `tomli` to read pyproject.toml."
-            )
-
-    try:
-        with path.open("rb") as stream:
-            document = tomllib.load(stream)
+        lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as error:
         raise VerificationError(f"Could not read package metadata at {path}: {error}")
-    except Exception as error:
-        raise VerificationError(f"Could not parse package metadata at {path}: {error}")
 
-    project = document.get("project")
-    version = project.get("version") if isinstance(project, dict) else None
-    if not isinstance(version, str) or not version:
-        raise VerificationError(f"Package metadata at {path} has no project.version.")
-    return version
+    in_project = False
+    for line in lines:
+        section = re.match(r"^\s*\[([^]]+)\]\s*(?:#.*)?$", line)
+        if section:
+            in_project = section.group(1).strip() == "project"
+            continue
+        if not in_project:
+            continue
+        match = re.match(r'^\s*version\s*=\s*"([^"\\]+)"\s*(?:#.*)?$', line)
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+
+    raise VerificationError(f"Package metadata at {path} has no simple project.version string.")
 
 
 def read_runtime_version(path=RUNTIME_VERSION_PATH):

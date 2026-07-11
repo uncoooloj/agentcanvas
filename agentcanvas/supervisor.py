@@ -20,6 +20,7 @@ from urllib.parse import urlencode
 
 from . import __version__
 from .ir import ensure_state_dirs, now_utc, resolve_workspace
+from .workspace_lock import workspace_write_lock
 from .server import server_heartbeat_path, token_hint
 
 
@@ -76,8 +77,12 @@ def ensure_server_up(
     record = read_launch_record(root)
     live = validate_launch_record(record, workspace=root) if record else None
     if live:
+        if session_id:
+            result = issue_session_launch(root, live, session_id=session_id)
+        else:
+            result = dict(live)
         result = {
-            **live,
+            **result,
             "ok": True,
             "already_running": True,
         }
@@ -112,6 +117,8 @@ def ensure_server_up(
         "agent": agent,
         "workspace": str(root),
     }
+    if session_id:
+        record["session_tokens"] = {token: session_id}
 
     try:
         wait_until_ready(record, workspace=root, timeout_seconds=READY_TIMEOUT_SECONDS)
@@ -135,6 +142,50 @@ def ensure_server_up(
     if open_browser:
         webbrowser.open(url)
     return result
+
+
+def issue_session_launch(
+    workspace: str | Path,
+    live: Dict[str, Any],
+    *,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Mint a per-launch token that is permanently scoped to one session.
+
+    The server reads these bindings from the owner-only launch record. This lets
+    one supervised server serve multiple agent sessions without trusting a
+    mutable ``sessionId`` query parameter.
+    """
+    root = resolve_workspace(workspace)
+    normalized_session_id = session_id.strip()
+    if not normalized_session_id:
+        return dict(live)
+
+    with workspace_write_lock(root, writer="server-session-launch"):
+        record = read_launch_record(root)
+        if not record:
+            raise SupervisorError(
+                "LAUNCH_RECORD_MISSING",
+                "AgentCanvas server launch record is unavailable",
+            )
+        token = secrets.token_urlsafe(24)
+        raw_bindings = record.get("session_tokens")
+        bindings = dict(raw_bindings) if isinstance(raw_bindings, dict) else {}
+        bindings[token] = normalized_session_id
+        record["session_tokens"] = bindings
+        write_launch_record(root, record)
+
+    return {
+        **live,
+        "token": token,
+        "url": launch_url(
+            str(live["host"]),
+            int(live["port"]),
+            token,
+            session_id=normalized_session_id,
+        ),
+        "session_id": normalized_session_id,
+    }
 
 
 def stop_server(workspace: str | Path) -> Dict[str, Any]:

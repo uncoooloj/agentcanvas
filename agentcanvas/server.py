@@ -771,6 +771,28 @@ def make_handler(
 ):
     web_root = (Path(__file__).resolve().parent / "web").resolve()
 
+    def session_binding_for_token(candidate: Optional[str]) -> Tuple[bool, Optional[str]]:
+        if not isinstance(candidate, str) or not candidate:
+            return False, None
+        if secrets.compare_digest(token, candidate):
+            return True, session_id
+
+        launch_path = state_paths(workspace)[0] / "launch.json"
+        try:
+            with launch_path.open(encoding="utf-8") as handle:
+                launch_record = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return False, None
+        bindings = launch_record.get("session_tokens") if isinstance(launch_record, dict) else None
+        if not isinstance(bindings, dict):
+            return False, None
+        for session_token, bound_session_id in bindings.items():
+            if not isinstance(session_token, str) or not isinstance(bound_session_id, str):
+                continue
+            if secrets.compare_digest(session_token, candidate):
+                return True, bound_session_id
+        return False, None
+
     class AgentCanvasHandler(SimpleHTTPRequestHandler):
         server_version = "AgentCanvas/0.1"
 
@@ -1197,13 +1219,25 @@ def make_handler(
             bearer_token = None
             if auth.startswith("Bearer "):
                 bearer_token = auth[len("Bearer ") :].strip()
-            return token in {query_token, header_token, bearer_token}
+            return any(
+                session_binding_for_token(candidate)[0]
+                for candidate in (query_token, header_token, bearer_token)
+            )
 
         def request_session_id(
             self,
             parsed,
             payload: Optional[Dict[str, Any]] = None,
         ) -> Optional[str]:
+            headers = getattr(self, "headers", {})
+            query_token = parse_qs(parsed.query).get("token", [None])[0]
+            header_token = headers.get("X-AgentCanvas-Token")
+            auth = headers.get("Authorization", "")
+            bearer_token = auth[len("Bearer ") :].strip() if auth.startswith("Bearer ") else None
+            for candidate in (query_token, header_token, bearer_token):
+                authorized_token, bound_session_id = session_binding_for_token(candidate)
+                if authorized_token and bound_session_id:
+                    return bound_session_id
             query = parse_qs(parsed.query)
             values = [
                 *(query.get("sessionId") or []),

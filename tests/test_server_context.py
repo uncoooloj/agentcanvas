@@ -465,7 +465,7 @@ class ServerContextTests(unittest.TestCase):
             self.assertEqual("demo", context["source"]["kind"])
             self.assertEqual(context["workspacePath"], str(workspace))
 
-    def test_query_session_id_overrides_server_session_id(self):
+    def test_bound_server_token_ignores_query_session_id(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "workspace"
             workspace.mkdir()
@@ -491,7 +491,7 @@ class ServerContextTests(unittest.TestCase):
             self.assertIsNone(context["demoFixture"])
             self.assertEqual("workspace", context["source"]["kind"])
             self.assertEqual(context["workspacePath"], str(workspace))
-            self.assertEqual(context["sessionId"], "query-session")
+            self.assertEqual(context["sessionId"], "server-session")
 
     def test_context_includes_learning_program_workspace_profile(self):
         with tempfile.TemporaryDirectory() as temp_root:

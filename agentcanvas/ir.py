@@ -538,6 +538,33 @@ def _pending_matches_session(item: Dict[str, Any], session_id: str) -> bool:
     return owner == session_id
 
 
+def _pending_matches_session_scope(item: Dict[str, Any], session_id: Optional[str]) -> bool:
+    """Match a request's session ownership, including the unscoped legacy case."""
+    if session_id:
+        return _pending_matches_session(item, session_id)
+    return item.get("sessionId", item.get("session_id")) is None
+
+
+def _existing_pending_for_client_change(
+    pending_dir: Path,
+    client_change_id: str,
+    session_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Return an existing request for one client retry within its session scope."""
+    for json_path in sorted(pending_dir.glob("*.json")):
+        record = _read_pending_file(json_path)
+        if record.get("clientChangeId") != client_change_id:
+            continue
+        if not _pending_matches_session_scope(record, session_id):
+            continue
+        return {
+            **record,
+            "json_path": str(json_path),
+            "markdown_path": str(json_path.with_suffix(".md")),
+        }
+    return None
+
+
 def _resolve_pending_json_path(pending_dir: Path, pending_id: str) -> Path:
     json_path = pending_dir / f"{pending_id}.json"
     if json_path.exists():
@@ -856,6 +883,15 @@ def write_pending_change(
     root = resolve_workspace(workspace)
     with workspace_write_lock(root, writer="pending-create"):
         _, _, pending_dir = ensure_state_dirs(root)
+        client_change_id = change.get("clientChangeId")
+        if isinstance(client_change_id, str) and client_change_id.strip():
+            existing = _existing_pending_for_client_change(
+                pending_dir,
+                client_change_id.strip(),
+                session_id,
+            )
+            if existing is not None:
+                return existing
         created_at = now_utc()
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         title = _first_text(

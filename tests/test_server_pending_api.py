@@ -59,6 +59,47 @@ class ServerPendingApiTests(unittest.TestCase):
             assistant_name="Codex",
         )
 
+    def test_change_post_is_idempotent_per_client_change_id_and_session(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+            handler_cls = self._handler_cls(workspace)
+            payload = {
+                "changeId": "change-123",
+                "clientChangeId": "retry-safe-change-123",
+                "title": "Clarify checkout message",
+                "summary": "Make the checkout message easier to understand.",
+            }
+
+            first = _FakeHandler(handler_cls, payload)
+            handler_cls.handle_api_post(
+                first,
+                urlparse("/api/changes?token=token&sessionId=session-1"),
+            )
+            second = _FakeHandler(handler_cls, payload)
+            handler_cls.handle_api_post(
+                second,
+                urlparse("/api/changes?token=token&sessionId=session-1"),
+            )
+
+            self.assertEqual(first.response["status"], 201)
+            self.assertEqual(second.response["status"], 201)
+            self.assertEqual(
+                first.response["payload"]["pending"]["id"],
+                second.response["payload"]["pending"]["id"],
+            )
+            pending_files = list((workspace / ".agentcanvas" / "pending").glob("*.json"))
+            self.assertEqual(len(pending_files), 1)
+
+            other_session = _FakeHandler(handler_cls, payload)
+            handler_cls.handle_api_post(
+                other_session,
+                urlparse("/api/changes?token=token&sessionId=session-2"),
+            )
+            self.assertNotEqual(
+                first.response["payload"]["pending"]["id"],
+                other_session.response["payload"]["pending"]["id"],
+            )
+
     def test_pending_list_returns_bounded_summary_without_change_blob(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = self._workspace(temp_root)

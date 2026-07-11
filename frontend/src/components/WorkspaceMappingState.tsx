@@ -15,9 +15,9 @@ import { cn } from "@/lib/utils"
 
 const MAPPING_STAGES = [
   "Looking through your project",
-  "Finding what people can do",
-  "Putting the story together",
-  "Getting your guide ready",
+  "Finding how people use it",
+  "Putting the important parts together",
+  "Almost ready to show you",
 ]
 const STUCK_PROGRESS_MS = 10 * 60 * 1000
 
@@ -42,6 +42,8 @@ interface Props {
   requestStatus?: MappingRequestStatus
   requestError?: string
   requestPendingId?: string
+  requestHasProgress?: boolean
+  connectionError?: string
   onRequestMap?: () => void
   onRetry: () => void
 }
@@ -58,28 +60,37 @@ export function WorkspaceMappingState({
   assistantName = "your assistant",
   requestStatus = MappingRequestStatus.Idle,
   requestError,
+  requestHasProgress = false,
+  connectionError,
   onRequestMap,
   onRetry,
 }: Props) {
   const [showInstructions, setShowInstructions] = useState(false)
+  const requestSent = requestStatus === MappingRequestStatus.Sent
+  const requestSending = requestStatus === MappingRequestStatus.Sending
+  const requestFailed = requestStatus === MappingRequestStatus.Failed
   const active = kind === CanvasStateKind.Loading || kind === CanvasStateKind.Reindexing
-  const liveProgress = active && workspaceProgress?.readable ? workspaceProgress : null
+  const connectionFailed = Boolean(connectionError)
+  const liveProgress = active && workspaceProgress?.readable && (!requestSent || requestHasProgress) ? workspaceProgress : null
   const liveStage = liveProgress?.stage
+  const hasRecordedProgress = Boolean(liveProgress)
+  const waitingForAssistant = requestSent && !hasRecordedProgress
   const progressStuck = isProgressStuck(liveProgress)
   const clampedStage = liveStage
     ? stageIndexForProgress(liveStage)
     : Math.min(Math.max(stageIndex, 0), MAPPING_STAGES.length - 1)
-  const progressPercent = progressValue(liveProgress, clampedStage, active, kind)
-  const requestSent = requestStatus === MappingRequestStatus.Sent
-  const requestSending = requestStatus === MappingRequestStatus.Sending
-  const requestFailed = requestStatus === MappingRequestStatus.Failed
+  const progressPercent = progressValue(liveProgress, clampedStage, hasRecordedProgress, kind)
   const Icon = kind === CanvasStateKind.Error ? AlertCircle : kind === CanvasStateKind.Empty ? Search : Sparkles
   const title =
-    requestSent && active
-      ? `${assistantName} is understanding your app`
+    connectionFailed
+      ? "We can't reach this project"
+      : waitingForAssistant
+      ? `Waiting for ${assistantName}`
+      : requestSent && active
+      ? `${assistantName} is learning about your app`
       : kind === CanvasStateKind.Empty
       ? requestSent
-        ? `${assistantName} is understanding your app`
+        ? `Waiting for ${assistantName}`
         : "Let's understand your app"
       : message ||
     (progressStuck ? "Your agent seems to have stopped" : undefined) ||
@@ -87,30 +98,38 @@ export function WorkspaceMappingState({
       ? "Refreshing this project"
       : kind === CanvasStateKind.Loading
         ? `Reading ${workspaceName || "your project"}`
-        : "Couldn't open the project map")
+        : "Couldn't open your project")
   const body =
-    requestSent && active
-      ? "It is looking through the project and putting together a simple guide. You can keep this page open."
+    connectionFailed
+      ? `${connectionError} Reopen AgentCanvas from your assistant to get a fresh link, then try again.`
+      : waitingForAssistant
+      ? `Your request is saved. When ${assistantName} starts looking through this project, updates will appear here.`
+      : requestSent && active
+      ? "It has started looking through the project. You will see updates here as it goes."
       : kind === CanvasStateKind.Empty
       ? requestSent
-        ? "It is looking through the project and putting together a simple guide. You can keep this page open."
-        : `AgentCanvas found a starting point. Ask ${assistantName} to turn it into a simple guide to what your app does and how people use it.`
+        ? `Your request is saved. When ${assistantName} starts looking through this project, updates will appear here.`
+        : `Ask ${assistantName} to look through this project and explain what your app does in a way anyone can follow.`
       : detail ||
     (progressStuck
-      ? "AgentCanvas has not seen a mapping progress update for more than 10 minutes. Ask your agent to resume from the last progress stage."
+      ? "We have not seen an update for more than 10 minutes. Ask your assistant to continue from where it stopped."
       : undefined) ||
     liveProgress?.message ||
     (active
       ? MAPPING_STAGES[clampedStage]
-      : source?.detail || "AgentCanvas could not open a usable map for this project.")
-  const retryLabel = kind === CanvasStateKind.Empty ? "Check for map" : "Try again"
+      : source?.detail || "AgentCanvas could not open this project yet.")
+  const retryLabel = kind === CanvasStateKind.Empty ? "Check for updates" : "Try again"
   const canRequestMap = kind === CanvasStateKind.Empty && Boolean(onRequestMap)
-  const requestAnnouncement = requestSending
-    ? `Asking ${assistantName} to make the app map.`
-    : requestSent
-      ? `${assistantName} is making the app map.`
+  const requestAnnouncement = connectionFailed
+    ? "This project link cannot connect to AgentCanvas."
+    : requestSending
+    ? `Saving your request for ${assistantName}.`
+    : waitingForAssistant
+      ? `Your request is ready. Waiting for ${assistantName} to start.`
+      : requestSent
+      ? `${assistantName} has started looking through your app.`
       : requestFailed
-        ? `We could not ask ${assistantName} to make the app map. ${requestError || "Try again."}`
+        ? `We could not save your request. ${requestError || "Try again."}`
         : active
           ? `Mapping progress: ${stageLabel(liveStage)}.`
           : ""
@@ -120,7 +139,7 @@ export function WorkspaceMappingState({
       className="flex min-h-full items-center justify-center px-6 py-16"
       role="region"
       aria-labelledby="workspace-mapping-state-title"
-      aria-busy={active || requestSending}
+      aria-busy={hasRecordedProgress || requestSending}
     >
       <div className="w-full max-w-xl rounded-2xl border bg-card/85 p-6 shadow-sm">
         <div className="sr-only" role="status" aria-live="polite">
@@ -133,7 +152,11 @@ export function WorkspaceMappingState({
               kind === CanvasStateKind.Error ? "bg-destructive/10 text-destructive" : "bg-when-bg text-when-fg"
             )}
           >
-            {active ? <Loader2 aria-hidden="true" className="size-5 animate-spin" /> : <Icon aria-hidden="true" className="size-5" />}
+            {hasRecordedProgress || requestSending || waitingForAssistant ? (
+              <Loader2 aria-hidden="true" className="size-5 animate-spin" />
+            ) : (
+              <Icon aria-hidden="true" className="size-5" />
+            )}
           </span>
           <div className="min-w-0 flex-1">
             <h2 id="workspace-mapping-state-title" className="text-base font-medium tracking-tight">
@@ -158,7 +181,14 @@ export function WorkspaceMappingState({
           </div>
         </div>
 
-        {active ? (
+        {connectionFailed ? (
+          <div className="mt-6">
+            <Button type="button" onClick={onRetry} className="gap-2">
+              <RefreshCw className="size-4" />
+              Try again
+            </Button>
+          </div>
+        ) : hasRecordedProgress ? (
           <div className="mt-6">
             <Progress
               value={progressPercent}
@@ -166,11 +196,9 @@ export function WorkspaceMappingState({
               aria-valuetext={`${Math.round(progressPercent)}% complete`}
               className="h-2"
             />
-            {(requestSending || requestSent) && (
+            {requestSent && (
               <p className="mt-3 text-sm text-muted-foreground" role="status" aria-live="polite">
-                {requestSending
-                  ? `Asking ${assistantName} to look through your app...`
-                  : `${assistantName} is working on your app guide.`}
+                {`${assistantName} has started looking through your app.`}
               </p>
             )}
             {liveProgress && (
@@ -185,9 +213,9 @@ export function WorkspaceMappingState({
             )}
             {progressStuck && fallbackPrompt && liveProgress && (
               <div className="mt-4 rounded-lg border border-when-accent/25 bg-when-bg/30 p-3">
-                <p className="text-sm font-medium text-foreground">Resume mapping</p>
+                <p className="text-sm font-medium text-foreground">Continue where it stopped</p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Copy this note into your agent so it can continue from the saved progress file.
+                  Copy this note into your assistant so it can continue from where it stopped.
                 </p>
                 <div className="mt-3">
                   <CopyMapPrompt prompt={resumePrompt(fallbackPrompt, liveProgress)} />
@@ -223,7 +251,7 @@ export function WorkspaceMappingState({
           <div className="mt-6 space-y-3">
             {requestFailed && requestError && (
               <p className="text-sm leading-relaxed text-destructive" role="status">
-                We could not ask {assistantName} just now. Try again, or copy the instructions instead.
+                We could not save your request. Try again, or copy the instructions instead.
               </p>
             )}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -232,14 +260,14 @@ export function WorkspaceMappingState({
                   type="button"
                   onClick={onRequestMap}
                   disabled={requestSending}
-                  aria-label={`Ask ${assistantName} to make the map`}
+                  aria-label={`Ask ${assistantName} to explain your app`}
                   className="w-full gap-2 sm:w-auto"
                 >
                   {requestSending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-                  {requestSending ? "Asking..." : "Explain my app"}
+                  {requestSending ? "Saving your request..." : `Ask ${assistantName} to explain my app`}
                 </Button>
               )}
-              {(kind !== CanvasStateKind.Empty || requestSent || !canRequestMap) && (
+              {!requestSending && (kind !== CanvasStateKind.Empty || requestSent || !canRequestMap) && (
                 <Button
                   type="button"
                   variant={canRequestMap ? "outline" : "default"}
@@ -258,6 +286,17 @@ export function WorkspaceMappingState({
                 ) : (
                   <Button type="button" variant="link" size="sm" onClick={() => setShowInstructions(true)}>
                     Working with another assistant?
+                  </Button>
+                )}
+              </div>
+            )}
+            {waitingForAssistant && fallbackPrompt && (
+              <div>
+                {showInstructions ? (
+                  <CopyMapPrompt prompt={fallbackPrompt} compact />
+                ) : (
+                  <Button type="button" variant="link" size="sm" onClick={() => setShowInstructions(true)}>
+                    Need to use another assistant instead?
                   </Button>
                 )}
               </div>
@@ -329,26 +368,26 @@ function stageLabel(stage?: WorkspaceProgressStage): string {
     case WorkspaceProgressStage.Indexing:
       return "Looking through your project"
     case WorkspaceProgressStage.Surveying:
-      return "Finding what people can do"
+      return "Finding how people use it"
     case WorkspaceProgressStage.MappingFlows:
-      return "Putting the story together"
+      return "Putting the important parts together"
     case WorkspaceProgressStage.Done:
-      return "Getting your guide ready"
+      return "Almost ready to show you"
     default:
-      return "Mapping project"
+      return "Looking through your project"
   }
 }
 
 function progressValue(
   progress: WorkspaceProgressStatus | null,
   clampedStage: number,
-  active: boolean,
+  hasRecordedProgress: boolean,
   kind: Props["kind"],
 ): number {
   if (progress && typeof progress.current === "number" && typeof progress.total === "number" && progress.total > 0) {
     return Math.min(100, Math.max(0, (progress.current / progress.total) * 100))
   }
-  return active ? ((clampedStage + 1) / MAPPING_STAGES.length) * 100 : kind === CanvasStateKind.Empty ? 100 : 0
+  return hasRecordedProgress ? ((clampedStage + 1) / MAPPING_STAGES.length) * 100 : kind === CanvasStateKind.Empty ? 100 : 0
 }
 
 function isProgressStuck(progress: WorkspaceProgressStatus | null): boolean {

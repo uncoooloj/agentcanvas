@@ -43,7 +43,7 @@ import {
   type HandoffItem,
 } from "@/lib/changeset"
 import { ApiError, applyCanvasBatch, fetchCanvas, fetchMapHealth, fetchProgress, isApiAuthExpired, postChange, reindexCanvas } from "@/lib/api"
-import { AppContextMode, useAppContext, type AppContext } from "@/lib/appcontext"
+import { AppContextMode, RuntimeConnectionState, useAppContext, type AppContext } from "@/lib/appcontext"
 import { EditDelivery, type EditRequest, type StagedEdit } from "@/lib/edits"
 import {
   buildMapEditOperations,
@@ -63,6 +63,7 @@ import {
   MapFreshnessStatus,
   MapHealthStatus,
   PendingRefKind,
+  WorkspaceProgressStage,
   findNode,
   type AppModel,
   type CanvasMapping,
@@ -80,13 +81,13 @@ import { findNativeDisplayNodeByDisplayId, findNodeByNativeId, nativeNodeToDispl
 import type { PendingRequestLink } from "@/components/CanvasV2FlowCanvas"
 
 const HOME = "__home__"
-const AUTH_EXPIRED_NOTICE = "This AgentCanvas link cannot sync anymore. Reopen AgentCanvas from your agent to keep this map live."
+const AUTH_EXPIRED_NOTICE = "This AgentCanvas link cannot sync anymore. Reopen AgentCanvas from your assistant to keep this page up to date."
 const ONBOARDING_MAJOR_VERSION = "1"
 const MAPPING_STAGES = [
-  "Reading project",
-  "Finding where work starts",
-  "Naming the flows",
-  "Preparing the map",
+  "Looking through your project",
+  "Finding how people use it",
+  "Putting the important parts together",
+  "Almost ready to show you",
 ]
 
 type CanvasState =
@@ -121,6 +122,27 @@ enum MapInstructionKind {
   Author = "author",
 }
 
+function hasProgressAfterRequest(progress: WorkspaceProgressStatus | null, requestStartedAt: number | null): boolean {
+  if (!progress?.readable || !requestStartedAt || !progress.updated_at) return false
+  const updatedAt = Date.parse(progress.updated_at)
+  return !Number.isNaN(updatedAt) && updatedAt >= requestStartedAt
+}
+
+function progressLabel(progress: WorkspaceProgressStatus | null): string | null {
+  switch (progress?.stage) {
+    case WorkspaceProgressStage.Indexing:
+      return "Looking through your project"
+    case WorkspaceProgressStage.Surveying:
+      return "Finding how people use it"
+    case WorkspaceProgressStage.MappingFlows:
+      return "Putting the important parts together"
+    case WorkspaceProgressStage.Done:
+      return "Almost ready to show you"
+    default:
+      return null
+  }
+}
+
 export default function App() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -141,7 +163,13 @@ export default function App() {
   // Preserve the query (token, demo) across navigations so deep links + reloads work.
   const go = (to: string) => navigate({ pathname: to, search: location.search })
 
-  const { context, loading: contextLoading } = useAppContext()
+  const {
+    context,
+    loading: contextLoading,
+    connection: runtimeConnection,
+    error: runtimeConnectionError,
+    retry: retryContext,
+  } = useAppContext()
   const [model, setModel] = useState<AppModel>(emptyAppModel())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editRequest, setEditRequest] = useState<EditRequest | null>(null)
@@ -160,6 +188,7 @@ export default function App() {
   const [mapRequestStatus, setMapRequestStatus] = useState<MappingRequestStatus>(MappingRequestStatus.Idle)
   const [mapRequestError, setMapRequestError] = useState<string | null>(null)
   const [mapRequestPendingId, setMapRequestPendingId] = useState<string | null>(null)
+  const [mapRequestStartedAt, setMapRequestStartedAt] = useState<number | null>(null)
   const [onboardingVisible, setOnboardingVisible] = useState(false)
   const canvasSignatureRef = useRef<string | null>(null)
   const canvasRevisionRef = useRef<number | null>(null)
@@ -209,6 +238,7 @@ export default function App() {
     setMapRequestStatus(MappingRequestStatus.Idle)
     setMapRequestError(null)
     setMapRequestPendingId(null)
+    setMapRequestStartedAt(null)
     lastUsableWorkspaceResultRef.current = null
     mapRequestInFlightRef.current = false
   }, [context.workspacePath, context.workspace])
@@ -218,15 +248,6 @@ export default function App() {
   useEffect(() => {
     setEditRequest(null)
   }, [view])
-
-  useEffect(() => {
-    if (!mappingActive) return
-
-    const timer = window.setInterval(() => {
-      setMappingStage((current) => Math.min(current + 1, MAPPING_STAGES.length - 1))
-    }, 900)
-    return () => window.clearInterval(timer)
-  }, [mappingActive])
 
   function rememberWorkspaceResult(result: WorkspaceModelResult) {
     canvasSignatureRef.current = canvasSignature(result)
@@ -622,6 +643,7 @@ export default function App() {
     const workspace = context.workspace || model.appName || "this project"
     const assistant = context.assistant || "your assistant"
     const clientChangeId = `map-request-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+    const requestStartedAt = Date.now()
     const instruction =
       canvasState.fallbackPrompt ||
       [
@@ -652,12 +674,13 @@ export default function App() {
       })
       setMapRequestPendingId(pending.id)
       setMapRequestStatus(MappingRequestStatus.Sent)
+      setMapRequestStartedAt(requestStartedAt)
       setMappingStage(0)
-      setMappingProgress(context.progress ?? null)
+      setMappingProgress(null)
       setCanvasState({
         kind: CanvasStateKind.Reindexing,
-        message: `${assistant} is understanding your app`,
-        detail: "This page will update as the guide takes shape.",
+        message: `Waiting for ${assistant}`,
+        detail: `Your request is saved. Updates will appear here when ${assistant} starts.`,
       })
       try {
         await refreshHandoff()
@@ -668,15 +691,19 @@ export default function App() {
       const message = error instanceof Error ? error.message : "AgentCanvas could not create the map request."
       setMapRequestError(message)
       setMapRequestStatus(MappingRequestStatus.Failed)
+      setMapRequestStartedAt(null)
     } finally {
       mapRequestInFlightRef.current = false
     }
   }
 
   const inJourney = view !== HOME && !!activeJourney
+  const runtimeConnectionFailed = !contextLoading && runtimeConnection === RuntimeConnectionState.Disconnected
   const appAvailable = !contextLoading && context.mode !== AppContextMode.Landing
   const landing =
-    onWelcome || (!hasRuntimeLaunchContext && contextLoading) || (!contextLoading && context.mode === AppContextMode.Landing)
+    onWelcome ||
+    (!hasRuntimeLaunchContext && contextLoading) ||
+    (!runtimeConnectionFailed && !contextLoading && context.mode === AppContextMode.Landing)
   const loading = mappingActive
   const workspaceState =
     canvasState.kind === CanvasStateKind.Loading ||
@@ -686,7 +713,15 @@ export default function App() {
       ? canvasState
       : null
   const readyMapRefreshAction = canvasState.kind === CanvasStateKind.Ready && !model.isDemo ? mapRefreshAction : null
-  const headerStatus = mappingActive ? MAPPING_STAGES[mappingStage] : canvasSource.shortLabel
+  const mapRequestHasProgress = hasProgressAfterRequest(mappingProgress, mapRequestStartedAt)
+  const headerStatus =
+    runtimeConnectionFailed
+      ? "Connection needed"
+      : mapRequestStatus === MappingRequestStatus.Sent && !mapRequestHasProgress
+        ? `Waiting for ${context.assistant || "your assistant"}`
+        : mappingActive && mapRequestHasProgress
+          ? progressLabel(mappingProgress) || MAPPING_STAGES[mappingStage]
+          : canvasSource.shortLabel
   const canvasHistoryAvailable =
     context.mode === AppContextMode.Workspace &&
     canvasState.kind === CanvasStateKind.Ready &&
@@ -736,6 +771,18 @@ export default function App() {
         <Sparkles className="mr-2 size-4 animate-pulse text-primary" />
         Opening AgentCanvas…
       </div>
+    )
+  }
+
+  if (runtimeConnectionFailed) {
+    return (
+      <WorkspaceMappingState
+        kind={CanvasStateKind.Error}
+        stageIndex={0}
+        workspaceName=""
+        connectionError={runtimeConnectionError}
+        onRetry={retryContext}
+      />
     )
   }
 
@@ -865,6 +912,7 @@ export default function App() {
               requestStatus={mapRequestStatus}
               requestError={mapRequestError ?? undefined}
               requestPendingId={mapRequestPendingId ?? undefined}
+              requestHasProgress={mapRequestHasProgress}
               onRequestMap={context.mode === AppContextMode.Workspace ? requestMapFromAssistant : undefined}
               onRetry={() => load({ refresh: true })}
             />
@@ -1316,9 +1364,9 @@ function describeCanvasSource(
   if (state.kind === CanvasStateKind.Error) {
     return {
       kind: CanvasSourceKind.Error,
-      label: "Map not available",
+      label: "Project unavailable",
       shortLabel: "Needs attention",
-      detail: "AgentCanvas could not open this project's map.",
+      detail: "AgentCanvas could not open this project.",
       tone: CanvasSourceTone.Error,
       flowCount,
     }
@@ -1338,9 +1386,9 @@ function describeCanvasSource(
   if (isStaleHealth(health)) {
     return {
       kind: CanvasSourceKind.StaleCache,
-      label: "Saved map may be out of date",
-      shortLabel: "Saved copy",
-      detail: health?.freshness.reason || "The project changed after this map was saved. Ask your assistant to refresh it if the behavior changed.",
+      label: "This may be out of date",
+      shortLabel: "Needs refresh",
+      detail: health?.freshness.reason || "The project changed after this was saved. Ask your assistant to refresh it if the behavior changed.",
       tone: CanvasSourceTone.Warning,
       flowCount,
     }
@@ -1349,9 +1397,9 @@ function describeCanvasSource(
   if (isStaleMap(mapping)) {
     return {
       kind: CanvasSourceKind.StaleCache,
-      label: "Saved map may be out of date",
-      shortLabel: "Saved copy",
-      detail: "The project changed after this map was saved. Ask your assistant to refresh it if the behavior changed.",
+      label: "This may be out of date",
+      shortLabel: "Needs refresh",
+      detail: "The project changed after this was saved. Ask your assistant to refresh it if the behavior changed.",
       tone: CanvasSourceTone.Warning,
       flowCount,
     }
@@ -1360,9 +1408,9 @@ function describeCanvasSource(
   if (isAgentAuthoredMap(mapping)) {
     return {
       kind: CanvasSourceKind.AgentAuthored,
-      label: "Made by your assistant",
-      shortLabel: "Assistant map",
-      detail: "These flows come from a saved map your assistant wrote from the project.",
+      label: "Reviewed by your assistant",
+      shortLabel: "Reviewed",
+      detail: "Your assistant checked this project and wrote this explanation.",
       tone: CanvasSourceTone.Info,
       flowCount,
     }
@@ -1371,9 +1419,9 @@ function describeCanvasSource(
   if (isHeuristicMap(mapping)) {
     return {
       kind: CanvasSourceKind.HeuristicProjection,
-      label: "Rough first pass",
-      shortLabel: "Starter map",
-      detail: "AgentCanvas made a rough first pass from what it found. Treat it as a starting point until your assistant reviews it.",
+      label: "First look",
+      shortLabel: "Needs review",
+      detail: "AgentCanvas found some early clues. Ask your assistant to check them before you rely on this explanation.",
       tone: CanvasSourceTone.Warning,
       flowCount,
     }
@@ -1381,9 +1429,9 @@ function describeCanvasSource(
 
   return {
     kind: CanvasSourceKind.Unknown,
-    label: source?.label || "Saved project map",
-    shortLabel: "Saved map",
-    detail: "These flows come from the current map saved for this project.",
+    label: source?.label || "Saved explanation",
+    shortLabel: "Saved",
+    detail: "This is the latest explanation saved for this project.",
     tone: CanvasSourceTone.Default,
     flowCount,
   }

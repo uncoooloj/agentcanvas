@@ -12,6 +12,7 @@ describe("WorkspaceMappingState", () => {
         workspaceName="Checkout"
         assistantName="Claude"
         requestStatus={MappingRequestStatus.Sent}
+        requestHasProgress
         progress={{
           exists: true,
           readable: true,
@@ -24,7 +25,7 @@ describe("WorkspaceMappingState", () => {
       />
     )
 
-    expect(html).toContain("Claude is working on your app guide")
+    expect(html).toContain("Claude has started looking through your app")
     expect(html).toContain('role="status"')
     expect(html).toContain('aria-label="Mapping progress"')
 
@@ -39,7 +40,7 @@ describe("WorkspaceMappingState", () => {
         onRetry={() => undefined}
       />
     )
-    expect(sentEmptyHtml).toContain("Claude is understanding your app")
+    expect(sentEmptyHtml).toContain("Waiting for Claude")
     expect(sentEmptyHtml).toContain("Check for updates")
   })
 
@@ -57,8 +58,8 @@ describe("WorkspaceMappingState", () => {
       />
     )
 
-    expect(html).toContain("We could not ask Claude just now.")
-    expect(html).toContain('aria-label="Ask Claude to make the map"')
+    expect(html).toContain("We could not save your request.")
+    expect(html).toContain('aria-label="Ask Claude to explain your app"')
     expect(html).not.toContain("Mapping request sent")
   })
 
@@ -78,10 +79,45 @@ describe("WorkspaceMappingState", () => {
     )
 
     expect(html).toContain("Let&#x27;s understand your app")
-    expect(html).toContain("Explain my app")
+    expect(html).toContain("Ask Codex to explain my app")
     expect(html).toContain("Working with another assistant?")
     expect(html).not.toContain("Starter map needs review")
     expect(html).not.toContain("Best next step")
     expect(html).not.toContain("Fallback")
+  })
+
+  it("waits for saved progress before claiming the assistant has started", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceMappingState
+        kind={CanvasStateKind.Reindexing}
+        stageIndex={0}
+        workspaceName="Checkout"
+        assistantName="Codex"
+        requestStatus={MappingRequestStatus.Sent}
+        fallbackPrompt="Explain the app"
+        onRetry={() => undefined}
+      />
+    )
+
+    expect(html).toContain("Waiting for Codex")
+    expect(html).toContain("Your request is saved")
+    expect(html).not.toContain("Codex has started looking through your app")
+    expect(html).not.toContain('aria-label="Mapping progress"')
+  })
+
+  it("shows a reconnect state instead of a marketing fallback", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceMappingState
+        kind={CanvasStateKind.Error}
+        stageIndex={0}
+        workspaceName=""
+        connectionError="We could not reach the AgentCanvas session behind this link."
+        onRetry={() => undefined}
+      />
+    )
+
+    expect(html).toContain("We can&#x27;t reach this project")
+    expect(html).toContain("Reopen AgentCanvas from your assistant")
+    expect(html).toContain("Try again")
   })
 })

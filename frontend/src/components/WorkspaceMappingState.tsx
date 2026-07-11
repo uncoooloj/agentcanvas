@@ -14,10 +14,10 @@ import {
 import { cn } from "@/lib/utils"
 
 const MAPPING_STAGES = [
-  "Reading project",
-  "Finding where work starts",
-  "Naming the flows",
-  "Preparing the map",
+  "Looking through your project",
+  "Finding what people can do",
+  "Putting the story together",
+  "Getting your guide ready",
 ]
 const STUCK_PROGRESS_MS = 10 * 60 * 1000
 
@@ -75,10 +75,12 @@ export function WorkspaceMappingState({
   const requestFailed = requestStatus === MappingRequestStatus.Failed
   const Icon = kind === CanvasStateKind.Error ? AlertCircle : kind === CanvasStateKind.Empty ? Search : Sparkles
   const title =
-    kind === CanvasStateKind.Empty
+    requestSent && active
+      ? `${assistantName} is understanding your app`
+      : kind === CanvasStateKind.Empty
       ? requestSent
-        ? `${assistantName} is making your app map`
-        : "Let's make a clear map of your app"
+        ? `${assistantName} is understanding your app`
+        : "Let's understand your app"
       : message ||
     (progressStuck ? "Your agent seems to have stopped" : undefined) ||
     (kind === CanvasStateKind.Reindexing
@@ -87,9 +89,11 @@ export function WorkspaceMappingState({
         ? `Reading ${workspaceName || "your project"}`
         : "Couldn't open the project map")
   const body =
-    kind === CanvasStateKind.Empty
+    requestSent && active
+      ? "It is looking through the project and putting together a simple guide. You can keep this page open."
+      : kind === CanvasStateKind.Empty
       ? requestSent
-        ? "It is looking through your project and turning the important parts into a clear guide. You can keep this page open."
+        ? "It is looking through the project and putting together a simple guide. You can keep this page open."
         : `AgentCanvas found a starting point. Ask ${assistantName} to turn it into a simple guide to what your app does and how people use it.`
       : detail ||
     (progressStuck
@@ -165,8 +169,8 @@ export function WorkspaceMappingState({
             {(requestSending || requestSent) && (
               <p className="mt-3 text-sm text-muted-foreground" role="status" aria-live="polite">
                 {requestSending
-                  ? `Sending the mapping request to ${assistantName}...`
-                  : `Mapping request sent to ${assistantName}. Waiting for progress.`}
+                  ? `Asking ${assistantName} to look through your app...`
+                  : `${assistantName} is working on your app guide.`}
               </p>
             )}
             {liveProgress && (
@@ -232,7 +236,7 @@ export function WorkspaceMappingState({
                   className="w-full gap-2 sm:w-auto"
                 >
                   {requestSending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-                  {requestSending ? "Asking..." : "Create my app map"}
+                  {requestSending ? "Asking..." : "Explain my app"}
                 </Button>
               )}
               {(kind !== CanvasStateKind.Empty || requestSent || !canRequestMap) && (
@@ -243,7 +247,7 @@ export function WorkspaceMappingState({
                   className="w-full gap-2 sm:w-auto"
                 >
                   <RefreshCw className="size-4" />
-                  {requestSent ? "Refresh map" : retryLabel}
+                  {requestSent ? "Check for updates" : retryLabel}
                 </Button>
               )}
             </div>
@@ -323,13 +327,13 @@ function stageIndexForProgress(stage: WorkspaceProgressStage): number {
 function stageLabel(stage?: WorkspaceProgressStage): string {
   switch (stage) {
     case WorkspaceProgressStage.Indexing:
-      return "Reading project"
+      return "Looking through your project"
     case WorkspaceProgressStage.Surveying:
-      return "Finding where work starts"
+      return "Finding what people can do"
     case WorkspaceProgressStage.MappingFlows:
-      return "Naming the flows"
+      return "Putting the story together"
     case WorkspaceProgressStage.Done:
-      return "Preparing the map"
+      return "Getting your guide ready"
     default:
       return "Mapping project"
   }

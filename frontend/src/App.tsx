@@ -625,10 +625,10 @@ export default function App() {
     const instruction =
       canvasState.fallbackPrompt ||
       [
-        `Please write the AgentCanvas map for ${workspace}.`,
+        `Please explain how ${workspace} works in a simple guide.`,
         "Use the current project as the source of truth.",
         "If anything is unclear, ask me a focused question before changing files.",
-        "Name the main user flows in plain English, save the AgentCanvas map to .agentcanvas/canvas.ir.json, and update AgentCanvas progress/status while you work.",
+        "Describe the main things people can do, save the AgentCanvas guide to .agentcanvas/canvas.ir.json, and update AgentCanvas progress while you work.",
       ].join(" ")
 
     setMapRequestStatus(MappingRequestStatus.Sending)
@@ -647,7 +647,7 @@ export default function App() {
         targetStep: null,
         targetNodeId: null,
         refs: [],
-        text1: `Create or refresh the plain-English AgentCanvas map for ${workspace}.`,
+        text1: `Create or refresh a simple guide to how ${workspace} works.`,
         text2: `Assigned to ${assistant}.`,
       })
       setMapRequestPendingId(pending.id)
@@ -656,8 +656,8 @@ export default function App() {
       setMappingProgress(context.progress ?? null)
       setCanvasState({
         kind: CanvasStateKind.Reindexing,
-        message: "Map request sent",
-        detail: `Waiting for ${assistant} to write the map. This page will show progress as it arrives.`,
+        message: `${assistant} is understanding your app`,
+        detail: "This page will update as the guide takes shape.",
       })
       try {
         await refreshHandoff()
@@ -1305,9 +1305,9 @@ function describeCanvasSource(
   if (state.kind === CanvasStateKind.Loading || state.kind === CanvasStateKind.Reindexing) {
     return {
       kind: CanvasSourceKind.Loading,
-      label: state.kind === CanvasStateKind.Reindexing ? "Refreshing this project" : "Reading this project",
-      shortLabel: state.kind === CanvasStateKind.Reindexing ? "Refreshing" : "Reading",
-      detail: "AgentCanvas is looking through the project and preparing the map.",
+      label: "Understanding your app",
+      shortLabel: "Working",
+      detail: "AgentCanvas is looking through the project and preparing a simple guide.",
       tone: CanvasSourceTone.Info,
       flowCount,
     }
@@ -1327,8 +1327,8 @@ function describeCanvasSource(
   if (state.kind === CanvasStateKind.Empty || !model.journeys.length) {
     return {
       kind: CanvasSourceKind.NoFlow,
-      label: "Getting your map ready",
-      shortLabel: "Getting ready",
+      label: "Ready to understand your app",
+      shortLabel: "Ready",
       detail: "Your assistant can turn this project into a clear guide to what people can do.",
       tone: CanvasSourceTone.Warning,
       flowCount,

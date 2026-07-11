@@ -24,7 +24,7 @@ describe("WorkspaceMappingState", () => {
       />
     )
 
-    expect(html).toContain("Claude is making the app map")
+    expect(html).toContain("Claude is working on your app guide")
     expect(html).toContain('role="status"')
     expect(html).toContain('aria-label="Mapping progress"')
 
@@ -39,8 +39,8 @@ describe("WorkspaceMappingState", () => {
         onRetry={() => undefined}
       />
     )
-    expect(sentEmptyHtml).toContain("Claude is making your app map")
-    expect(sentEmptyHtml).toContain("Refresh map")
+    expect(sentEmptyHtml).toContain("Claude is understanding your app")
+    expect(sentEmptyHtml).toContain("Check for updates")
   })
 
   it("announces request failures and keeps retry available", () => {
@@ -77,8 +77,8 @@ describe("WorkspaceMappingState", () => {
       />
     )
 
-    expect(html).toContain("Let&#x27;s make a clear map of your app")
-    expect(html).toContain("Create my app map")
+    expect(html).toContain("Let&#x27;s understand your app")
+    expect(html).toContain("Explain my app")
     expect(html).toContain("Working with another assistant?")
     expect(html).not.toContain("Starter map needs review")
     expect(html).not.toContain("Best next step")

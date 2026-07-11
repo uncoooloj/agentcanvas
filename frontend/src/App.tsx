@@ -125,7 +125,6 @@ export default function App() {
   const navigate = useNavigate()
   const location = useLocation()
   const path = location.pathname
-  const onWelcome = path === "/welcome"
   const launchParams = new URLSearchParams(location.search)
   const hasRuntimeLaunchContext = Boolean(
     launchParams.get("token") ||
@@ -133,6 +132,9 @@ export default function App() {
       launchParams.get("sessionId") ||
       launchParams.get("session_id")
   )
+  // A workspace link can keep a stale /welcome path in an existing browser tab.
+  // Runtime context must always win so a launched canvas never turns into marketing.
+  const onWelcome = path === "/welcome" && !hasRuntimeLaunchContext
   const journeyMatch = path.match(/^\/flows\/(.+?)\/?$/)
   const routeJourneyId = journeyMatch ? decodeURIComponent(journeyMatch[1]) : null
   const view = routeJourneyId ?? HOME
@@ -1325,9 +1327,9 @@ function describeCanvasSource(
   if (state.kind === CanvasStateKind.Empty || !model.journeys.length) {
     return {
       kind: CanvasSourceKind.NoFlow,
-      label: "No map yet",
-      shortLabel: "No map yet",
-      detail: "AgentCanvas checked this project, but it does not have a clear plain-English map yet.",
+      label: "Getting your map ready",
+      shortLabel: "Getting ready",
+      detail: "Your assistant can turn this project into a clear guide to what people can do.",
       tone: CanvasSourceTone.Warning,
       flowCount,
     }

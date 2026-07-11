@@ -24,7 +24,7 @@ describe("WorkspaceMappingState", () => {
       />
     )
 
-    expect(html).toContain("Mapping request sent to Claude")
+    expect(html).toContain("Claude is making the app map")
     expect(html).toContain('role="status"')
     expect(html).toContain('aria-label="Mapping progress"')
 
@@ -39,8 +39,8 @@ describe("WorkspaceMappingState", () => {
         onRetry={() => undefined}
       />
     )
-    expect(sentEmptyHtml).toContain('aria-label="Mapping request sent to Claude"')
-    expect(sentEmptyHtml).toContain('disabled=""')
+    expect(sentEmptyHtml).toContain("Claude is making your app map")
+    expect(sentEmptyHtml).toContain("Refresh map")
   })
 
   it("announces request failures and keeps retry available", () => {
@@ -57,8 +57,31 @@ describe("WorkspaceMappingState", () => {
       />
     )
 
-    expect(html).toContain("The local server is unavailable.")
-    expect(html).toContain('aria-label="Send map request to Claude"')
-    expect(html).not.toContain('aria-label="Mapping request sent to Claude"')
+    expect(html).toContain("We could not ask Claude just now.")
+    expect(html).toContain('aria-label="Ask Claude to make the map"')
+    expect(html).not.toContain("Mapping request sent")
+  })
+
+  it("keeps the first-run map request plain and focused", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceMappingState
+        kind={CanvasStateKind.Empty}
+        stageIndex={0}
+        workspaceName="Checkout"
+        assistantName="Codex"
+        message="Starter map needs review"
+        detail="Technical details should not take over this screen."
+        fallbackPrompt="Make the map"
+        onRequestMap={() => undefined}
+        onRetry={() => undefined}
+      />
+    )
+
+    expect(html).toContain("Let&#x27;s make a clear map of your app")
+    expect(html).toContain("Create my app map")
+    expect(html).toContain("Working with another assistant?")
+    expect(html).not.toContain("Starter map needs review")
+    expect(html).not.toContain("Best next step")
+    expect(html).not.toContain("Fallback")
   })
 })

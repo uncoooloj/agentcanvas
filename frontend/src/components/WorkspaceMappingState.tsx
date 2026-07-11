@@ -52,17 +52,16 @@ export function WorkspaceMappingState({
   workspaceName,
   message,
   detail,
-  nextSteps,
   fallbackPrompt,
   progress: workspaceProgress,
   source,
   assistantName = "your assistant",
   requestStatus = MappingRequestStatus.Idle,
   requestError,
-  requestPendingId,
   onRequestMap,
   onRetry,
 }: Props) {
+  const [showInstructions, setShowInstructions] = useState(false)
   const active = kind === CanvasStateKind.Loading || kind === CanvasStateKind.Reindexing
   const liveProgress = active && workspaceProgress?.readable ? workspaceProgress : null
   const liveStage = liveProgress?.stage
@@ -71,40 +70,43 @@ export function WorkspaceMappingState({
     ? stageIndexForProgress(liveStage)
     : Math.min(Math.max(stageIndex, 0), MAPPING_STAGES.length - 1)
   const progressPercent = progressValue(liveProgress, clampedStage, active, kind)
+  const requestSent = requestStatus === MappingRequestStatus.Sent
+  const requestSending = requestStatus === MappingRequestStatus.Sending
+  const requestFailed = requestStatus === MappingRequestStatus.Failed
   const Icon = kind === CanvasStateKind.Error ? AlertCircle : kind === CanvasStateKind.Empty ? Search : Sparkles
   const title =
-    message ||
+    kind === CanvasStateKind.Empty
+      ? requestSent
+        ? `${assistantName} is making your app map`
+        : "Let's make a clear map of your app"
+      : message ||
     (progressStuck ? "Your agent seems to have stopped" : undefined) ||
     (kind === CanvasStateKind.Reindexing
       ? "Refreshing this project"
       : kind === CanvasStateKind.Loading
         ? `Reading ${workspaceName || "your project"}`
-        : kind === CanvasStateKind.Empty
-          ? "No plain-English map yet"
-          : "Couldn't open the project map")
+        : "Couldn't open the project map")
   const body =
-    detail ||
+    kind === CanvasStateKind.Empty
+      ? requestSent
+        ? "It is looking through your project and turning the important parts into a clear guide. You can keep this page open."
+        : `AgentCanvas found a starting point. Ask ${assistantName} to turn it into a simple guide to what your app does and how people use it.`
+      : detail ||
     (progressStuck
       ? "AgentCanvas has not seen a mapping progress update for more than 10 minutes. Ask your agent to resume from the last progress stage."
       : undefined) ||
     liveProgress?.message ||
     (active
       ? MAPPING_STAGES[clampedStage]
-      : source?.detail ||
-        (kind === CanvasStateKind.Empty
-          ? "AgentCanvas checked this project, but it does not have a clear list of the main things people can do yet."
-          : "AgentCanvas could not open a usable map for this project."))
+      : source?.detail || "AgentCanvas could not open a usable map for this project.")
   const retryLabel = kind === CanvasStateKind.Empty ? "Check for map" : "Try again"
   const canRequestMap = kind === CanvasStateKind.Empty && Boolean(onRequestMap)
-  const requestSent = requestStatus === MappingRequestStatus.Sent
-  const requestSending = requestStatus === MappingRequestStatus.Sending
-  const requestFailed = requestStatus === MappingRequestStatus.Failed
   const requestAnnouncement = requestSending
-    ? `Sending a mapping request to ${assistantName}.`
+    ? `Asking ${assistantName} to make the app map.`
     : requestSent
-      ? `Mapping request sent to ${assistantName}. Waiting for mapping progress.`
+      ? `${assistantName} is making the app map.`
       : requestFailed
-        ? `Mapping request failed. ${requestError || "Try again."}`
+        ? `We could not ask ${assistantName} to make the app map. ${requestError || "Try again."}`
         : active
           ? `Mapping progress: ${stageLabel(liveStage)}.`
           : ""
@@ -134,7 +136,7 @@ export function WorkspaceMappingState({
               {title}
             </h2>
             <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{body}</p>
-            {source && (
+            {source && kind !== CanvasStateKind.Empty && (
               <p
                 className={cn(
                   "mt-3 inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
@@ -214,71 +216,48 @@ export function WorkspaceMappingState({
             </div>
           </div>
         ) : (
-          <div className="mt-5 space-y-4">
-            {kind === CanvasStateKind.Empty ? (
-              <div className="rounded-lg border bg-secondary/35 p-3.5">
-                <p className="text-xs font-medium uppercase text-muted-foreground">
-                  {requestSent ? "Sent" : "Best next step"}
-                </p>
-                {requestSent ? (
-                  <p className="mt-2 text-sm leading-relaxed text-foreground">
-                    AgentCanvas wrote a mapping request for {assistantName}. Keep this page open; when the agent
-                    updates progress or saves the map, this page can refresh from the same local state.
-                  </p>
-                ) : (
-                  <p className="mt-2 text-sm leading-relaxed text-foreground">
-                    Send a map-writing request to {assistantName}. If the agent is connected through the skill or
-                    MCP, it can pick up the request, ask questions, and update status from there.
-                  </p>
-                )}
-                {requestPendingId && (
-                  <p className="mt-2 font-mono text-[11px] text-muted-foreground">{requestPendingId}</p>
-                )}
-                {requestFailed && requestError && (
-                  <p className="mt-2 text-xs leading-relaxed text-destructive">{requestError}</p>
-                )}
-              </div>
-            ) : null}
-
-            {kind === CanvasStateKind.Empty && nextSteps?.length && !requestSent ? (
-              <div className="rounded-lg border bg-background/50 p-3.5">
-                <p className="text-xs font-medium uppercase text-muted-foreground">Fallback</p>
-                <ol className="mt-2 space-y-1.5 text-sm leading-relaxed text-foreground">
-                  {nextSteps.map((step) => (
-                    <li key={step} className="flex gap-2">
-                      <Check className="mt-0.5 size-3.5 shrink-0 text-act-accent" />
-                      <span>{step}</span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            ) : null}
+          <div className="mt-6 space-y-3">
+            {requestFailed && requestError && (
+              <p className="text-sm leading-relaxed text-destructive" role="status">
+                We could not ask {assistantName} just now. Try again, or copy the instructions instead.
+              </p>
+            )}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              {canRequestMap && (
+              {canRequestMap && !requestSent && (
                 <Button
                   type="button"
                   onClick={onRequestMap}
-                  disabled={requestSending || requestSent}
-                  aria-label={requestSent ? `Mapping request sent to ${assistantName}` : `Send map request to ${assistantName}`}
+                  disabled={requestSending}
+                  aria-label={`Ask ${assistantName} to make the map`}
                   className="w-full gap-2 sm:w-auto"
                 >
                   {requestSending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-                  {requestSent ? `Sent to ${assistantName}` : requestSending ? "Sending" : `Send to ${assistantName}`}
+                  {requestSending ? "Asking..." : "Create my app map"}
                 </Button>
               )}
-              <Button
-                type="button"
-                variant={canRequestMap ? "outline" : "default"}
-                onClick={onRetry}
-                className="w-full gap-2 sm:w-auto"
-              >
-                <RefreshCw className="size-4" />
-                {retryLabel}
-              </Button>
-              {kind === CanvasStateKind.Empty && fallbackPrompt && (
-                <CopyMapPrompt prompt={fallbackPrompt} compact={canRequestMap} />
+              {(kind !== CanvasStateKind.Empty || requestSent || !canRequestMap) && (
+                <Button
+                  type="button"
+                  variant={canRequestMap ? "outline" : "default"}
+                  onClick={onRetry}
+                  className="w-full gap-2 sm:w-auto"
+                >
+                  <RefreshCw className="size-4" />
+                  {requestSent ? "Refresh map" : retryLabel}
+                </Button>
               )}
             </div>
+            {kind === CanvasStateKind.Empty && fallbackPrompt && !requestSent && (
+              <div>
+                {showInstructions ? (
+                  <CopyMapPrompt prompt={fallbackPrompt} compact />
+                ) : (
+                  <Button type="button" variant="link" size="sm" onClick={() => setShowInstructions(true)}>
+                    Working with another assistant?
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -303,12 +282,12 @@ function CopyMapPrompt({ prompt, compact = false }: { prompt: string; compact?: 
     <div className="min-w-0 flex-1">
       <Button
         type="button"
-        variant="outline"
+        variant={compact ? "ghost" : "outline"}
         className="w-full shrink-0 sm:w-auto"
         onClick={copyPrompt}
       >
         {copyState === CopyState.Copied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
-        {copyState === CopyState.Copied ? "Copied" : compact ? "Copy fallback" : "Copy note for assistant"}
+        {copyState === CopyState.Copied ? "Copied" : compact ? "Copy instructions" : "Copy note for assistant"}
       </Button>
       {copyState === CopyState.Manual && (
         <div className="mt-3 rounded-md border bg-secondary/30 p-3">

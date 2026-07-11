@@ -45,6 +45,10 @@ class LifecycleTests(unittest.TestCase):
             allowed_next_statuses("implemented"),
             {"in_progress", "verified", "blocked", "cancelled", "rejected"},
         )
+        self.assertEqual(
+            allowed_next_statuses("pending"),
+            {"sent", "in_progress", "needs_input", "blocked", "cancelled", "rejected"},
+        )
         blocked_record = {"status": "blocked", "blocked_from": "in_progress"}
         self.assertEqual(allowed_next_statuses("blocked", blocked_record), {"in_progress", "cancelled", "rejected"})
         self.assertEqual(
@@ -62,7 +66,20 @@ class LifecycleTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.status, "verified")
-        self.assertEqual(raised.exception.allowed, {"sent", "needs_input", "blocked", "cancelled", "rejected"})
+        self.assertEqual(raised.exception.allowed, {"sent", "in_progress", "needs_input", "blocked", "cancelled", "rejected"})
+
+    def test_agent_can_start_a_new_request_without_a_delivery_transport(self):
+        updated = transition_record(
+            {"status": PENDING},
+            PendingStatus.IN_PROGRESS,
+            at="2026-07-11T00:00:00Z",
+            actor="codex",
+            enforce_transitions=True,
+        )
+
+        self.assertEqual(updated["status"], PendingStatus.IN_PROGRESS.value)
+        self.assertEqual(updated["history"][-1]["from"], PENDING)
+        self.assertEqual(updated["history"][-1]["actor"], "codex")
 
     def test_verified_requires_evidence(self):
         with self.assertRaises(LifecycleError):

@@ -33,7 +33,14 @@ from .ir import (
     resolve_workspace,
     update_pending_status,
 )
-from .lifecycle import LifecycleError, PENDING, PENDING_STATUSES, validate_status
+from .lifecycle import (
+    IN_PROGRESS,
+    PENDING,
+    PENDING_STATUSES,
+    SENT,
+    LifecycleError,
+    validate_status,
+)
 from .progress import write_progress, progress_status
 
 
@@ -313,6 +320,51 @@ def update_request(
     return {"ok": True, "workspace": str(resolve_workspace(workspace)), "request": item}
 
 
+def claim_request(
+    request_id: str,
+    *,
+    workspace: str = ".",
+    actor: str = "agentcanvas-mcp",
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Record that an agent has started a newly-created request.
+
+    This is deliberately separate from a generic status update so callers only
+    say work has begun after an agent has actually picked the request up.
+    Resuming after a user answer remains an ``update_request(..., in_progress)``
+    operation.
+    """
+
+    root = resolve_workspace(workspace)
+    current = get_pending_request(root, request_id, session_id=session_id)
+    status = validate_status(current.get("status", PENDING))
+    if status == IN_PROGRESS:
+        return {
+            "ok": True,
+            "workspace": str(root),
+            "claimed": False,
+            "request": current,
+        }
+    if status not in {PENDING, SENT}:
+        raise LifecycleError(
+            "request cannot be claimed from %s" % status,
+            status=status,
+            allowed={IN_PROGRESS},
+            details={"from": status, "to": IN_PROGRESS},
+        )
+
+    updated = update_pending_status(
+        root,
+        request_id,
+        IN_PROGRESS,
+        actor=actor,
+        note="Agent started working on this request.",
+        enforce_transitions=True,
+        session_id=session_id,
+    )
+    return {"ok": True, "workspace": str(root), "claimed": True, "request": updated}
+
+
 def ask_user(
     request_id: str,
     question: str,
@@ -532,6 +584,20 @@ def run_mcp_server(default_workspace: str = ".") -> int:
             workspace=workspace,
             note=note,
             evidence=evidence,
+            actor=actor,
+            session_id=session_id,
+        )
+
+    @server.tool()
+    def agentcanvas_claim_request(
+        request_id: str,
+        workspace: str = default_workspace,
+        actor: str = "agentcanvas-mcp",
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return claim_request(
+            request_id,
+            workspace=workspace,
             actor=actor,
             session_id=session_id,
         )

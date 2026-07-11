@@ -381,6 +381,8 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 "in_progress",
                 "--note",
                 "Working on it.",
+                "--actor",
+                "codex-session-1",
                 "--session-id",
                 "session-1",
                 cwd=temp_root,
@@ -394,6 +396,7 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 updated = json.load(handle)
             self.assertEqual(updated["status"], "in_progress")
             self.assertEqual(updated["note"], "Working on it.")
+            self.assertEqual(updated["history"][-1]["actor"], "codex-session-1")
             self.assertEqual(
                 updated["refs"],
                 [

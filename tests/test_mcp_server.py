@@ -23,6 +23,7 @@ from agentcanvas.mcp_server import (
     DEFAULT_EVIDENCE_MAX_ITEMS,
     apply_canvas,
     ask_user,
+    claim_request,
     get_answers,
     get_canvas,
     get_evidence,
@@ -252,15 +253,24 @@ class McpServerContractTests(unittest.TestCase):
             self.assertEqual(listed["requests"][0]["id"], pending["id"])
             self.assertNotIn("change", listed["requests"][0])
 
-            sent = update_request(
+            claimed = claim_request(
                 pending["id"],
-                SENT,
                 workspace=str(workspace),
-                note="Sent to the current agent.",
+                actor="codex-session-1",
+                session_id="session-1",
             )
-            self.assertEqual(sent["request"]["status"], SENT)
-            in_progress = update_request(pending["id"], IN_PROGRESS, workspace=str(workspace))
-            self.assertEqual(in_progress["request"]["status"], IN_PROGRESS)
+            self.assertTrue(claimed["claimed"])
+            self.assertEqual(claimed["request"]["status"], IN_PROGRESS)
+            self.assertEqual(claimed["request"]["history"][-1]["actor"], "codex-session-1")
+
+            already_claimed = claim_request(
+                pending["id"],
+                workspace=str(workspace),
+                actor="another-agent",
+                session_id="session-1",
+            )
+            self.assertFalse(already_claimed["claimed"])
+            self.assertEqual(len(already_claimed["request"]["history"]), 1)
 
             asked = ask_user(
                 pending["id"],

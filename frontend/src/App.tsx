@@ -713,6 +713,10 @@ export default function App() {
       ? canvasState
       : null
   const readyMapRefreshAction = canvasState.kind === CanvasStateKind.Ready && !model.isDemo ? mapRefreshAction : null
+  const refreshWorkspaceConnection = () => {
+    retryContext()
+    void load({ refresh: true })
+  }
   const mapRequestHasProgress = hasProgressAfterRequest(mappingProgress, mapRequestStartedAt)
   const headerStatus =
     runtimeConnectionFailed
@@ -913,8 +917,9 @@ export default function App() {
               requestError={mapRequestError ?? undefined}
               requestPendingId={mapRequestPendingId ?? undefined}
               requestHasProgress={mapRequestHasProgress}
+              agentConnected={Boolean(context.agentPresence?.connected)}
               onRequestMap={context.mode === AppContextMode.Workspace ? requestMapFromAssistant : undefined}
-              onRetry={() => load({ refresh: true })}
+              onRetry={refreshWorkspaceConnection}
             />
           ) : inJourney ? (
             <JourneyView

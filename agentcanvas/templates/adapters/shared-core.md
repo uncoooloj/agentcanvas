@@ -14,11 +14,15 @@ needed.
 
 Preferred MCP order:
 
-1. `agentcanvas_workspace_status`
-2. `agentcanvas_get_answers`
-3. `agentcanvas_get_canvas`
-4. `agentcanvas_get_evidence`
-5. `agentcanvas_record_progress`
+1. `agentcanvas_agent_heartbeat` with your agent name and current session id when available.
+2. `agentcanvas_workspace_status`
+3. `agentcanvas_get_answers`
+4. `agentcanvas_get_canvas`
+5. `agentcanvas_get_evidence`
+6. `agentcanvas_record_progress`
+
+The heartbeat is what lets the local page know an agent is genuinely available.
+Do not claim a request until you have read it and are ready to begin work.
 
 CLI fallback:
 

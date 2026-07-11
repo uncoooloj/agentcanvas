@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import urlparse
 
+from agentcanvas.agent_presence import record_agent_presence
 from agentcanvas.canvas_v2.evidence import build_workflow_evidence_from_path
 from agentcanvas.ir import canvas_map_handoff
 from agentcanvas.server import make_handler
@@ -100,6 +101,7 @@ class ServerContextTests(unittest.TestCase):
             handler_cls.handle_api_get(fake, urlparse("/api/context?token=token"))
 
             context = fake.response["payload"]["context"]
+            self.assertFalse(context["agentPresence"]["connected"])
             handoff = context["handoff"]["canvasMap"]
             self.assertFalse(handoff["readable"])
             self.assertTrue(handoff["needsAuthoring"])
@@ -109,6 +111,32 @@ class ServerContextTests(unittest.TestCase):
             self.assertIn(".agentcanvas/canvas.ir.json", handoff["instruction"])
             self.assertNotIn("agentcanvas start", handoff["instruction"])
             self.assertIn("agentcanvas up --workspace", handoff["instruction"])
+
+    def test_context_exposes_only_a_matching_fresh_agent_connection(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            record_agent_presence(
+                workspace,
+                agent="codex",
+                agent_name="Codex",
+                session_id="session-123",
+            )
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+                session_id="session-123",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/context?token=token&sessionId=session-123"))
+
+            presence = fake.response["payload"]["context"]["agentPresence"]
+            self.assertTrue(presence["connected"])
+            self.assertEqual("codex", presence["agent"])
+            self.assertEqual("Codex", presence["agentName"])
 
     def test_health_api_returns_map_health_summary(self):
         with tempfile.TemporaryDirectory() as temp_root:

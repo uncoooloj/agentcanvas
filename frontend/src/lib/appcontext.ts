@@ -26,6 +26,7 @@ export type AppContext = {
   demoFallback?: boolean
   demoFixture?: string | null
   source?: RuntimeSource
+  agentPresence?: AgentPresence
   sessionId?: string | null
   progress?: WorkspaceProgressStatus
 }
@@ -50,6 +51,14 @@ export type RuntimeSource = {
   demoFallback?: boolean
   demoFixture?: string | null
   reason?: string | null
+}
+
+export type AgentPresence = {
+  connected: boolean
+  agent?: string
+  agentName?: string
+  sessionId?: string | null
+  updatedAt?: string
 }
 
 export type AppContextLoadResult = {

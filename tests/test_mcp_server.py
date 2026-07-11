@@ -29,6 +29,7 @@ from agentcanvas.mcp_server import (
     get_evidence,
     get_request,
     get_workspace_status,
+    heartbeat_agent,
     list_requests,
     record_progress,
     record_sync,
@@ -76,6 +77,23 @@ class McpServerContractTests(unittest.TestCase):
             self.assertEqual("Reading routes and jobs", progress["message"])
             self.assertEqual(1, progress["current"])
             self.assertTrue((workspace / ".agentcanvas" / "progress.json").is_file())
+
+    def test_mcp_agent_heartbeat_exposes_a_fresh_connected_agent(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+
+            result = heartbeat_agent(
+                str(workspace),
+                agent="codex",
+                agent_name="Codex",
+                session_id="session-123",
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["agent_presence"]["connected"])
+            self.assertEqual("codex", result["agent_presence"]["agent"])
+            self.assertEqual("Codex", result["agent_presence"]["agentName"])
+            self.assertEqual("session-123", result["agent_presence"]["sessionId"])
 
     def _workspace(self, temp_root):
         workspace = Path(temp_root) / "workspace"

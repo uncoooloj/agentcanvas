@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from .agent_presence import agent_presence_status, record_agent_presence
 from .canvas_v2 import (
     CanvasStoreError,
     apply_operation_batch,
@@ -112,6 +113,31 @@ def get_workspace_status(workspace: str = ".") -> Dict[str, Any]:
             "status_counts": status_counts,
         },
         "heartbeat": read_server_heartbeat(root),
+        "agent_presence": agent_presence_status(root),
+    }
+
+
+def heartbeat_agent(
+    workspace: str = ".",
+    *,
+    agent: str = "agentcanvas-mcp",
+    agent_name: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Record a fresh local heartbeat from a connected coding agent."""
+
+    root = resolve_workspace(workspace)
+    presence = record_agent_presence(
+        root,
+        agent=agent,
+        agent_name=agent_name,
+        session_id=session_id,
+    )
+    return {
+        "ok": True,
+        "workspace": str(root),
+        "agent_presence": agent_presence_status(root, session_id=session_id),
+        "recorded": presence,
     }
 
 
@@ -485,6 +511,20 @@ def run_mcp_server(default_workspace: str = ".") -> int:
     @server.tool()
     def agentcanvas_workspace_status(workspace: str = default_workspace) -> Dict[str, Any]:
         return get_workspace_status(workspace)
+
+    @server.tool()
+    def agentcanvas_agent_heartbeat(
+        workspace: str = default_workspace,
+        agent: str = "agentcanvas-mcp",
+        agent_name: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return heartbeat_agent(
+            workspace,
+            agent=agent,
+            agent_name=agent_name,
+            session_id=session_id,
+        )
 
     @server.tool()
     def agentcanvas_get_canvas(

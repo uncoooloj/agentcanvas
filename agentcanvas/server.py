@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
+from .agent_presence import agent_presence_status
 from .canvas_v2 import (
     CanvasStoreError,
     apply_operation_batch,
@@ -984,6 +985,7 @@ def make_handler(
                             "demoFixture": source["demoFixture"],
                             "source": source,
                             "sessionId": request_session_id,
+                            "agentPresence": agent_presence_status(workspace, session_id=request_session_id),
                             "progress": safe_progress_status(workspace),
                             "handoff": {
                                 "schema": "agentcanvas.handoff.v1",

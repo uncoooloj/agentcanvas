@@ -27,7 +27,7 @@ describe("WorkspaceMappingState", () => {
 
     expect(html).toContain("Claude has started looking through your app")
     expect(html).toContain('role="status"')
-    expect(html).toContain('aria-label="Mapping progress"')
+    expect(html).toContain('aria-label="Project progress"')
 
     const sentEmptyHtml = renderToStaticMarkup(
       <WorkspaceMappingState
@@ -53,17 +53,18 @@ describe("WorkspaceMappingState", () => {
         assistantName="Claude"
         requestStatus={MappingRequestStatus.Failed}
         requestError="The local server is unavailable."
+        agentConnected
         onRequestMap={() => undefined}
         onRetry={() => undefined}
       />
     )
 
-    expect(html).toContain("We could not save your request.")
+    expect(html).toContain("We could not save your instruction.")
     expect(html).toContain('aria-label="Ask Claude to explain your app"')
     expect(html).not.toContain("Mapping request sent")
   })
 
-  it("keeps the first-run map request plain and focused", () => {
+  it("offers a clear copy path until the assistant has connected", () => {
     const html = renderToStaticMarkup(
       <WorkspaceMappingState
         kind={CanvasStateKind.Empty}
@@ -79,11 +80,30 @@ describe("WorkspaceMappingState", () => {
     )
 
     expect(html).toContain("Let&#x27;s understand your app")
-    expect(html).toContain("Ask Codex to explain my app")
-    expect(html).toContain("Working with another assistant?")
+    expect(html).toContain("Copy message for Codex")
+    expect(html).toContain("Check Codex connection")
+    expect(html).not.toContain("Ask Codex to explain my app")
     expect(html).not.toContain("Starter map needs review")
     expect(html).not.toContain("Best next step")
     expect(html).not.toContain("Fallback")
+  })
+
+  it("shows the tracked send action after the assistant connects", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceMappingState
+        kind={CanvasStateKind.Empty}
+        stageIndex={0}
+        workspaceName="Checkout"
+        assistantName="Codex"
+        fallbackPrompt="Explain the app"
+        agentConnected
+        onRequestMap={() => undefined}
+        onRetry={() => undefined}
+      />
+    )
+
+    expect(html).toContain("Ask Codex to explain my app")
+    expect(html).toContain("Working with another assistant?")
   })
 
   it("waits for saved progress before claiming the assistant has started", () => {
@@ -100,9 +120,9 @@ describe("WorkspaceMappingState", () => {
     )
 
     expect(html).toContain("Waiting for Codex")
-    expect(html).toContain("Your request is saved")
+    expect(html).toContain("Your instruction is saved")
     expect(html).not.toContain("Codex has started looking through your app")
-    expect(html).not.toContain('aria-label="Mapping progress"')
+    expect(html).not.toContain('aria-label="Project progress"')
   })
 
   it("shows a reconnect state instead of a marketing fallback", () => {

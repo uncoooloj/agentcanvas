@@ -43,6 +43,7 @@ interface Props {
   requestError?: string
   requestPendingId?: string
   requestHasProgress?: boolean
+  agentConnected?: boolean
   connectionError?: string
   onRequestMap?: () => void
   onRetry: () => void
@@ -61,6 +62,7 @@ export function WorkspaceMappingState({
   requestStatus = MappingRequestStatus.Idle,
   requestError,
   requestHasProgress = false,
+  agentConnected = false,
   connectionError,
   onRequestMap,
   onRetry,
@@ -75,6 +77,7 @@ export function WorkspaceMappingState({
   const liveStage = liveProgress?.stage
   const hasRecordedProgress = Boolean(liveProgress)
   const waitingForAssistant = requestSent && !hasRecordedProgress
+  const needsAssistantConnection = kind === CanvasStateKind.Empty && !agentConnected && !requestSent
   const progressStuck = isProgressStuck(liveProgress)
   const clampedStage = liveStage
     ? stageIndexForProgress(liveStage)
@@ -103,12 +106,14 @@ export function WorkspaceMappingState({
     connectionFailed
       ? `${connectionError} Reopen AgentCanvas from your assistant to get a fresh link, then try again.`
       : waitingForAssistant
-      ? `Your request is saved. When ${assistantName} starts looking through this project, updates will appear here.`
+      ? `Your instruction is saved. Updates will appear here when ${assistantName} starts.`
       : requestSent && active
       ? "It has started looking through the project. You will see updates here as it goes."
       : kind === CanvasStateKind.Empty
       ? requestSent
-        ? `Your request is saved. When ${assistantName} starts looking through this project, updates will appear here.`
+        ? `Your instruction is saved. Updates will appear here when ${assistantName} starts.`
+        : needsAssistantConnection
+          ? `Copy a short message into ${assistantName}. It will look through this project and bring back a simple guide to what it does.`
         : `Ask ${assistantName} to look through this project and explain what your app does in a way anyone can follow.`
       : detail ||
     (progressStuck
@@ -123,7 +128,7 @@ export function WorkspaceMappingState({
   const requestAnnouncement = connectionFailed
     ? "This project link cannot connect to AgentCanvas."
     : requestSending
-    ? `Saving your request for ${assistantName}.`
+    ? `Saving your instruction for ${assistantName}.`
     : waitingForAssistant
       ? `Your request is ready. Waiting for ${assistantName} to start.`
       : requestSent
@@ -131,7 +136,7 @@ export function WorkspaceMappingState({
       : requestFailed
         ? `We could not save your request. ${requestError || "Try again."}`
         : active
-          ? `Mapping progress: ${stageLabel(liveStage)}.`
+          ? `Project progress: ${stageLabel(liveStage)}.`
           : ""
 
   return (
@@ -192,7 +197,7 @@ export function WorkspaceMappingState({
           <div className="mt-6">
             <Progress
               value={progressPercent}
-              aria-label="Mapping progress"
+              aria-label="Project progress"
               aria-valuetext={`${Math.round(progressPercent)}% complete`}
               className="h-2"
             />
@@ -251,11 +256,11 @@ export function WorkspaceMappingState({
           <div className="mt-6 space-y-3">
             {requestFailed && requestError && (
               <p className="text-sm leading-relaxed text-destructive" role="status">
-                We could not save your request. Try again, or copy the instructions instead.
+                We could not save your instruction. Try again, or copy a message for your assistant instead.
               </p>
             )}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              {canRequestMap && !requestSent && (
+              {canRequestMap && !requestSent && agentConnected && (
                 <Button
                   type="button"
                   onClick={onRequestMap}
@@ -264,7 +269,7 @@ export function WorkspaceMappingState({
                   className="w-full gap-2 sm:w-auto"
                 >
                   {requestSending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-                  {requestSending ? "Saving your request..." : `Ask ${assistantName} to explain my app`}
+                  {requestSending ? "Saving your instruction..." : `Ask ${assistantName} to explain my app`}
                 </Button>
               )}
               {!requestSending && (kind !== CanvasStateKind.Empty || requestSent || !canRequestMap) && (
@@ -278,17 +283,27 @@ export function WorkspaceMappingState({
                   {requestSent ? "Check for updates" : retryLabel}
                 </Button>
               )}
+              {needsAssistantConnection && (
+                <Button type="button" variant="outline" onClick={onRetry} className="w-full gap-2 sm:w-auto">
+                  <RefreshCw className="size-4" />
+                  Check {assistantName} connection
+                </Button>
+              )}
             </div>
             {kind === CanvasStateKind.Empty && fallbackPrompt && !requestSent && (
-              <div>
-                {showInstructions ? (
-                  <CopyMapPrompt prompt={fallbackPrompt} compact />
-                ) : (
-                  <Button type="button" variant="link" size="sm" onClick={() => setShowInstructions(true)}>
-                    Working with another assistant?
-                  </Button>
-                )}
-              </div>
+              needsAssistantConnection ? (
+                <CopyMapPrompt prompt={fallbackPrompt} label={`Copy message for ${assistantName}`} />
+              ) : (
+                <div>
+                  {showInstructions ? (
+                    <CopyMapPrompt prompt={fallbackPrompt} compact />
+                  ) : (
+                    <Button type="button" variant="link" size="sm" onClick={() => setShowInstructions(true)}>
+                      Working with another assistant?
+                    </Button>
+                  )}
+                </div>
+              )
             )}
             {waitingForAssistant && fallbackPrompt && (
               <div>
@@ -308,7 +323,7 @@ export function WorkspaceMappingState({
   )
 }
 
-function CopyMapPrompt({ prompt, compact = false }: { prompt: string; compact?: boolean }) {
+function CopyMapPrompt({ prompt, compact = false, label }: { prompt: string; compact?: boolean; label?: string }) {
   const [copyState, setCopyState] = useState<CopyState>(CopyState.Idle)
 
   async function copyPrompt() {
@@ -330,7 +345,7 @@ function CopyMapPrompt({ prompt, compact = false }: { prompt: string; compact?: 
         onClick={copyPrompt}
       >
         {copyState === CopyState.Copied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
-        {copyState === CopyState.Copied ? "Copied" : compact ? "Copy instructions" : "Copy note for assistant"}
+        {copyState === CopyState.Copied ? "Copied" : label || (compact ? "Copy instructions" : "Copy message for assistant")}
       </Button>
       {copyState === CopyState.Manual && (
         <div className="mt-3 rounded-md border bg-secondary/30 p-3">
@@ -399,7 +414,7 @@ function isProgressStuck(progress: WorkspaceProgressStatus | null): boolean {
 
 function resumePrompt(fallbackPrompt: string, progress: WorkspaceProgressStatus): string {
   const lines = [
-    "AgentCanvas mapping seems stalled.",
+    "AgentCanvas work seems stalled.",
     "",
     "Please resume from the latest progress state in `.agentcanvas/progress.json`.",
     `Current stage: ${progress.stage || "unknown"}`,

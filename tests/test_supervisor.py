@@ -5,10 +5,12 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 from agentcanvas.server import server_heartbeat_path, token_hint
 from agentcanvas.supervisor import (
     api_url,
+    ensure_server_up,
     heartbeat_is_fresh,
     launch_record_path,
     launch_url,
@@ -34,6 +36,48 @@ class _FakeResponse:
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_reused_server_issues_a_session_bound_launch_url(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            record = {
+                "schema": "agentcanvas.launch.v1",
+                "pid": os.getpid(),
+                "host": "127.0.0.1",
+                "port": 8765,
+                "token": "first-session-token",
+                "url": launch_url(
+                    "127.0.0.1",
+                    8765,
+                    "first-session-token",
+                    session_id="session-1",
+                ),
+                "session_id": "session-1",
+                "session_tokens": {"first-session-token": "session-1"},
+            }
+            write_launch_record(workspace, record)
+            live = {
+                "pid": os.getpid(),
+                "host": "127.0.0.1",
+                "port": 8765,
+                "token": "first-session-token",
+                "url": record["url"],
+                "session_id": "session-1",
+            }
+
+            with patch("agentcanvas.supervisor.validate_launch_record", return_value=live):
+                result = ensure_server_up(workspace, session_id="session-2")
+
+            self.assertTrue(result["already_running"])
+            self.assertEqual(result["session_id"], "session-2")
+            parsed = urlparse(result["url"])
+            params = parse_qs(parsed.query)
+            session_token = params["token"][0]
+            self.assertNotEqual(session_token, "first-session-token")
+            self.assertEqual(params["sessionId"], ["session-2"])
+            refreshed = json.loads(launch_record_path(workspace).read_text(encoding="utf-8"))
+            self.assertEqual(refreshed["session_tokens"][session_token], "session-2")
+            self.assertEqual(refreshed["url"], record["url"])
     def test_launch_record_is_owner_only_and_contains_recoverable_url(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "workspace"

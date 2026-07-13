@@ -23,11 +23,13 @@ from agentcanvas.mcp_server import (
     DEFAULT_EVIDENCE_MAX_ITEMS,
     apply_canvas,
     ask_user,
+    claim_request,
     get_answers,
     get_canvas,
     get_evidence,
     get_request,
     get_workspace_status,
+    heartbeat_agent,
     list_requests,
     record_progress,
     record_sync,
@@ -75,6 +77,23 @@ class McpServerContractTests(unittest.TestCase):
             self.assertEqual("Reading routes and jobs", progress["message"])
             self.assertEqual(1, progress["current"])
             self.assertTrue((workspace / ".agentcanvas" / "progress.json").is_file())
+
+    def test_mcp_agent_heartbeat_exposes_a_fresh_connected_agent(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = self._workspace(temp_root)
+
+            result = heartbeat_agent(
+                str(workspace),
+                agent="codex",
+                agent_name="Codex",
+                session_id="session-123",
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["agent_presence"]["connected"])
+            self.assertEqual("codex", result["agent_presence"]["agent"])
+            self.assertEqual("Codex", result["agent_presence"]["agentName"])
+            self.assertEqual("session-123", result["agent_presence"]["sessionId"])
 
     def _workspace(self, temp_root):
         workspace = Path(temp_root) / "workspace"
@@ -252,15 +271,24 @@ class McpServerContractTests(unittest.TestCase):
             self.assertEqual(listed["requests"][0]["id"], pending["id"])
             self.assertNotIn("change", listed["requests"][0])
 
-            sent = update_request(
+            claimed = claim_request(
                 pending["id"],
-                SENT,
                 workspace=str(workspace),
-                note="Sent to the current agent.",
+                actor="codex-session-1",
+                session_id="session-1",
             )
-            self.assertEqual(sent["request"]["status"], SENT)
-            in_progress = update_request(pending["id"], IN_PROGRESS, workspace=str(workspace))
-            self.assertEqual(in_progress["request"]["status"], IN_PROGRESS)
+            self.assertTrue(claimed["claimed"])
+            self.assertEqual(claimed["request"]["status"], IN_PROGRESS)
+            self.assertEqual(claimed["request"]["history"][-1]["actor"], "codex-session-1")
+
+            already_claimed = claim_request(
+                pending["id"],
+                workspace=str(workspace),
+                actor="another-agent",
+                session_id="session-1",
+            )
+            self.assertFalse(already_claimed["claimed"])
+            self.assertEqual(len(already_claimed["request"]["history"]), 1)
 
             asked = ask_user(
                 pending["id"],
@@ -286,6 +314,9 @@ class McpServerContractTests(unittest.TestCase):
             self.assertEqual(len(answers["answers"]), 1)
             self.assertEqual(answers["answers"][0]["text"], "Checkout screen only.")
             self.assertEqual(answers["answers"][0]["request_id"], pending["id"])
+
+            with self.assertRaises(FileNotFoundError):
+                get_answers(pending["id"], workspace=str(workspace), session_id="session-2")
 
 
 if __name__ == "__main__":

@@ -170,10 +170,18 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--workspace", help="workspace path to update")
     status_parser.add_argument("--status", required=True, choices=sorted(PENDING_STATUSES))
     status_parser.add_argument("--note", help="short status note for the user")
+    status_parser.add_argument(
+        "--actor",
+        default="agentcanvas-cli",
+        help="agent or person making this status update",
+    )
     status_parser.add_argument("--session-id", help="only update a request from this agent session")
     status_parser.add_argument("--evidence-check", help="verification check that was run before marking verified")
     status_parser.add_argument("--evidence-result", help="verification result, for example 'passed'")
-    status_parser.add_argument("--evidence-actor", default="agentcanvas-cli", help="who performed verification")
+    status_parser.add_argument(
+        "--evidence-actor",
+        help="who performed verification; defaults to --actor",
+    )
     status_parser.add_argument("--evidence-at", help="ISO timestamp for verification; defaults to now")
     status_parser.set_defaults(func=cmd_status)
 
@@ -465,8 +473,10 @@ def cmd_status(args: argparse.Namespace) -> int:
             args.pending_id,
             args.status,
             note=getattr(args, "note", None),
+            actor=getattr(args, "actor", None) or "agentcanvas-cli",
             session_id=getattr(args, "session_id", None),
             evidence=status_evidence_from_args(args),
+            enforce_transitions=True,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Could not update pending request: {exc}")
@@ -484,7 +494,7 @@ def status_evidence_from_args(args: argparse.Namespace) -> Dict[str, Any] | None
     if not check and not result:
         return None
     return {
-        "actor": getattr(args, "evidence_actor", None) or "agentcanvas-cli",
+        "actor": getattr(args, "evidence_actor", None) or getattr(args, "actor", None) or "agentcanvas-cli",
         "at": getattr(args, "evidence_at", None) or now_utc(),
         "check": check or "verification",
         "result": result or "passed",

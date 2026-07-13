@@ -195,6 +195,23 @@ def run_pending_loop(args: argparse.Namespace) -> None:
             assert_status(answered, "in_progress", "answered request")
             print("POST /api/pending/<id>/answer ok: status=in_progress", flush=True)
 
+            implemented = require_pending(
+                post_json(
+                    launch.base_url,
+                    "/api/status?sessionId=pending-loop",
+                    launch.token,
+                    {
+                        "id": pending_id,
+                        "status": "implemented",
+                        "note": "Implemented by pending-loop smoke.",
+                    },
+                    args.timeout,
+                ),
+                "POST /api/status implemented",
+            )
+            assert_status(implemented, "implemented", "implemented request")
+            print("POST /api/status ok: status=implemented", flush=True)
+
             verified = require_pending(
                 post_json(
                     launch.base_url,

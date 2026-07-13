@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from .agent_presence import agent_presence_status, record_agent_presence
 from .canvas_v2 import (
     CanvasStoreError,
     apply_operation_batch,
@@ -33,7 +34,14 @@ from .ir import (
     resolve_workspace,
     update_pending_status,
 )
-from .lifecycle import LifecycleError, PENDING, PENDING_STATUSES, validate_status
+from .lifecycle import (
+    IN_PROGRESS,
+    PENDING,
+    PENDING_STATUSES,
+    SENT,
+    LifecycleError,
+    validate_status,
+)
 from .progress import write_progress, progress_status
 
 
@@ -105,6 +113,31 @@ def get_workspace_status(workspace: str = ".") -> Dict[str, Any]:
             "status_counts": status_counts,
         },
         "heartbeat": read_server_heartbeat(root),
+        "agent_presence": agent_presence_status(root),
+    }
+
+
+def heartbeat_agent(
+    workspace: str = ".",
+    *,
+    agent: str = "agentcanvas-mcp",
+    agent_name: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Record a fresh local heartbeat from a connected coding agent."""
+
+    root = resolve_workspace(workspace)
+    presence = record_agent_presence(
+        root,
+        agent=agent,
+        agent_name=agent_name,
+        session_id=session_id,
+    )
+    return {
+        "ok": True,
+        "workspace": str(root),
+        "agent_presence": agent_presence_status(root, session_id=session_id),
+        "recorded": presence,
     }
 
 
@@ -313,6 +346,51 @@ def update_request(
     return {"ok": True, "workspace": str(resolve_workspace(workspace)), "request": item}
 
 
+def claim_request(
+    request_id: str,
+    *,
+    workspace: str = ".",
+    actor: str = "agentcanvas-mcp",
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Record that an agent has started a newly-created request.
+
+    This is deliberately separate from a generic status update so callers only
+    say work has begun after an agent has actually picked the request up.
+    Resuming after a user answer remains an ``update_request(..., in_progress)``
+    operation.
+    """
+
+    root = resolve_workspace(workspace)
+    current = get_pending_request(root, request_id, session_id=session_id)
+    status = validate_status(current.get("status", PENDING))
+    if status == IN_PROGRESS:
+        return {
+            "ok": True,
+            "workspace": str(root),
+            "claimed": False,
+            "request": current,
+        }
+    if status not in {PENDING, SENT}:
+        raise LifecycleError(
+            "request cannot be claimed from %s" % status,
+            status=status,
+            allowed={IN_PROGRESS},
+            details={"from": status, "to": IN_PROGRESS},
+        )
+
+    updated = update_pending_status(
+        root,
+        request_id,
+        IN_PROGRESS,
+        actor=actor,
+        note="Agent started working on this request.",
+        enforce_transitions=True,
+        session_id=session_id,
+    )
+    return {"ok": True, "workspace": str(root), "claimed": True, "request": updated}
+
+
 def ask_user(
     request_id: str,
     question: str,
@@ -340,16 +418,17 @@ def get_answers(
     *,
     workspace: str = ".",
     since: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return user answers from one request or all pending request threads."""
 
     root = resolve_workspace(workspace)
     answers: List[Dict[str, Any]] = []
     if request_id:
-        request = get_pending_request(root, request_id, since=since)
+        request = get_pending_request(root, request_id, since=since, session_id=session_id)
         answers.extend(_answer_turns(request, request.get("id")))
     else:
-        for item in list_pending(root, summary=True):
+        for item in list_pending(root, summary=True, session_id=session_id):
             json_path = item.get("json_path")
             if not isinstance(json_path, str):
                 continue
@@ -432,6 +511,20 @@ def run_mcp_server(default_workspace: str = ".") -> int:
     @server.tool()
     def agentcanvas_workspace_status(workspace: str = default_workspace) -> Dict[str, Any]:
         return get_workspace_status(workspace)
+
+    @server.tool()
+    def agentcanvas_agent_heartbeat(
+        workspace: str = default_workspace,
+        agent: str = "agentcanvas-mcp",
+        agent_name: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return heartbeat_agent(
+            workspace,
+            agent=agent,
+            agent_name=agent_name,
+            session_id=session_id,
+        )
 
     @server.tool()
     def agentcanvas_get_canvas(
@@ -536,6 +629,20 @@ def run_mcp_server(default_workspace: str = ".") -> int:
         )
 
     @server.tool()
+    def agentcanvas_claim_request(
+        request_id: str,
+        workspace: str = default_workspace,
+        actor: str = "agentcanvas-mcp",
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return claim_request(
+            request_id,
+            workspace=workspace,
+            actor=actor,
+            session_id=session_id,
+        )
+
+    @server.tool()
     def agentcanvas_ask_user(
         request_id: str,
         question: str,
@@ -556,8 +663,9 @@ def run_mcp_server(default_workspace: str = ".") -> int:
         request_id: Optional[str] = None,
         workspace: str = default_workspace,
         since: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return get_answers(request_id, workspace=workspace, since=since)
+        return get_answers(request_id, workspace=workspace, since=since, session_id=session_id)
 
     @server.tool()
     def agentcanvas_record_sync(

@@ -1,10 +1,15 @@
-import { useState, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 import type { WorkspaceProgressStatus } from "@/lib/types"
 
 export enum AppContextMode {
   Landing = "landing",
   Workspace = "workspace",
   Demo = "demo",
+}
+
+export enum RuntimeConnectionState {
+  Ready = "ready",
+  Disconnected = "disconnected",
 }
 
 export type AppContext = {
@@ -21,6 +26,7 @@ export type AppContext = {
   demoFallback?: boolean
   demoFixture?: string | null
   source?: RuntimeSource
+  agentPresence?: AgentPresence
   sessionId?: string | null
   progress?: WorkspaceProgressStatus
 }
@@ -47,6 +53,20 @@ export type RuntimeSource = {
   reason?: string | null
 }
 
+export type AgentPresence = {
+  connected: boolean
+  agent?: string
+  agentName?: string
+  sessionId?: string | null
+  updatedAt?: string
+}
+
+export type AppContextLoadResult = {
+  context: AppContext
+  connection: RuntimeConnectionState
+  error?: string
+}
+
 const DEMO_CONTEXT: AppContext = {
   workspace: "Your project",
   workspacePath: "",
@@ -64,8 +84,8 @@ const DEMO_FALLBACK: AppContext = {
   workspace: "Your online shop",
   workspacePath: "",
   productLanguage: { singular: "app", workspace_noun: "app", entry_noun: "flow" },
-  assistant: "Claude Code",
-  assistantId: "claude-code",
+  assistant: "No agent connected",
+  assistantId: "generic",
   mode: AppContextMode.Demo,
   isDemo: true,
   isDemoContent: true,
@@ -73,7 +93,12 @@ const DEMO_FALLBACK: AppContext = {
   sessionId: null,
 }
 
-export async function fetchAppContext(): Promise<AppContext> {
+export function hasRuntimeLaunchContext(search = window.location.search): boolean {
+  const params = new URLSearchParams(search)
+  return Boolean(params.get("token") || params.get("sessionId") || params.get("session_id"))
+}
+
+export async function fetchAppContext(): Promise<AppContextLoadResult> {
   const params = new URLSearchParams(window.location.search)
   const demo = params.get("demo")
   try {
@@ -88,25 +113,50 @@ export async function fetchAppContext(): Promise<AppContext> {
     const data = (await res.json()) as { ok: boolean; context: AppContext }
     // ?demo=1 always enters demo mode, even if the server didn't say so.
     if (demo && data.context.mode !== AppContextMode.Demo) {
-      return { ...data.context, mode: AppContextMode.Demo, isDemo: true, isDemoContent: true, demoFallback: false }
+      return {
+        context: { ...data.context, mode: AppContextMode.Demo, isDemo: true, isDemoContent: true, demoFallback: false },
+        connection: RuntimeConnectionState.Ready,
+      }
     }
-    return data.context
+    return { context: data.context, connection: RuntimeConnectionState.Ready }
   } catch {
-    // No API (e.g. static host) — honour ?demo=1 client-side, else show landing.
-    return demo ? DEMO_FALLBACK : DEMO_CONTEXT
+    // A launched workspace must never silently become the marketing site when its
+    // local server has stopped or its link has expired.
+    if (hasRuntimeLaunchContext()) {
+      return {
+        context: DEMO_CONTEXT,
+        connection: RuntimeConnectionState.Disconnected,
+        error: "We could not reach the AgentCanvas session behind this link.",
+      }
+    }
+    // No API (for example a static host) can still show demo mode or the public landing page.
+    return { context: demo ? DEMO_FALLBACK : DEMO_CONTEXT, connection: RuntimeConnectionState.Ready }
   }
 }
 
-export function useAppContext(): { context: AppContext; loading: boolean } {
+export function useAppContext(): {
+  context: AppContext
+  loading: boolean
+  connection: RuntimeConnectionState
+  error?: string
+  retry: () => void
+} {
   const [context, setContext] = useState<AppContext>(DEMO_CONTEXT)
   const [loading, setLoading] = useState(true)
+  const [connection, setConnection] = useState(RuntimeConnectionState.Ready)
+  const [error, setError] = useState<string | undefined>()
+  const [attempt, setAttempt] = useState(0)
+  const retry = useCallback(() => setAttempt((current) => current + 1), [])
 
   useEffect(() => {
-    fetchAppContext().then((ctx) => {
-      setContext(ctx)
+    setLoading(true)
+    fetchAppContext().then((result) => {
+      setContext(result.context)
+      setConnection(result.connection)
+      setError(result.error)
       setLoading(false)
     })
-  }, [])
+  }, [attempt])
 
-  return { context, loading }
+  return { context, loading, connection, error, retry }
 }

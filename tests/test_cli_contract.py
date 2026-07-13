@@ -381,6 +381,8 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 "in_progress",
                 "--note",
                 "Working on it.",
+                "--actor",
+                "codex-session-1",
                 "--session-id",
                 "session-1",
                 cwd=temp_root,
@@ -394,6 +396,7 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 updated = json.load(handle)
             self.assertEqual(updated["status"], "in_progress")
             self.assertEqual(updated["note"], "Working on it.")
+            self.assertEqual(updated["history"][-1]["actor"], "codex-session-1")
             self.assertEqual(
                 updated["refs"],
                 [
@@ -433,14 +436,14 @@ class AgentCanvasCliContractTests(unittest.TestCase):
                 "verified",
                 "--note",
                 "Verified.",
+                "--actor",
+                "codex-session-1",
                 "--session-id",
                 "session-1",
                 "--evidence-check",
                 "npm test",
                 "--evidence-result",
                 "passed",
-                "--evidence-actor",
-                "codex",
                 "--evidence-at",
                 "2026-07-06T00:00:00Z",
                 cwd=temp_root,
@@ -456,7 +459,7 @@ class AgentCanvasCliContractTests(unittest.TestCase):
             self.assertEqual(
                 verified["verification"],
                 {
-                    "actor": "codex",
+                    "actor": "codex-session-1",
                     "at": "2026-07-06T00:00:00Z",
                     "check": "npm test",
                     "result": "passed",

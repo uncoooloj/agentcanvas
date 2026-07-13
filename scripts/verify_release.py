@@ -2,8 +2,10 @@
 """Run AgentCanvas checks before GitHub, PyPI, or Cloudflare publishing."""
 
 import argparse
+import ast
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -13,6 +15,8 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_METADATA_PATH = PROJECT_ROOT / "pyproject.toml"
+RUNTIME_VERSION_PATH = PROJECT_ROOT / "agentcanvas" / "__init__.py"
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 PACKAGED_WEB_DIR = PROJECT_ROOT / "agentcanvas" / "web"
 WRANGLER_CONFIG = PROJECT_ROOT / "wrangler.jsonc"
@@ -34,6 +38,64 @@ def require_supported_python(version_info=None):
             "Run `python3.9 scripts/verify_release.py` or use the Python version "
             "configured in CI."
         )
+
+
+def read_package_version(path=PACKAGE_METADATA_PATH):
+    """Read the package's simple PEP 621 version without a runtime TOML dependency."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise VerificationError(f"Could not read package metadata at {path}: {error}")
+
+    in_project = False
+    for line in lines:
+        section = re.match(r"^\s*\[([^]]+)\]\s*(?:#.*)?$", line)
+        if section:
+            in_project = section.group(1).strip() == "project"
+            continue
+        if not in_project:
+            continue
+        match = re.match(r'^\s*version\s*=\s*"([^"\\]+)"\s*(?:#.*)?$', line)
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+
+    raise VerificationError(f"Package metadata at {path} has no simple project.version string.")
+
+
+def read_runtime_version(path=RUNTIME_VERSION_PATH):
+    """Read the version reported by the runtime package source."""
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+    except OSError as error:
+        raise VerificationError(f"Could not read runtime version at {path}: {error}")
+    except SyntaxError as error:
+        raise VerificationError(f"Could not parse runtime version at {path}: {error}")
+
+    for statement in tree.body:
+        if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+        if not any(isinstance(target, ast.Name) and target.id == "__version__" for target in targets):
+            continue
+        value = statement.value
+        if isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value:
+            return value.value
+        raise VerificationError(f"Runtime version at {path} is not a non-empty string.")
+
+    raise VerificationError(f"Runtime version at {path} does not define __version__.")
+
+
+def verify_release_version(package_metadata_path=PACKAGE_METADATA_PATH, runtime_version_path=RUNTIME_VERSION_PATH):
+    """Ensure package metadata and the runtime report the same release."""
+    package_version = read_package_version(package_metadata_path)
+    runtime_version = read_runtime_version(runtime_version_path)
+    if package_version != runtime_version:
+        raise VerificationError(
+            "Package metadata and runtime versions diverge: "
+            f"metadata={package_version!r}, runtime={runtime_version!r}."
+        )
+    print(f"Package metadata and runtime version match {package_version}.", flush=True)
 
 
 def command_text(command):
@@ -385,6 +447,7 @@ def main(argv=None):
 
     try:
         require_supported_python()
+        verify_release_version()
         verify_cloudflare_config()
         run_python_checks(
             skip_runtime_smoke=args.skip_runtime_smoke,

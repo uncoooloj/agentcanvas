@@ -7,6 +7,8 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional, Pattern, Sequence, Set
 
+from agentcanvas.core.facts import prioritize_facts
+
 
 FACT_SCHEMA = "agentcanvas.source_facts.v1"
 MAX_FILE_BYTES = 1_000_000
@@ -117,6 +119,7 @@ def extract_source_facts(
     facts.extend(_extract_routes(code, display_path, spec))
     facts.extend(_extract_branches(structural_code, display_path, spec))
     facts.extend(_extract_calls(structural_code, display_path, spec))
+    facts, fact_selection = prioritize_facts(facts, 200)
     return {
         "schema": FACT_SCHEMA,
         "language": spec.language,
@@ -128,6 +131,7 @@ def extract_source_facts(
         "path": display_path,
         "facts": facts,
         "summary": _summary(facts),
+        "fact_selection": fact_selection,
         "errors": [],
     }
 
@@ -377,7 +381,7 @@ def _extract_calls(code: str, path: str, spec: LightweightLanguageSpec) -> List[
                     "source_ref": {"path": path, "line": line},
                 }
             )
-    return facts[:200]
+    return facts
 
 
 def _mask_comments(source: str, spec: LightweightLanguageSpec) -> str:

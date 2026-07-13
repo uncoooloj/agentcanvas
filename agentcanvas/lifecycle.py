@@ -74,6 +74,8 @@ UI_GROUPS = {
 _TRANSITIONS = {
     PENDING: _status_values(
         PendingStatus.SENT,
+        PendingStatus.IN_PROGRESS,
+        PendingStatus.NEEDS_INPUT,
         PendingStatus.BLOCKED,
         PendingStatus.CANCELLED,
         PendingStatus.REJECTED,

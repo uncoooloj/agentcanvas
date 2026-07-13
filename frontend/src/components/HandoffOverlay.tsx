@@ -20,9 +20,14 @@ export function HandoffOverlay({ onAcknowledge, onDismiss }: Props) {
 
   if (phase === HandoffPhase.Sending || phase === HandoffPhase.Working) {
     return (
-      <div className="w-full max-w-lg animate-fade-in rounded-lg border border-border bg-card shadow-lg">
+      <div
+        className="w-full max-w-lg animate-fade-in rounded-lg border border-border bg-card shadow-lg"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
         <div className="flex items-center gap-3 px-5 py-4">
-          <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />
+          <Loader2 aria-hidden="true" className="h-5 w-5 shrink-0 animate-spin text-primary" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-foreground">
               Waiting for {assistantName}
@@ -31,8 +36,8 @@ export function HandoffOverlay({ onAcknowledge, onDismiss }: Props) {
               Pending requests were written locally. Your agent can pick them up now.
             </p>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => refreshHandoff()} aria-label="Refresh status">
-            <RefreshCw className="h-4 w-4" />
+          <Button type="button" variant="ghost" size="icon" onClick={() => refreshHandoff()} aria-label="Refresh status">
+            <RefreshCw aria-hidden="true" className="h-4 w-4" />
           </Button>
         </div>
 
@@ -53,9 +58,13 @@ export function HandoffOverlay({ onAcknowledge, onDismiss }: Props) {
 
   if (phase === HandoffPhase.Done) {
     return (
-      <div className="w-full max-w-lg animate-fade-in rounded-lg border border-border bg-card shadow-lg">
+      <div
+        className="w-full max-w-lg animate-fade-in rounded-lg border border-border bg-card shadow-lg"
+        role="status"
+        aria-live="polite"
+      >
         <div className="flex items-start gap-3 px-5 py-5">
-          <CircleCheck className="mt-0.5 h-5 w-5 shrink-0 text-act-fg" />
+          <CircleCheck aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-act-fg" />
           <div className="flex-1">
             <p className="text-sm font-semibold text-foreground">
               All set - your changes are live
@@ -80,9 +89,13 @@ export function HandoffOverlay({ onAcknowledge, onDismiss }: Props) {
     const blocked = phase === HandoffPhase.Blocked || phase === HandoffPhase.Stopped
     const needsInputItems = items.filter((item) => item.status === HandoffItemStatus.NeedsInput)
     return (
-      <div className="w-full max-w-lg animate-fade-in rounded-lg border border-border bg-card shadow-lg">
+      <div
+        className="w-full max-w-lg animate-fade-in rounded-lg border border-border bg-card shadow-lg"
+        role={blocked ? "alert" : "region"}
+        aria-live={blocked ? "assertive" : "polite"}
+      >
         <div className="flex items-start gap-3 px-5 py-5">
-          <AlertCircle className={cn("mt-0.5 h-5 w-5 shrink-0", blocked ? "text-destructive" : "text-when-fg")} />
+          <AlertCircle aria-hidden="true" className={cn("mt-0.5 h-5 w-5 shrink-0", blocked ? "text-destructive" : "text-when-fg")} />
           <div className="flex-1">
             <p className="text-sm font-semibold text-foreground">
               {blocked ? `${assistantName} is blocked` : `${assistantName} needs input`}
@@ -200,7 +213,7 @@ function HandoffItemList({ items }: { items: HandoffItem[] }) {
         return (
           <li key={item.changeId} className="rounded-md border border-border bg-background/60 px-3 py-2">
             <div className="flex items-start gap-2.5">
-              <cfg.Icon className={cn("mt-0.5 h-4 w-4 shrink-0", cfg.iconClassName)} />
+              <cfg.Icon aria-hidden="true" className={cn("mt-0.5 h-4 w-4 shrink-0", cfg.iconClassName)} />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-medium", cfg.badgeClassName)}>
@@ -265,6 +278,8 @@ function AnswerQuestion({
         <p className="text-sm leading-snug text-foreground">{question}</p>
         {item.conversation?.length ? <ConversationThread item={item} /> : null}
         <Textarea
+          id={`handoff-answer-${item.pendingId || item.changeId}`}
+          aria-label={`Answer: ${question}`}
           value={answer}
           onChange={(event) => setAnswer(event.target.value)}
           placeholder="Type your answer..."
@@ -275,7 +290,7 @@ function AnswerQuestion({
             Clear
           </Button>
           <Button type="button" size="sm" onClick={submit} disabled={!canSubmit}>
-            {submitting ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+            {submitting ? <Loader2 aria-hidden="true" className="size-3.5 animate-spin" /> : <Send aria-hidden="true" className="size-3.5" />}
             Send answer
           </Button>
         </div>

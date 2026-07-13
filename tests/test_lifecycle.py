@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agentcanvas.ir import update_pending_status
+from agentcanvas.ir import append_pending_conversation, update_pending_status, write_pending_change
 from agentcanvas.lifecycle import (
     LifecycleError,
     PENDING,
@@ -45,6 +45,10 @@ class LifecycleTests(unittest.TestCase):
             allowed_next_statuses("implemented"),
             {"in_progress", "verified", "blocked", "cancelled", "rejected"},
         )
+        self.assertEqual(
+            allowed_next_statuses("pending"),
+            {"sent", "in_progress", "needs_input", "blocked", "cancelled", "rejected"},
+        )
         blocked_record = {"status": "blocked", "blocked_from": "in_progress"}
         self.assertEqual(allowed_next_statuses("blocked", blocked_record), {"in_progress", "cancelled", "rejected"})
         self.assertEqual(
@@ -62,7 +66,20 @@ class LifecycleTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.status, "verified")
-        self.assertEqual(raised.exception.allowed, {"sent", "blocked", "cancelled", "rejected"})
+        self.assertEqual(raised.exception.allowed, {"sent", "in_progress", "needs_input", "blocked", "cancelled", "rejected"})
+
+    def test_agent_can_start_a_new_request_without_a_delivery_transport(self):
+        updated = transition_record(
+            {"status": PENDING},
+            PendingStatus.IN_PROGRESS,
+            at="2026-07-11T00:00:00Z",
+            actor="codex",
+            enforce_transitions=True,
+        )
+
+        self.assertEqual(updated["status"], PendingStatus.IN_PROGRESS.value)
+        self.assertEqual(updated["history"][-1]["from"], PENDING)
+        self.assertEqual(updated["history"][-1]["actor"], "codex")
 
     def test_verified_requires_evidence(self):
         with self.assertRaises(LifecycleError):
@@ -125,6 +142,23 @@ class LifecycleTests(unittest.TestCase):
             self.assertEqual(updated["status"], "verified")
             self.assertEqual(updated["history"][-1]["to"], "verified")
             self.assertEqual(updated["status_history"][-1]["status"], "verified")
+
+    def test_answer_must_follow_question_and_does_not_write_on_failure(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            pending = write_pending_change(workspace, {"title": "Answer", "summary": "Answer"})
+
+            with self.assertRaises(ValueError):
+                append_pending_conversation(
+                    workspace,
+                    pending["id"],
+                    role="user",
+                    kind="answer",
+                    text="Too early",
+                )
+
+            conversation_path = Path(pending["json_path"]).with_suffix(".conversation.jsonl")
+            self.assertFalse(conversation_path.exists())
 
 
 if __name__ == "__main__":

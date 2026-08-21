@@ -585,7 +585,7 @@ function CopyBox({ text, oneLine, className }: { text: string; oneLine?: boolean
       <pre
         className={cn(
           "overflow-x-auto px-4 py-3 font-mono text-xs leading-relaxed text-foreground/80",
-          oneLine ? "whitespace-pre" : "whitespace-pre-wrap"
+          oneLine ? "whitespace-pre" : "max-h-80 overflow-y-auto whitespace-pre-wrap"
         )}
       >
         {text}

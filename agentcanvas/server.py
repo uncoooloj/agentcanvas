@@ -2,25 +2,63 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from enum import Enum
+import hashlib
 import json
 import mimetypes
 import os
 import secrets
+import threading
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
+from .agent_presence import agent_presence_status
+from .canvas_v2 import (
+    CanvasStoreError,
+    apply_operation_batch,
+    list_canvas_history,
+    restore_canvas_revision,
+    validate_canvas_v2,
+)
 from .indexer import index_workspace
 from .ir import (
+    append_pending_conversation,
+    atomic_write_json,
+    canvas_map_handoff,
+    canvas_ir_path,
+    ConversationRole,
+    ConversationTurnKind,
+    get_pending_request,
     list_pending,
+    load_canvas_ir,
     load_ir,
+    map_health,
+    now_utc,
     resolve_workspace,
+    save_canvas_ir,
     state_paths,
     update_pending_status,
     write_pending_change,
 )
+from .core.behavior_canvas import (
+    BEHAVIOR_CANVAS_SCHEMA,
+    BEHAVIOR_CANVAS_WRAPPER_SCHEMA,
+    CANVAS_MAPPING_SCHEMA,
+    CanvasMappingMode,
+    CanvasProjectionEngine,
+    CanvasSourceKind,
+    CanvasSourceReason,
+    CanvasSourceStatus,
+    build_behavior_canvas,
+    canvas_source_metadata,
+)
+from .core.workspace_profile import infer_workspace_profile
+from .failure_ids import FailureId, failure_payload
+from .progress import ProgressError, progress_status, safe_progress_status, write_progress
 
 
 # Known coding-agent platforms that may launch AgentCanvas, with human labels.
@@ -31,6 +69,20 @@ _ASSISTANTS = {
     "antigravity": "Antigravity",
     "generic": "Your assistant",
 }
+DEMO_MARKER_FILENAME = ".agentcanvas-demo"
+CANVAS_V2_SCHEMA = "agentcanvas.canvas.v2"
+SERVER_HEARTBEAT_FILENAME = "server.heartbeat.json"
+HEARTBEAT_INTERVAL_SECONDS = 15
+
+
+class AppContextMode(str, Enum):
+    LANDING = "landing"
+    WORKSPACE = "workspace"
+    DEMO = "demo"
+
+
+class CanvasHandoffReason(str, Enum):
+    WORKSPACE_NOT_SELECTED = "workspace_not_selected"
 
 
 def resolve_assistant(agent: Optional[str]) -> Tuple[str, str]:
@@ -60,6 +112,7 @@ def run_server(
     demo_mode: bool = False,
     landing_mode: bool = False,
     session_id: Optional[str] = None,
+    supervised: bool = False,
 ) -> None:
     root = resolve_workspace(workspace)
     token = token or secrets.token_urlsafe(24)
@@ -79,6 +132,17 @@ def run_server(
     httpd = ThreadingHTTPServer((host, port), handler_class)
     actual_host, actual_port = httpd.server_address[:2]
     display_host = "127.0.0.1" if actual_host in {"0.0.0.0", "::"} else actual_host
+    heartbeat = None
+    if server_heartbeat_enabled(demo_mode=demo_mode, landing_mode=landing_mode):
+        heartbeat = start_server_heartbeat(
+            root,
+            host=display_host,
+            port=int(actual_port),
+            token=token,
+            session_id=session_id,
+            agent=assistant_id if assistant_id != "generic" else None,
+            agent_name=assistant_name if assistant_id != "generic" else None,
+        )
     query = {"token": token}
     if session_id:
         query["sessionId"] = session_id
@@ -91,14 +155,17 @@ def run_server(
     else:
         prefix = "AgentCanvas serving"
     print(f"{prefix} {root}", flush=True)
-    print(f"Open {url}", flush=True)
-    print("Press Ctrl-C to stop.", flush=True)
+    if not supervised:
+        print(f"Open {url}", flush=True)
+        print("Press Ctrl-C to stop.", flush=True)
 
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nAgentCanvas stopped.", flush=True)
     finally:
+        if heartbeat is not None:
+            stop_server_heartbeat(heartbeat)
         httpd.server_close()
 
 
@@ -106,6 +173,592 @@ def ensure_ir(workspace: Path) -> None:
     _, ir_path, _ = state_paths(workspace)
     if not ir_path.exists():
         index_workspace(workspace)
+
+
+def server_heartbeat_enabled(*, demo_mode: bool, landing_mode: bool) -> bool:
+    return not demo_mode and not landing_mode
+
+
+def server_heartbeat_path(workspace: str | Path) -> Path:
+    state_dir, _, _ = state_paths(workspace)
+    return state_dir / SERVER_HEARTBEAT_FILENAME
+
+
+def token_hint(token: str) -> str:
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+    return "sha256:%s;len:%s" % (digest, len(token))
+
+
+def build_server_heartbeat(
+    workspace: str | Path,
+    *,
+    host: str,
+    port: int,
+    token: str,
+    session_id: Optional[str] = None,
+    agent: Optional[str] = None,
+    agent_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    timestamp = now_utc()
+    payload: Dict[str, Any] = {
+        "schema": "agentcanvas.server_heartbeat.v1",
+        "pid": os.getpid(),
+        "host": host,
+        "port": int(port),
+        "workspace": str(resolve_workspace(workspace)),
+        "updated_at": timestamp,
+        "last_seen": timestamp,
+        "token_hint": token_hint(token),
+    }
+    if session_id:
+        payload["session_id"] = session_id
+    if agent:
+        payload["agent"] = agent
+    if agent_name:
+        payload["agent_name"] = agent_name
+    return payload
+
+
+def write_server_heartbeat(
+    workspace: str | Path,
+    *,
+    host: str,
+    port: int,
+    token: str,
+    session_id: Optional[str] = None,
+    agent: Optional[str] = None,
+    agent_name: Optional[str] = None,
+) -> Path:
+    path = server_heartbeat_path(workspace)
+    atomic_write_json(
+        path,
+        build_server_heartbeat(
+            workspace,
+            host=host,
+            port=port,
+            token=token,
+            session_id=session_id,
+            agent=agent,
+            agent_name=agent_name,
+        ),
+    )
+    return path
+
+
+def start_server_heartbeat(
+    workspace: str | Path,
+    *,
+    host: str,
+    port: int,
+    token: str,
+    session_id: Optional[str] = None,
+    agent: Optional[str] = None,
+    agent_name: Optional[str] = None,
+    interval_seconds: int = HEARTBEAT_INTERVAL_SECONDS,
+) -> Tuple[threading.Event, threading.Thread]:
+    stop_event = threading.Event()
+
+    def refresh() -> None:
+        while not stop_event.wait(interval_seconds):
+            write_server_heartbeat(
+                workspace,
+                host=host,
+                port=port,
+                token=token,
+                session_id=session_id,
+                agent=agent,
+                agent_name=agent_name,
+            )
+
+    write_server_heartbeat(
+        workspace,
+        host=host,
+        port=port,
+        token=token,
+        session_id=session_id,
+        agent=agent,
+        agent_name=agent_name,
+    )
+    thread = threading.Thread(target=refresh, name="agentcanvas-heartbeat", daemon=True)
+    thread.start()
+    return stop_event, thread
+
+
+def stop_server_heartbeat(heartbeat: Tuple[threading.Event, threading.Thread]) -> None:
+    stop_event, thread = heartbeat
+    stop_event.set()
+    thread.join(timeout=1)
+
+
+def canvas_store_error_status(error: CanvasStoreError) -> HTTPStatus:
+    if error.code == "REVISION_CONFLICT":
+        return HTTPStatus.CONFLICT
+    if error.code == "WORKSPACE_BUSY":
+        return HTTPStatus.LOCKED
+    return HTTPStatus.BAD_REQUEST
+
+
+def canvas_apply_author(workspace_assistant_id: str, payload: Dict[str, Any]) -> str:
+    authored_by = payload.get("authored_by")
+    if isinstance(authored_by, str) and authored_by.strip():
+        return authored_by.strip()
+    if workspace_assistant_id and workspace_assistant_id != "generic":
+        return workspace_assistant_id
+    return "agentcanvas-server"
+
+
+def load_or_build_canvas(
+    workspace: Path,
+    *,
+    refresh: bool = False,
+    demo_mode: bool = False,
+    demo_fallback: bool = False,
+) -> Dict[str, Any]:
+    demo_content = demo_mode or demo_fallback or is_demo_workspace(workspace)
+    if not refresh:
+        try:
+            canvas = load_canvas_ir(workspace)
+            if is_canvas_v2_document(canvas):
+                return with_workspace_profile(
+                    workspace,
+                    with_runtime_source_status(
+                        canvas_v2_compat_envelope(workspace, canvas),
+                        demo_content=demo_content,
+                        demo_fallback=demo_fallback,
+                    ),
+                )
+            if is_agent_authored_canvas(canvas):
+                return with_workspace_profile(
+                    workspace,
+                    with_runtime_source_status(
+                        preserve_agent_authored_canvas(workspace, canvas),
+                        demo_content=demo_content,
+                        demo_fallback=demo_fallback,
+                    ),
+                )
+            if canvas_cache_is_fresh(workspace):
+                return with_workspace_profile(
+                    workspace,
+                    with_runtime_source_status(
+                        canvas,
+                        demo_content=demo_content,
+                        demo_fallback=demo_fallback,
+                    ),
+                )
+        except FileNotFoundError:
+            pass
+    try:
+        graph = load_ir(workspace)
+    except FileNotFoundError:
+        graph = index_workspace(workspace)
+    canvas = build_behavior_canvas(graph, workspace=workspace, is_demo=demo_content)
+    canvas = with_runtime_source_status(
+        canvas,
+        demo_content=demo_content,
+        demo_fallback=demo_fallback,
+    )
+    save_canvas_ir(workspace, canvas)
+    return with_workspace_profile(workspace, canvas)
+
+
+def include_reindex_graph(parsed) -> bool:
+    values = parse_qs(parsed.query).get("includeGraph", [])
+    return any(str(value).lower() in {"1", "true", "yes"} for value in values)
+
+
+def is_canvas_v2_document(canvas: Dict[str, Any]) -> bool:
+    return canvas.get("schema") == CANVAS_V2_SCHEMA
+
+
+def canvas_v2_compat_envelope(workspace: Path, canvas_v2: Dict[str, Any]) -> Dict[str, Any]:
+    display_canvas = flatten_canvas_v2_for_display(workspace, canvas_v2)
+    flow_count = len(canvas_v2.get("flows") or [])
+    display_flow_count = len(display_canvas.get("journeys") or [])
+    source = canvas_source_metadata(
+        CanvasSourceKind.AGENT_AUTHORED,
+        CanvasSourceStatus.READY,
+        is_empty=flow_count == 0,
+        flow_count=flow_count,
+    )
+    metadata = display_canvas.setdefault("metadata", {})
+    if isinstance(metadata, dict):
+        metadata["source"] = source
+        projection = metadata.setdefault("projection", {})
+        if isinstance(projection, dict):
+            projection.setdefault("mode", CanvasMappingMode.V2_COMPAT.value)
+            projection.setdefault("engine", CanvasProjectionEngine.CANVAS_V2_FLATTEN.value)
+            projection.setdefault("displayFlowCount", display_flow_count)
+            projection.setdefault("warnings", [])
+
+    return {
+        "schema": BEHAVIOR_CANVAS_WRAPPER_SCHEMA,
+        "version": "0.1.0",
+        "revision": canvas_v2.get("revision", 0),
+        "canvas": display_canvas,
+        "canvas_v2": deepcopy(canvas_v2),
+        "mapping": {
+            "schema": CANVAS_MAPPING_SCHEMA,
+            "status": CanvasSourceStatus.READY.value,
+            "mode": CanvasMappingMode.AGENT_AUTHORED.value,
+            "primaryMode": CanvasMappingMode.AGENT_AUTHORED.value,
+            "flowCount": flow_count,
+            "displayFlowCount": display_flow_count,
+            "source": source,
+            "stale": False,
+            "empty": flow_count == 0,
+            "demoFallback": False,
+            "warnings": [],
+        },
+    }
+
+
+def flatten_canvas_v2_for_display(workspace: Path, canvas_v2: Dict[str, Any]) -> Dict[str, Any]:
+    external = load_canvas_v2_flattener()
+    if external:
+        flattened = call_canvas_v2_flattener(external, canvas_v2, workspace)
+        if isinstance(flattened, dict):
+            canvas = flattened.get("canvas") if isinstance(flattened.get("canvas"), dict) else flattened
+            if isinstance(canvas.get("journeys"), list):
+                return deepcopy(canvas)
+    return fallback_flatten_canvas_v2(canvas_v2)
+
+
+def load_canvas_v2_flattener():
+    for module_name in (
+        "agentcanvas.canvas_v2",
+        "agentcanvas.core.canvas_v2",
+        "agentcanvas.projection.canvas_v2",
+    ):
+        try:
+            module = __import__(module_name, fromlist=["flatten_canvas_v2"])
+        except ImportError:
+            continue
+        flattener = getattr(module, "flatten_canvas_v2", None)
+        if callable(flattener):
+            return flattener
+    return None
+
+
+def call_canvas_v2_flattener(flattener, canvas_v2: Dict[str, Any], workspace: Path):
+    try:
+        return flattener(canvas_v2, workspace=workspace)
+    except TypeError:
+        return flattener(canvas_v2)
+
+
+def fallback_flatten_canvas_v2(canvas_v2: Dict[str, Any]) -> Dict[str, Any]:
+    app = canvas_v2.get("app") if isinstance(canvas_v2.get("app"), dict) else {}
+    journeys = [
+        fallback_flatten_v2_flow(flow)
+        for flow in canvas_v2.get("flows") or []
+        if isinstance(flow, dict)
+    ]
+    journeys = [journey for journey in journeys if journey is not None]
+    return {
+        "schema": BEHAVIOR_CANVAS_SCHEMA,
+        "version": "0.1.0",
+        "appName": str(app.get("name") or "Your app"),
+        "journeys": journeys,
+        "isDemo": bool(app.get("is_demo")),
+        "thin": len(journeys) <= 2,
+        "metadata": {
+            "source_schema": canvas_v2.get("schema"),
+            "projection": {
+                "mode": CanvasMappingMode.V2_COMPAT.value,
+                "engine": CanvasProjectionEngine.LOCAL_FALLBACK.value,
+                "displayFlowCount": len(journeys),
+                "warnings": [],
+            },
+        },
+    }
+
+
+def fallback_flatten_v2_flow(flow: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    ordered_nodes = ordered_v2_nodes(flow)
+    if not ordered_nodes:
+        return None
+    title = str(flow.get("title") or flow.get("id") or "Workspace flow")
+    first = ordered_nodes[0]
+    return {
+        "id": str(flow.get("id") or title),
+        "title": title,
+        "summary": str(flow.get("summary") or "Mapped from your workspace canvas."),
+        "entry": str(first.get("title") or title),
+        "nodes": [
+            fallback_v2_node_to_display(node, index == 0)
+            for index, node in enumerate(ordered_nodes)
+        ],
+    }
+
+
+def ordered_v2_nodes(flow: Dict[str, Any]) -> list[Dict[str, Any]]:
+    nodes = [node for node in flow.get("nodes") or [] if isinstance(node, dict)]
+    if not nodes:
+        return []
+    by_id = {str(node.get("id")): node for node in nodes if node.get("id")}
+    outgoing: Dict[str, list[str]] = {}
+    for edge in flow.get("edges") or []:
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("source")
+        target = edge.get("target")
+        if source and target:
+            outgoing.setdefault(str(source), []).append(str(target))
+
+    ordered: list[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def visit(node_id: str) -> None:
+        if node_id in seen:
+            return
+        node = by_id.get(node_id)
+        if not node:
+            return
+        seen.add(node_id)
+        ordered.append(node)
+        for target_id in outgoing.get(node_id, []):
+            visit(target_id)
+
+    entry_node = flow.get("entry_node")
+    if entry_node:
+        visit(str(entry_node))
+    for node in nodes:
+        node_id = str(node.get("id") or "")
+        if node_id and node_id not in seen:
+            visit(node_id)
+        elif not node_id:
+            ordered.append(node)
+    return ordered
+
+
+def fallback_v2_node_to_display(node: Dict[str, Any], first: bool) -> Dict[str, Any]:
+    kind = str(node.get("kind") or "Do")
+    role = "when" if first or kind == "When" else "do"
+    refs = [
+        str(ref)
+        for ref in node.get("evidence_refs") or []
+        if isinstance(ref, (str, int, float))
+    ]
+    display: Dict[str, Any] = {
+        "kind": "step",
+        "id": str(node.get("id") or node.get("title") or role),
+        "role": role,
+        "text": str(node.get("title") or node.get("detail") or "Mapped step"),
+    }
+    if node.get("detail"):
+        display["detail"] = str(node["detail"])
+    if node.get("status") in {"inferred", "proposed", "stale"}:
+        display["uncertain"] = True
+    if refs:
+        display["tech"] = {"refs": refs}
+    return display
+
+
+def is_agent_authored_canvas(canvas: Dict[str, Any]) -> bool:
+    if is_canvas_v2_document(canvas):
+        return True
+    mapping = canvas.get("mapping") if isinstance(canvas.get("mapping"), dict) else {}
+    if mapping.get("mode") == CanvasMappingMode.AGENT_AUTHORED.value:
+        return True
+    source = mapping.get("source") if isinstance(mapping.get("source"), dict) else {}
+    if source.get("kind") == CanvasSourceKind.AGENT_AUTHORED.value:
+        return True
+    body = canvas.get("canvas") if isinstance(canvas.get("canvas"), dict) else canvas
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    source = metadata.get("source") if isinstance(metadata.get("source"), dict) else {}
+    if source.get("kind") == CanvasSourceKind.AGENT_AUTHORED.value:
+        return True
+    projection = metadata.get("projection") if isinstance(metadata.get("projection"), dict) else {}
+    if projection.get("mode") == CanvasMappingMode.AGENT_AUTHORED.value:
+        return True
+    return False
+
+
+def preserve_agent_authored_canvas(workspace: Path, canvas: Dict[str, Any]) -> Dict[str, Any]:
+    if canvas_cache_is_fresh(workspace):
+        return canvas
+    warning = (
+        "Workspace evidence was refreshed after this agent-authored canvas. "
+        "AgentCanvas kept the canvas file; ask the connected agent to refresh the map if behavior changed."
+    )
+    return with_runtime_source_status(
+        with_canvas_warning(canvas, warning),
+        stale=True,
+        stale_reason=warning,
+    )
+
+
+def with_canvas_warning(canvas: Dict[str, Any], warning: str) -> Dict[str, Any]:
+    next_canvas = deepcopy(canvas)
+    mapping = next_canvas.setdefault("mapping", {})
+    if isinstance(mapping, dict):
+        warnings = mapping.setdefault("warnings", [])
+        if isinstance(warnings, list) and warning not in warnings:
+            warnings.append(warning)
+    body = next_canvas.get("canvas") if isinstance(next_canvas.get("canvas"), dict) else next_canvas
+    metadata = body.setdefault("metadata", {})
+    if isinstance(metadata, dict):
+        projection = metadata.setdefault("projection", {})
+        if isinstance(projection, dict):
+            warnings = projection.setdefault("warnings", [])
+            if isinstance(warnings, list) and warning not in warnings:
+                warnings.append(warning)
+    return next_canvas
+
+
+def canvas_cache_is_fresh(workspace: Path) -> bool:
+    _, ir_path, _ = state_paths(workspace)
+    path = canvas_ir_path(workspace)
+    if not path.exists():
+        return False
+    if not ir_path.exists():
+        return True
+    return path.stat().st_mtime >= ir_path.stat().st_mtime
+
+
+def is_demo_workspace(workspace: Path) -> bool:
+    return (workspace / DEMO_MARKER_FILENAME).exists()
+
+
+def canvas_runtime_source(
+    workspace: Path,
+    *,
+    demo_mode: bool = False,
+    landing_mode: bool = False,
+    request_demo_mode: bool = False,
+) -> Dict[str, Any]:
+    demo_fallback = landing_mode and not request_demo_mode and is_demo_workspace(workspace)
+    demo_content = demo_mode or request_demo_mode or demo_fallback or is_demo_workspace(workspace)
+    if demo_fallback:
+        kind = CanvasSourceKind.DEMO_FALLBACK.value
+        status = CanvasSourceStatus.DEMO_FALLBACK.value
+        reason = CanvasSourceReason.LAUNCH_PAGE_WITHOUT_WORKSPACE.value
+    elif demo_content:
+        kind = CanvasSourceKind.DEMO.value
+        status = CanvasSourceStatus.DEMO.value
+        reason = (
+            CanvasSourceReason.REQUESTED_DEMO_WORKSPACE.value
+            if (demo_mode or request_demo_mode)
+            else CanvasSourceReason.DEMO_WORKSPACE.value
+        )
+    else:
+        kind = CanvasSourceKind.WORKSPACE.value
+        status = CanvasSourceStatus.WORKSPACE.value
+        reason = None
+    return {
+        "kind": kind,
+        "status": status,
+        "demoContent": demo_content,
+        "demoFallback": demo_fallback,
+        "demoFixture": workspace.name if demo_content else None,
+        "reason": reason,
+    }
+
+
+def with_runtime_source_status(
+    canvas: Dict[str, Any],
+    *,
+    demo_content: bool = False,
+    demo_fallback: bool = False,
+    stale: bool = False,
+    stale_reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    next_canvas = deepcopy(canvas)
+    body = next_canvas.get("canvas") if isinstance(next_canvas.get("canvas"), dict) else next_canvas
+    mapping = next_canvas.setdefault("mapping", {})
+    if not isinstance(mapping, dict):
+        mapping = {}
+        next_canvas["mapping"] = mapping
+    metadata = body.setdefault("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+        body["metadata"] = metadata
+
+    existing_source = metadata.get("source") if isinstance(metadata.get("source"), dict) else {}
+    existing_kind = str(
+        existing_source.get("kind")
+        or mapping.get("mode")
+        or CanvasSourceKind.HEURISTIC_PROJECTION.value
+    )
+    if existing_kind == CanvasMappingMode.DETERMINISTIC.value:
+        existing_kind = CanvasSourceKind.HEURISTIC_PROJECTION.value
+    existing_status = str(
+        mapping.get("status") or existing_source.get("status") or CanvasSourceStatus.READY.value
+    )
+    existing_empty = bool(existing_source.get("isEmpty") or mapping.get("empty"))
+    existing_stale = bool(existing_source.get("isStale") or mapping.get("stale"))
+    effective_stale = stale or existing_stale
+
+    kind = existing_kind
+    status = existing_status
+    reason = str(existing_source.get("reason")) if existing_source.get("reason") else None
+    is_fallback = bool(existing_source.get("isFallback"))
+    if demo_fallback:
+        kind = CanvasSourceKind.DEMO_FALLBACK.value
+        status = CanvasSourceStatus.DEMO_FALLBACK.value
+        reason = CanvasSourceReason.LAUNCH_PAGE_WITHOUT_WORKSPACE.value
+        is_fallback = True
+    elif demo_content and kind not in {
+        CanvasSourceKind.AGENT_AUTHORED.value,
+        CanvasSourceKind.EMPTY.value,
+    }:
+        kind = CanvasSourceKind.DEMO.value
+        status = CanvasSourceStatus.DEMO.value
+        reason = reason or CanvasSourceReason.DEMO_WORKSPACE.value
+    if effective_stale:
+        status = CanvasSourceStatus.STALE_CACHE.value
+        reason = stale_reason or reason
+
+    source = canvas_source_metadata(
+        kind,
+        status,
+        is_demo_content=demo_content,
+        is_fallback=is_fallback,
+        is_stale=effective_stale,
+        is_empty=existing_empty,
+        flow_count=0 if existing_empty else len(body.get("journeys") or []),
+        reason=reason,
+    )
+    metadata["source"] = source
+    body["isDemo"] = bool(body.get("isDemo") or demo_content)
+    mapping["status"] = status
+    mapping["mode"] = kind
+    mapping["source"] = source
+    mapping["stale"] = effective_stale
+    mapping["empty"] = existing_empty
+    mapping["demoFallback"] = demo_fallback
+    mapping.setdefault("displayFlowCount", len(body.get("journeys") or []))
+    if existing_empty:
+        mapping["flowCount"] = 0
+    projection = metadata.get("projection") if isinstance(metadata.get("projection"), dict) else {}
+    if projection:
+        projection["source_status"] = status
+        projection["source_kind"] = kind
+    return next_canvas
+
+
+def load_workspace_profile(workspace: Path) -> Dict[str, Any]:
+    try:
+        graph = load_ir(workspace)
+    except FileNotFoundError:
+        graph = None
+    return infer_workspace_profile(graph, workspace=workspace)
+
+
+def with_workspace_profile(workspace: Path, canvas: Dict[str, Any]) -> Dict[str, Any]:
+    body = canvas.get("canvas") if isinstance(canvas.get("canvas"), dict) else canvas
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    if isinstance(metadata.get("workspace_profile"), dict):
+        return canvas
+
+    next_canvas = deepcopy(canvas)
+    next_body = (
+        next_canvas.get("canvas")
+        if isinstance(next_canvas.get("canvas"), dict)
+        else next_canvas
+    )
+    next_body.setdefault("metadata", {})["workspace_profile"] = load_workspace_profile(workspace)
+    return next_canvas
 
 
 def make_handler(
@@ -118,6 +771,28 @@ def make_handler(
     session_id: Optional[str] = None,
 ):
     web_root = (Path(__file__).resolve().parent / "web").resolve()
+
+    def session_binding_for_token(candidate: Optional[str]) -> Tuple[bool, Optional[str]]:
+        if not isinstance(candidate, str) or not candidate:
+            return False, None
+        if secrets.compare_digest(token, candidate):
+            return True, session_id
+
+        launch_path = state_paths(workspace)[0] / "launch.json"
+        try:
+            with launch_path.open(encoding="utf-8") as handle:
+                launch_record = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return False, None
+        bindings = launch_record.get("session_tokens") if isinstance(launch_record, dict) else None
+        if not isinstance(bindings, dict):
+            return False, None
+        for session_token, bound_session_id in bindings.items():
+            if not isinstance(session_token, str) or not isinstance(bound_session_id, str):
+                continue
+            if secrets.compare_digest(session_token, candidate):
+                return True, bound_session_id
+        return False, None
 
     class AgentCanvasHandler(SimpleHTTPRequestHandler):
         server_version = "AgentCanvas/0.1"
@@ -155,7 +830,10 @@ def make_handler(
         def handle_api_get(self, parsed) -> None:
             if not self.authorized(parsed):
                 self.write_json(
-                    {"ok": False, "error": "missing or invalid token"},
+                    failure_payload(
+                        FailureId.TOKEN_INVALID,
+                        "missing or invalid token",
+                    ),
                     status=HTTPStatus.UNAUTHORIZED,
                 )
                 return
@@ -168,33 +846,151 @@ def make_handler(
                 self.write_json({"ok": True, "graph": graph})
                 return
 
+            if parsed.path == "/api/canvas":
+                request_demo_mode = self.request_demo_mode(parsed)
+                source = canvas_runtime_source(
+                    workspace,
+                    demo_mode=demo_mode,
+                    landing_mode=landing_mode,
+                    request_demo_mode=request_demo_mode,
+                )
+                canvas = load_or_build_canvas(
+                    workspace,
+                    demo_mode=source["demoContent"],
+                    demo_fallback=source["demoFallback"],
+                )
+                self.write_json({"ok": True, **canvas})
+                return
+
+            if parsed.path == "/api/canvas/history":
+                try:
+                    history = list_canvas_history(workspace)
+                except CanvasStoreError as exc:
+                    self.write_json(exc.to_dict(), status=canvas_store_error_status(exc))
+                    return
+                self.write_json(history)
+                return
+
+            if parsed.path == "/api/canvas/validate":
+                mode = parse_qs(parsed.query).get("mode", ["authoring"])[0]
+                try:
+                    canvas = load_or_build_canvas(workspace, demo_mode=demo_mode)
+                    canvas_v2 = canvas.get("canvas_v2")
+                    if not isinstance(canvas_v2, dict):
+                        self.write_json(
+                            CanvasStoreError(
+                                "CANVAS_V2_NOT_AVAILABLE",
+                                "canvas validation requires a native v2 canvas document",
+                                details={
+                                    "suggested_command": (
+                                        "agentcanvas canvas migrate --workspace <workspace> --apply"
+                                    )
+                                },
+                            ).to_dict(),
+                            status=HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    result = validate_canvas_v2(canvas_v2, mode=mode)
+                    self.write_json({"ok": True, "revision": canvas.get("revision"), **result})
+                except CanvasStoreError as exc:
+                    self.write_json(exc.to_dict(), status=canvas_store_error_status(exc))
+                return
+
             if parsed.path == "/api/pending":
-                self.write_json({"ok": True, "pending": list_pending(workspace)})
+                self.write_json(
+                    {
+                        "ok": True,
+                        "pending": list_pending(
+                            workspace,
+                            summary=True,
+                            session_id=self.request_session_id(parsed),
+                        ),
+                    }
+                )
+                return
+
+            pending_id = AgentCanvasHandler.pending_request_id(self, parsed.path)
+            if pending_id:
+                try:
+                    pending = get_pending_request(
+                        workspace,
+                        pending_id,
+                        since=parse_qs(parsed.query).get("since", [None])[0],
+                        session_id=self.request_session_id(parsed),
+                    )
+                except FileNotFoundError as exc:
+                    self.write_json(
+                        {"ok": False, "error": str(exc)},
+                        status=HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                self.write_json({"ok": True, "pending": pending})
+                return
+
+            if parsed.path == "/api/health":
+                self.write_json({"ok": True, "health": map_health(workspace)})
+                return
+
+            if parsed.path == "/api/progress":
+                try:
+                    self.write_json({"ok": True, "progress": progress_status(workspace)})
+                except ProgressError as exc:
+                    self.write_json(exc.to_dict(), status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
 
             if parsed.path == "/api/context":
                 request_session_id = self.request_session_id(parsed)
                 request_demo_mode = self.request_demo_mode(parsed)
                 effective_demo_mode = demo_mode or request_demo_mode
-                mode = (
-                    "landing"
-                    if landing_mode and not request_demo_mode
-                    else "demo"
-                    if effective_demo_mode
-                    else "workspace"
+                source = canvas_runtime_source(
+                    workspace,
+                    demo_mode=demo_mode,
+                    landing_mode=landing_mode,
+                    request_demo_mode=request_demo_mode,
                 )
+                workspace_profile = load_workspace_profile(workspace)
+                mode = (
+                    AppContextMode.LANDING.value
+                    if landing_mode and not request_demo_mode
+                    else AppContextMode.DEMO.value
+                    if effective_demo_mode
+                    else AppContextMode.WORKSPACE.value
+                )
+                canvas_handoff = canvas_map_handoff(workspace)
+                if mode == AppContextMode.LANDING.value:
+                    canvas_handoff = {
+                        **canvas_handoff,
+                        "readable": False,
+                        "needsAuthoring": False,
+                        "reason": CanvasHandoffReason.WORKSPACE_NOT_SELECTED.value,
+                        "workspacePath": "",
+                        "outputPath": "",
+                        "instruction": None,
+                    }
                 self.write_json(
                     {
                         "ok": True,
                         "context": {
                             "workspace": workspace.name,
-                            "workspacePath": "" if mode == "landing" else str(workspace),
+                            "workspacePath": "" if mode == AppContextMode.LANDING.value else str(workspace),
+                            "workspaceKind": workspace_profile["kind"],
+                            "workspaceProfile": workspace_profile,
+                            "productLanguage": workspace_profile["product_language"],
                             "assistantId": assistant_id,
                             "assistant": assistant_name,
                             "mode": mode,
                             "isDemo": effective_demo_mode,
-                            "demoFixture": workspace.name if effective_demo_mode else None,
+                            "isDemoContent": source["demoContent"],
+                            "demoFallback": source["demoFallback"],
+                            "demoFixture": source["demoFixture"],
+                            "source": source,
                             "sessionId": request_session_id,
+                            "agentPresence": agent_presence_status(workspace, session_id=request_session_id),
+                            "progress": safe_progress_status(workspace),
+                            "handoff": {
+                                "schema": "agentcanvas.handoff.v1",
+                                "canvasMap": canvas_handoff,
+                            },
                         },
                     }
                 )
@@ -208,14 +1004,107 @@ def make_handler(
         def handle_api_post(self, parsed) -> None:
             if not self.authorized(parsed):
                 self.write_json(
-                    {"ok": False, "error": "missing or invalid token"},
+                    failure_payload(
+                        FailureId.TOKEN_INVALID,
+                        "missing or invalid token",
+                    ),
                     status=HTTPStatus.UNAUTHORIZED,
                 )
                 return
 
             if parsed.path == "/api/reindex":
+                request_demo_mode = self.request_demo_mode(parsed)
+                source = canvas_runtime_source(
+                    workspace,
+                    demo_mode=demo_mode,
+                    landing_mode=landing_mode,
+                    request_demo_mode=request_demo_mode,
+                )
                 graph = index_workspace(workspace)
-                self.write_json({"ok": True, "graph": graph, "summary": graph["summary"]})
+                try:
+                    existing_canvas = load_canvas_ir(workspace)
+                except FileNotFoundError:
+                    existing_canvas = None
+                if existing_canvas and is_agent_authored_canvas(existing_canvas):
+                    canvas = with_runtime_source_status(
+                        preserve_agent_authored_canvas(workspace, existing_canvas),
+                        demo_content=source["demoContent"],
+                        demo_fallback=source["demoFallback"],
+                    )
+                else:
+                    canvas = build_behavior_canvas(
+                        graph,
+                        workspace=workspace,
+                        is_demo=source["demoContent"],
+                    )
+                    canvas = with_runtime_source_status(
+                        canvas,
+                        demo_content=source["demoContent"],
+                        demo_fallback=source["demoFallback"],
+                    )
+                    save_canvas_ir(workspace, canvas)
+                payload = {
+                    "ok": True,
+                    **with_workspace_profile(workspace, canvas),
+                    "summary": graph["summary"],
+                }
+                if include_reindex_graph(parsed):
+                    payload["graph"] = graph
+                self.write_json(payload)
+                return
+
+            if parsed.path == "/api/progress":
+                payload = self.read_json_body()
+                if payload is None:
+                    return
+                try:
+                    write_progress(
+                        workspace,
+                        stage=payload.get("stage"),
+                        message=payload.get("message"),
+                        current=payload.get("current"),
+                        total=payload.get("total"),
+                    )
+                    self.write_json({"ok": True, "progress": progress_status(workspace)})
+                except ProgressError as exc:
+                    self.write_json(exc.to_dict(), status=HTTPStatus.BAD_REQUEST)
+                return
+
+            if parsed.path == "/api/canvas/apply":
+                payload = self.read_json_body()
+                if payload is None:
+                    return
+                try:
+                    result = apply_operation_batch(
+                        workspace,
+                        payload,
+                        base_revision=payload.get("base_revision"),
+                        authored_by=canvas_apply_author(assistant_id, payload),
+                    )
+                except CanvasStoreError as exc:
+                    self.write_json(
+                        exc.to_dict(),
+                        status=canvas_store_error_status(exc),
+                    )
+                    return
+                self.write_json(result)
+                return
+
+            if parsed.path == "/api/canvas/restore":
+                payload = self.read_json_body()
+                if payload is None:
+                    return
+                try:
+                    result = restore_canvas_revision(
+                        workspace,
+                        payload.get("revision"),
+                        base_revision=payload.get("base_revision"),
+                        authored_by=canvas_apply_author(assistant_id, payload),
+                    )
+                except CanvasStoreError as exc:
+                    self.write_json(exc.to_dict(), status=canvas_store_error_status(exc))
+                    return
+                self.write_json(result)
                 return
 
             if parsed.path == "/api/changes":
@@ -258,12 +1147,58 @@ def make_handler(
                         status=HTTPStatus.BAD_REQUEST,
                     )
                     return
+                evidence = payload.get("evidence")
+                if evidence is None:
+                    evidence = payload.get("verification")
+                if evidence is not None and not isinstance(evidence, dict):
+                    self.write_json(
+                        {"ok": False, "error": "evidence must be a JSON object"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                actor = payload.get("actor")
                 try:
                     pending = update_pending_status(
                         workspace,
                         pending_id,
                         status,
                         note=note if isinstance(note, str) else None,
+                        actor=actor.strip() if isinstance(actor, str) and actor.strip() else assistant_id,
+                        evidence=evidence,
+                        enforce_transitions=True,
+                        session_id=self.request_session_id(parsed, payload),
+                    )
+                except (FileNotFoundError, ValueError) as exc:
+                    self.write_json(
+                        {"ok": False, "error": str(exc)},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                self.write_json({"ok": True, "pending": pending})
+                return
+
+            answer_pending_id = self.pending_answer_id(parsed.path)
+            if answer_pending_id:
+                payload = self.read_json_body()
+                if payload is None:
+                    return
+                text = payload.get("answer") or payload.get("text")
+                if not isinstance(text, str) or not text.strip():
+                    self.write_json(
+                        {"ok": False, "error": "answer text is required"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                try:
+                    answer_session_id = self.request_session_id(parsed, payload)
+                    pending = append_pending_conversation(
+                        workspace,
+                        answer_pending_id,
+                        role=ConversationRole.USER.value,
+                        kind=ConversationTurnKind.ANSWER.value,
+                        text=text,
+                        actor=answer_session_id or "agentcanvas-web",
+                        session_id=answer_session_id,
                     )
                 except (FileNotFoundError, ValueError) as exc:
                     self.write_json(
@@ -286,13 +1221,25 @@ def make_handler(
             bearer_token = None
             if auth.startswith("Bearer "):
                 bearer_token = auth[len("Bearer ") :].strip()
-            return token in {query_token, header_token, bearer_token}
+            return any(
+                session_binding_for_token(candidate)[0]
+                for candidate in (query_token, header_token, bearer_token)
+            )
 
         def request_session_id(
             self,
             parsed,
             payload: Optional[Dict[str, Any]] = None,
         ) -> Optional[str]:
+            headers = getattr(self, "headers", {})
+            query_token = parse_qs(parsed.query).get("token", [None])[0]
+            header_token = headers.get("X-AgentCanvas-Token")
+            auth = headers.get("Authorization", "")
+            bearer_token = auth[len("Bearer ") :].strip() if auth.startswith("Bearer ") else None
+            for candidate in (query_token, header_token, bearer_token):
+                authorized_token, bound_session_id = session_binding_for_token(candidate)
+                if authorized_token and bound_session_id:
+                    return bound_session_id
             query = parse_qs(parsed.query)
             values = [
                 *(query.get("sessionId") or []),
@@ -308,6 +1255,21 @@ def make_handler(
                 if isinstance(value, str) and value.strip():
                     return value.strip()
             return None
+
+        def pending_request_id(self, path: str) -> Optional[str]:
+            prefix = "/api/pending/"
+            if not path.startswith(prefix) or path.endswith("/answer"):
+                return None
+            pending_id = path[len(prefix) :].strip("/")
+            return unquote(pending_id) if pending_id else None
+
+        def pending_answer_id(self, path: str) -> Optional[str]:
+            prefix = "/api/pending/"
+            suffix = "/answer"
+            if not path.startswith(prefix) or not path.endswith(suffix):
+                return None
+            pending_id = path[len(prefix) : -len(suffix)].strip("/")
+            return unquote(pending_id) if pending_id else None
 
         def request_demo_mode(self, parsed) -> bool:
             value = parse_qs(parsed.query).get("demo", [""])[0]

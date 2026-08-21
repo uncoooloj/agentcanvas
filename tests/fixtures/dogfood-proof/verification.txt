@@ -1,0 +1,2 @@
+command: python3.9 scripts/verify_release.py
+result: passed

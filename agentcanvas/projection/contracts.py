@@ -8,6 +8,11 @@ from pathlib import PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional
 
 from agentcanvas.ir import SCHEMA as WORKFLOW_IR_SCHEMA
+from agentcanvas.core.facts import (
+    FACT_SELECTION_STRATEGY,
+    merge_fact_selection_metadata,
+    prioritize_facts,
+)
 
 SOURCE_FACTS_SCHEMA = "agentcanvas.source_facts.v1"
 CANVAS_QUERY_SCHEMA = "agentcanvas.canvas_query.v1"
@@ -47,6 +52,34 @@ SOURCE_FACTS_JSON_SCHEMA: Dict[str, Any] = {
                         "maximum": 1,
                     },
                 },
+            },
+        },
+        "fact_selection": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "strategy",
+                "max_facts",
+                "chunk_index",
+                "chunk_count",
+                "total_facts",
+                "included_facts",
+                "omitted_facts",
+                "complete",
+            ],
+            "properties": {
+                "strategy": {"const": FACT_SELECTION_STRATEGY},
+                "max_facts": {"type": "integer", "minimum": 0},
+                "chunk_index": {"type": "integer", "minimum": 0},
+                "chunk_count": {"type": "integer", "minimum": 0},
+                "total_facts": {"type": "integer", "minimum": 0},
+                "included_facts": {"type": "integer", "minimum": 0},
+                "omitted_facts": {"type": "integer", "minimum": 0},
+                "complete": {"type": "boolean"},
+                "included_by_kind": {"type": "object"},
+                "omitted_by_kind": {"type": "object"},
+                "omitted_fact_ids": {"type": "array", "items": {"type": "string"}},
+                "omitted_fact_ids_truncated": {"type": "boolean"},
             },
         },
         "warnings": {"type": "array", "items": {"type": "string"}},
@@ -172,16 +205,23 @@ PROJECTION_CONTRACT_JSON_SCHEMA: Dict[str, Any] = {
 
 SYSTEM_PROMPT = """You project grounded repository facts into AgentCanvas canvas query JSON.
 
-AgentCanvas is usually invoked by an LLM or coding agent. Treat LLM-assisted
-repo understanding as the core projection path: translate grounded facts into
-human-readable flow language that can be shown on the canvas. Language modules
-are grounding, chunking, and provenance providers. They improve precision, but
-they are not required to be perfect parsers before useful projection can happen.
+AgentCanvas is usually invoked by an LLM or coding agent. The invoking agent
+should read the projection contract, source_facts, and repo app_surfaces before
+generating or applying a query. Treat LLM-assisted repo understanding as the
+core projection path: translate grounded facts into human-readable AgentCanvas
+journeys using When, Do, If, ElseIf, and Else language that can be shown on the
+canvas. Language modules are grounding, chunking, and provenance providers. They
+improve precision, but they are not required to be perfect parsers before useful
+projection can happen.
 
 Use only supplied source facts as evidence. Do not invent routes, files, tests,
 services, or relationships that are not supported by fact_ids. If a useful
-canvas relationship is uncertain, omit it or add a warning. Output only JSON
-matching the response schema.
+canvas relationship is uncertain, omit it or add a warning. Do not turn a raw
+file inventory into top-level journeys. If the request or facts are unclear
+enough that applying the result would be misleading, the invoking agent should
+ask clarifying questions before applying; if you must return JSON, return only
+grounded partial operations plus warnings. Output only JSON matching the response
+schema.
 
 When the repo summary includes app_surfaces, treat those as app/workspace lanes
 inside a human journey. For example, signup in a monorepo is usually one
@@ -194,14 +234,21 @@ USER_PROMPT_TEMPLATE = """Project these grounded facts into AgentCanvas canvas q
 
 Return JSON with schema "{canvas_query_schema}". Use mode "llm-assisted".
 Every operation should cite fact_ids. Prefer stable node IDs from facts when
-available. Use concise, human-readable labels that explain the repo flow. The
-result will be validated before AgentCanvas accepts it.
+available. Use concise, human-readable labels that explain the repo flow as
+AgentCanvas journeys. Represent steps with When, Do, If, ElseIf, and Else
+language where the available facts support it. Use app_surfaces as journey lanes
+or participants, not as separate top-level journeys unless the actor, outcome,
+or business rule differs. Do not create top-level journeys from a raw file
+inventory. The result will be validated before AgentCanvas accepts it.
 
 Repository summary:
 {repo_summary}
 
 Source facts:
 {source_facts}
+
+Fact selection and completeness:
+{fact_selection}
 
 Canvas query response schema:
 {response_schema}
@@ -234,13 +281,20 @@ def build_projection_contract(
         "response_schema": deepcopy(CANVAS_QUERY_JSON_SCHEMA),
         "instructions": [
             "Treat LLM-assisted projection as the primary path.",
+            "The invoking agent must read source_facts, the projection contract, and repo app_surfaces before generating or applying a query.",
+            "Check source_facts.fact_selection before mapping; when complete is false, treat omitted facts as unknown and use the supplied omission metadata to avoid claiming full repository coverage.",
+            "If the requested projection or available facts are unclear, ask concise clarifying questions before applying a query; do not execute unclear changes blindly.",
             "Use language-module facts as grounding evidence, not as a complete parser output.",
+            "Generate human-readable AgentCanvas journeys using When, Do, If, ElseIf, and Else language.",
             "For monorepos, group behavior by human journey first, then use app_surfaces as lanes or drilldowns.",
             "Represent cross-surface handoffs only when route, call, import, event, or entrypoint facts support them.",
+            "Do not create top-level journeys from raw file inventories; files, tests, and services belong in provenance, details, or supporting nodes.",
             "Use only source_facts as evidence.",
             "Return JSON only; no Markdown wrapper.",
             "Set mode to llm-assisted.",
             "Cite fact_ids on every operation.",
+            "Carry provenance in operation fact_ids, and include human-auditable evidence in node or edge data when useful.",
+            "Progressive mapping is acceptable: return partial grounded journeys with warnings instead of pretending the whole app is understood.",
             "Prefer omission plus warning over unsupported inference.",
         ],
     }
@@ -260,6 +314,7 @@ def build_projection_prompt(
         canvas_query_schema=CANVAS_QUERY_SCHEMA,
         repo_summary=json.dumps(fact_bundle["repo"], indent=2, sort_keys=True),
         source_facts=json.dumps(fact_bundle["facts"], indent=2, sort_keys=True),
+        fact_selection=json.dumps(fact_bundle.get("fact_selection") or {}, indent=2, sort_keys=True),
         response_schema=json.dumps(contract["response_schema"], indent=2, sort_keys=True),
     )
     return {
@@ -290,19 +345,25 @@ def normalize_fact_bundle(
         bundle = deepcopy(source)
         if repo_summary:
             bundle["repo"] = _merge_repo_summary(bundle.get("repo") or {}, repo_summary)
-        bundle["facts"] = _limit_facts(bundle.get("facts") or [], max_facts)
+        facts, selection = prioritize_facts(bundle.get("facts") or [], max_facts)
+        bundle["facts"] = facts
+        bundle["fact_selection"] = merge_fact_selection_metadata(
+            bundle.get("fact_selection"), selection
+        )
         return bundle
 
     if source.get("schema") == WORKFLOW_IR_SCHEMA:
         return facts_from_workflow_ir(source, repo_summary, max_facts=max_facts)
 
+    facts, selection = prioritize_facts(source.get("facts") or [], max_facts)
     return {
         "schema": SOURCE_FACTS_SCHEMA,
         "version": "0.1.0",
         "repo": repo_summary or {},
-        "facts": _limit_facts(source.get("facts") or [], max_facts),
+        "facts": facts,
+        "fact_selection": selection,
         "warnings": [
-            "Source did not declare a known schema; facts were passed through as-is."
+            "Source did not declare a known schema; facts were normalized and bounded."
         ],
     }
 
@@ -332,11 +393,13 @@ def facts_from_workflow_ir(
     for edge in workflow_ir.get("edges") or []:
         facts.append(_edge_fact(edge))
 
+    facts, selection = prioritize_facts(facts, max_facts)
     return {
         "schema": SOURCE_FACTS_SCHEMA,
         "version": "0.1.0",
         "repo": repo,
-        "facts": _limit_facts(facts, max_facts),
+        "facts": facts,
+        "fact_selection": selection,
         "warnings": [],
     }
 
@@ -492,16 +555,11 @@ def _path_evidence(paths: Iterable[Any]) -> List[Dict[str, str]]:
     evidence = []
     for path in paths:
         if isinstance(path, str) and path:
-            evidence.append({"path": PurePosixPath(path).as_posix()})
+            evidence.append({"path": PurePosixPath(path.replace("\\", "/")).as_posix()})
     return evidence
 
 
 def _limit_facts(facts: Iterable[Dict[str, Any]], max_facts: int) -> List[Dict[str, Any]]:
-    limited = []
-    for fact in facts:
-        if not isinstance(fact, dict):
-            continue
-        limited.append(fact)
-        if len(limited) >= max_facts:
-            break
-    return limited
+    """Backward-compatible wrapper for callers that used the old private helper."""
+
+    return prioritize_facts(facts, max_facts)[0]

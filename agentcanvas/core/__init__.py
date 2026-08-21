@@ -7,6 +7,14 @@ from .app_surface import (
     detect_app_surfaces,
     enrich_app_surfaces,
 )
+from .behavior_canvas import (
+    BEHAVIOR_CANVAS_SCHEMA,
+    build_agent_authored_canvas,
+    build_behavior_canvas,
+    parse_pyproject_scripts,
+    workflow_ir_to_behavior_canvas,
+)
+from .facts import FACT_SELECTION_STRATEGY, fact_priority, fact_selection_metadata, prioritize_facts
 from .mapper import repo_facts_to_canvas_model
 from .model import (
     CANVAS_SCHEMA,
@@ -37,11 +45,18 @@ from .model import (
     validate_canvas_model,
     validate_repo_facts,
 )
+from .workspace_profile import (
+    WORKSPACE_PROFILE_SCHEMA,
+    infer_workspace_profile,
+)
 
 __all__ = [
+    "BEHAVIOR_CANVAS_SCHEMA",
     "CANVAS_SCHEMA",
     "CORE_SCHEMA",
+    "WORKSPACE_PROFILE_SCHEMA",
     "CallFact",
+    "FACT_SELECTION_STRATEGY",
     "CanvasModel",
     "CanvasStep",
     "Confidence",
@@ -62,14 +77,22 @@ __all__ = [
     "app_surface_for_path",
     "app_surface_id_for_path",
     "all_fact_ids",
+    "build_agent_authored_canvas",
+    "build_behavior_canvas",
     "detect_app_surfaces",
     "enrich_app_surfaces",
+    "fact_priority",
+    "fact_selection_metadata",
+    "infer_workspace_profile",
     "make_fact_id",
     "normalize_canvas_model",
     "normalize_http_method",
     "normalize_path",
     "normalize_repo_facts",
+    "parse_pyproject_scripts",
+    "prioritize_facts",
     "repo_facts_to_canvas_model",
     "validate_canvas_model",
     "validate_repo_facts",
+    "workflow_ir_to_behavior_canvas",
 ]

@@ -1,0 +1,49 @@
+name: Dogfood run
+description: Record a real end-to-end AgentCanvas trial.
+title: "[Dogfood]: "
+labels:
+  - dogfood
+body:
+  - type: input
+    id: workspace
+    attributes:
+      label: Workspace tested
+      description: Repo type is enough if the repo is private.
+      placeholder: Next.js checkout app, FastAPI backend, Laravel app, monorepo
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent used
+      options:
+        - Codex
+        - Claude Code
+        - Cursor
+        - Antigravity
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: path
+    attributes:
+      label: What path did you try?
+      description: Describe the flow from first command through the point where you stopped.
+      placeholder: I pasted the bootstrap prompt, opened the canvas, asked it to change checkout, answered one question, and watched the map update.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Result
+      description: What worked, what broke, and where did trust drop?
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Triage class
+      options:
+        - blocks-gate
+        - launch-note
+        - post-launch

@@ -3,7 +3,12 @@
   "name": "agentcanvas",
   "main": "deploy/cloudflare/agentcanvas-worker.js",
   "compatibility_date": "2026-06-19",
-  "workers_dev": false,
+  "workers_dev": true,
+  "build": {
+    "command": "npm ci && npm run build:agentcanvas",
+    "cwd": "frontend",
+    "watch_dir": "frontend"
+  },
   "assets": {
     "directory": "./dist/cloudflare-agentcanvas",
     "binding": "ASSETS",

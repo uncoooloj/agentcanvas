@@ -1127,4 +1127,4 @@ def is_test_path(rel: str) -> bool:
 
 
 def to_posix(path: Path | PurePosixPath | str) -> str:
-    return PurePosixPath(str(path)).as_posix()
+    return PurePosixPath(str(path).replace("\\", "/")).as_posix()

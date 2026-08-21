@@ -33,6 +33,13 @@ class ProjectionContractTests(unittest.TestCase):
             "Treat LLM-assisted projection as the primary path.",
             contract["instructions"],
         )
+        instructions = "\n".join(contract["instructions"])
+        self.assertIn("source_facts", instructions)
+        self.assertIn("repo app_surfaces", instructions)
+        self.assertIn("ask concise clarifying questions", instructions)
+        self.assertIn("When, Do, If, ElseIf, and Else", instructions)
+        self.assertIn("Do not create top-level journeys from raw file inventories", instructions)
+        self.assertIn("Progressive mapping is acceptable", instructions)
 
     def test_projection_prompt_is_provider_and_agent_agnostic(self):
         prompt = build_projection_prompt(SAMPLE_SOURCE_FACTS)
@@ -42,7 +49,13 @@ class ProjectionContractTests(unittest.TestCase):
         response_schema_name = prompt["response_schema"]["properties"]["schema"]["const"]
         self.assertEqual(response_schema_name, CANVAS_QUERY_SCHEMA)
         self.assertIn("grounding, chunking, and provenance providers", prompt_text)
+        self.assertIn("When, Do, If, ElseIf, and Else", prompt_text)
+        self.assertIn("app_surfaces", prompt_text)
+        self.assertIn("raw file invent", prompt_text)
         self.assertNotIn("Codex", prompt_text)
+        self.assertNotIn("Claude", prompt_text)
+        self.assertNotIn("Cursor", prompt_text)
+        self.assertNotIn("Antigravity", prompt_text)
 
     def test_sample_facts_prompt_and_canvas_model_validate(self):
         sample = build_sample_projection()
@@ -57,6 +70,24 @@ class ProjectionContractTests(unittest.TestCase):
         self.assertEqual(canvas_model["schema"], WORKFLOW_IR_SCHEMA)
         self.assertEqual(canvas_model["summary"]["nodes"], 3)
         self.assertEqual(canvas_model["summary"]["edges"], 2)
+        checkout_node = next(
+            node for node in canvas_model["nodes"] if node["id"] == "flow:checkout"
+        )
+        self.assertEqual(
+            ["fact:file:src/checkout.js"],
+            checkout_node["data"]["projection"]["fact_ids"],
+        )
+        self.assertEqual(
+            "Checkout",
+            checkout_node["data"]["journey"]["title"],
+        )
+        self.assertEqual(
+            ["When", "Do"],
+            [
+                step["kind"]
+                for step in checkout_node["data"]["journey"]["steps"]
+            ],
+        )
 
     def test_heuristic_projection_materializes_existing_canvas_facts(self):
         workflow_ir = {

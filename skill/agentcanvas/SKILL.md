@@ -5,188 +5,150 @@ description: Launch and use AgentCanvas, a local workflow canvas for AI coding a
 
 # AgentCanvas
 
-Use AgentCanvas to turn a workspace into a local workflow canvas and then into
-agent-ready implementation requests.
+AgentCanvas is the shared local workflow canvas for this workspace. Use it to
+turn source-code behavior into plain-English journeys, keep the canvas editable,
+and create implementation requests only when source-code work is explicitly
+needed.
 
-Keep the workflow simple: index, inspect, create/request, clarify, implement,
-verify, update status, re-index.
+## Start Here
 
-## Core Rules
+1. Run `agentcanvas --help` to confirm the CLI is available.
+2. Call `uvx --from 'use-agentcanvas[mcp]' agentcanvas mcp` tools when your agent supports MCP.
+3. If MCP is not available, use the CLI and files under `.agentcanvas/`.
+4. Start each turn by checking workspace status and unanswered questions.
 
-- Treat `.agentcanvas/` as the shared contract.
-- Treat `.agentcanvas/pending/*.md` as the human-readable task brief.
-- Treat `.agentcanvas/pending/*.json` as structured context for tools.
-- Do not edit source code just because a canvas node changed; implement only an
-  explicit pending request.
-- Before executing a pending request, inspect the request and current workspace
-  context.
-- Start implementation only when the requested change, affected flow or step,
-  acceptance criteria, and verification path are clear.
-- If anything is ambiguous, risky, incomplete, or contradicted by the current
-  workspace, ask concise plain-language clarifying questions and wait.
-- Do not mark a request done until the implementation was verified.
-- Do not run migrations, seeds, deploys, or destructive commands without
-  explicit user permission.
-- If no live agent/session is connected, use copy fallback.
+Preferred MCP order:
 
-## Check The CLI
+1. `agentcanvas_agent_heartbeat` with your agent name and current session id when available.
+2. `agentcanvas_workspace_status`
+3. `agentcanvas_get_answers`
+4. `agentcanvas_get_canvas`
+5. `agentcanvas_get_evidence`
+6. `agentcanvas_record_progress`
 
-Start by checking the installed command:
+The heartbeat is what lets the local page know an agent is genuinely available.
+Do not claim a request until you have read it and are ready to begin work.
+
+CLI fallback:
 
 ```bash
-agentcanvas --help
-```
-
-If `agentcanvas` is not installed and this is the AgentCanvas source repo,
-install it locally:
-
-```bash
-python3 -m pip install -e .
-```
-
-## Real Workspace
-
-Index the workspace:
-
-```bash
-agentcanvas index --workspace <workspace>
-```
-
-Start the local canvas:
-
-```bash
-agentcanvas start --workspace <workspace> --port 8765
-```
-
-If the calling agent has a stable session id, pass it through:
-
-```bash
-agentcanvas start --workspace <workspace> --port 8765 --session-id <session-id>
-```
-
-Open the printed URL when your environment can open browsers. Otherwise give
-the URL to the user.
-
-## No Workspace And Demo
-
-Use the no-workspace landing when no project is selected:
-
-```bash
-agentcanvas start --port 8765
-```
-
-Use explicit demo mode for the bundled sample project:
-
-```bash
-agentcanvas start --demo --port 8765
-```
-
-In demo mode, keep saying that it is demo mode. Do not imply the demo is the
-user's own repo.
-
-## Pending Request Loop
-
-List pending requests:
-
-```bash
+agentcanvas health --workspace <workspace>
 agentcanvas pending --workspace <workspace>
 ```
 
-Read the selected `.md` first. Read the matching `.json` for structured ids,
-affected files, flow or step references, and acceptance criteria. Inspect the
-current workspace context before editing so you know whether the request still
-matches the code.
+## Local Files
 
-Before entering execution mode, confirm these four things:
+- `.agentcanvas/workflow.ir.json` is raw repo evidence.
+- `.agentcanvas/canvas.ir.json` is the stored revisioned canvas.
+- `.agentcanvas/pending/*.md` is the readable implementation brief.
+- `.agentcanvas/pending/*.json` is structured implementation context.
+- `.agentcanvas/pending/*.conversation.jsonl` stores questions, answers, and notes.
 
-- the requested change is specific enough to implement
-- the affected flow, journey, step, route, or behavior is identified
-- the acceptance criteria say what a good result looks like
-- the verification path is clear, such as a test, smoke check, or manual path
+## Canvas Rules
 
-If any item is missing, ambiguous, risky, incomplete, or contradicted by the
-current workspace, do not guess and do not mark the request `in_progress`. Ask
-the fewest useful clarifying questions in plain language:
+- Update canvas-only changes through `agentcanvas canvas apply`.
+- Do not edit source code just because a canvas node changed.
+- Preserve stable flow, node, and edge ids for unchanged behavior.
+- Preserve evidence refs whenever possible.
+- Run `record_sync` in the same turn as code changes that alter behavior.
+- Use plain-English titles for visible canvas text.
+- Keep file paths, API names, framework terms, and schema jargon out of visible titles.
+
+Node kinds:
+
+- `When`: the user, system, time, webhook, job, or event that starts behavior.
+- `Do`: something the app does.
+- `Decision`: a user-visible or business-rule branch.
+- `Loop`: repeated behavior with body and exit paths.
+- `Parallel`: independent work that can happen side-by-side.
+- `Join`: where parallel paths come back together.
+- `Wait`: waiting for time, user input, an external event, or another system.
+- `SubFlow`: handoff to another flow.
+- `End`: where the flow stops.
+
+## Pending Request Loop
+
+Pending requests are for explicit source-code implementation work.
+
+Before execution mode, confirm:
+
+- the requested change is specific
+- the affected flow, step, route, or behavior is identified
+- the acceptance criteria are clear
+- the verification path is clear
+
+If anything is ambiguous, ask first:
 
 ```bash
-agentcanvas status --workspace <workspace> <pending-id> --status needs_input --note "I need one decision before editing: should this change apply to checkout only, or to every order flow?"
+agentcanvas reply --workspace <workspace> <pending-id> --question "Short plain-language question?"
 ```
 
-Keep questions short enough for a non-technical user to answer. Ask about the
-user-visible behavior, affected flow or step, acceptance criteria, verification
-expectation, or safety permission that is blocking work.
+Then wait for an answer. Do not mark unclear work `in_progress`.
 
-Only after the request is clear, mark work in progress:
+When the request is clear:
 
 ```bash
 agentcanvas status --workspace <workspace> <pending-id> --status in_progress
 ```
 
-After implementation, run the relevant test or smoke check, then re-index:
+After implementation, verify the change, refresh evidence, and update status:
 
 ```bash
 agentcanvas index --workspace <workspace>
+agentcanvas status --workspace <workspace> <pending-id> --status implemented --note "Implemented."
+agentcanvas status --workspace <workspace> <pending-id> --status verified --note "Verified." --evidence-check "<command or smoke test>" --evidence-result "passed" --evidence-actor "<agent name>"
+agentcanvas status --workspace <workspace> <pending-id> --status done --note "Done."
 ```
 
-Mark done only after verification:
+`verified` always requires evidence. Never mark a request `done` unless the
+implementation has actually been verified.
+
+## Safety
+
+- Do not run migrations, seeds, deploys, destructive commands, or production
+  mutations without explicit user permission.
+- If the workspace contradicts a pending request, ask before editing.
+- If no live session is connected, use copy fallback instead of pretending a
+  request was sent.
+
+## Launching The Browser
+
+For a real workspace:
 
 ```bash
-agentcanvas status --workspace <workspace> <pending-id> --status done --note "Implemented and verified."
+agentcanvas index --workspace <workspace>
+agentcanvas up <workspace> --port 8765
 ```
 
-Use `blocked` when progress cannot continue without an external change.
+For no workspace, the lower-level server command
+`agentcanvas start --port 8765` opens the landing page only.
+
+For the bundled sample, the lower-level server command
+`agentcanvas start --demo --port 8765` opens demo mode.
+Keep saying it is demo mode when the sample project is shown.
+
+## Applying Canvas Edits
+
+Read `.agentcanvas/canvas.ir.json`, get its current `revision`, then apply an
+operation batch:
+
+```bash
+agentcanvas canvas apply --workspace <workspace> --base-revision <revision> --input <ops.json>
+```
+
+Use `allow_rewrite.reason` only for intentional large rewrites. Smaller edits
+should preserve ids and provenance.
 
 ## Copy Fallback
 
-When no adapter or live session is available, provide a copyable prompt instead
-of pretending to send work.
-
-Include:
-
-- workspace path
-- pending Markdown path
-- pending JSON path
-- acceptance criteria
-- reminder to inspect the workspace context before editing
-- instruction to ask concise clarifying questions before execution if the
-  requested change, affected flow or step, acceptance criteria, or verification
-  path is unclear
-- exact status commands
-- reminder to test and re-index
-
-For portable prompt snippets, read `references/agent-prompts.md`.
-
-## Integration Paths
-
-- **Skill**: this skill is the portable first path.
-- **Local API**: the browser/server path uses `/api/context`, `/api/graph`,
-  `/api/pending`, `/api/changes`, `/api/status`, and `/api/reindex`.
-- **MCP**: if MCP tools exist, use them only as wrappers around the same actions:
-  get context, list pending, create request, update status, and re-index.
-- **Webhooks**: if webhook support exists, use it for status/reply events, not
-  direct source edits.
-
-Keep every path aligned with the same pending request lifecycle.
-
-## LLM Projection
-
-If a caller LLM generates `agentcanvas.canvas_query.v1` JSON from the projection
-contract, validate before writing:
+If MCP or a live adapter is not available, offer agent-specific MCP enablement
+before giving the user a copyable prompt. For Codex, say that AgentCanvas can
+write the global `~/.codex/config.toml` only after opt-in:
 
 ```bash
-agentcanvas apply-query --workspace <workspace> --query <canvas-query.json> --dry-run
+agentcanvas setup --agent codex --workspace <workspace> --write-codex-config
 ```
 
-Apply only after validation passes and the user wants it:
-
-```bash
-agentcanvas apply-query --workspace <workspace> --query <canvas-query.json>
-```
-
-## Adding Languages
-
-When adding or reviewing language support, read
-`references/language-support.md`.
-
-Language modules should emit grounded facts with provenance. The projection
-layer can turn those facts into human-readable canvas flows.
+If the user does not opt in, give a copyable prompt that names the workspace,
+pending request files, acceptance criteria, status commands, and the
+verification expectation.

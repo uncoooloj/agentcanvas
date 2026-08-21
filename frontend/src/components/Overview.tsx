@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react"
 import {
+  AlertCircle,
   ArrowRight,
   CalendarClock,
   CreditCard,
+  Info,
   Loader2,
   Mail,
   MessageSquare,
@@ -17,20 +19,22 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { countSteps, type Journey } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import { CanvasSourceTone, JourneyActivity, countSteps, type CanvasSourceSummary, type Journey } from "@/lib/types"
+import type { ProductLanguage } from "@/lib/appcontext"
 import type { ChangeEntry } from "@/lib/changeset"
-
-type JourneyActivity = "idle" | "edited" | "working"
 
 interface Props {
   appName: string
+  productLanguage?: ProductLanguage
+  source?: CanvasSourceSummary
   journeys: Journey[]
   changes: ChangeEntry[]
   activity: Map<string, JourneyActivity>
   onOpen: (id: string) => void
 }
 
-export function Overview({ appName, journeys, changes, activity, onOpen }: Props) {
+export function Overview({ appName, productLanguage, source, journeys, changes, activity, onOpen }: Props) {
   const [query, setQuery] = useState("")
 
   const pendingByJourney = useMemo(() => {
@@ -48,7 +52,8 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
     })
   }, [journeys, query])
 
-  const displayName = appName.trim() || "your app"
+  const displayName = appName.trim() || "your project"
+  const entryNoun = productLanguage?.entry_noun || "flow"
   const total = journeys.length
   const hasQuery = query.trim().length > 0
 
@@ -56,12 +61,14 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
     <div className="mx-auto max-w-5xl px-6 pb-36">
       <header className="pt-12 text-center">
         <h1 className="text-2xl font-semibold tracking-tight sm:text-[28px]">
-          What {displayName.toLowerCase()} does
+          What {displayName} does
         </h1>
         <p className="mx-auto mt-2.5 max-w-md text-[15px] leading-relaxed text-muted-foreground">
-          Each card is a moment someone uses your app. Open one to see exactly what happens, in
-          plain language.
+          Each card is a plain-English {entryNoun}. Open one to see what happens and why.
         </p>
+        {source && (
+          <SourceTruth source={source} />
+        )}
       </header>
 
       {/* Sticky search — always available so this scales to a big app */}
@@ -72,12 +79,14 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${total} ${total === 1 ? "flow" : "flows"}…`}
+              placeholder={`Search ${total} ${total === 1 ? entryNoun : `${entryNoun}s`}…`}
               className="h-11 rounded-full pl-10 text-[15px]"
             />
           </div>
           <span className="hidden shrink-0 text-sm text-muted-foreground sm:block">
-            {hasQuery ? `${filtered.length} of ${total}` : `${total} ${total === 1 ? "flow" : "flows"}`}
+            {hasQuery
+              ? `${filtered.length} of ${total}`
+              : `${total} ${total === 1 ? entryNoun : `${entryNoun}s`}`}
           </span>
         </div>
       </div>
@@ -89,7 +98,7 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
               key={journey.id}
               journey={journey}
               pending={pendingByJourney.get(journey.id) ?? 0}
-              status={activity.get(journey.id) ?? "idle"}
+              status={activity.get(journey.id) ?? JourneyActivity.Idle}
               onOpen={() => onOpen(journey.id)}
             />
           ))}
@@ -106,6 +115,27 @@ export function Overview({ appName, journeys, changes, activity, onOpen }: Props
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+function SourceTruth({ source }: { source: CanvasSourceSummary }) {
+  const Icon = source.tone === CanvasSourceTone.Warning || source.tone === CanvasSourceTone.Error ? AlertCircle : Info
+  return (
+    <div
+      className={cn(
+        "mx-auto mt-4 inline-flex max-w-2xl items-center gap-2 rounded-full border px-3 py-1.5 text-xs",
+        source.tone === CanvasSourceTone.Warning
+          ? "border-gold/30 bg-gold/10 text-foreground"
+          : source.tone === CanvasSourceTone.Error
+            ? "border-destructive/25 bg-destructive/10 text-destructive"
+            : "border-border bg-secondary/70 text-muted-foreground"
+      )}
+      title={source.detail}
+    >
+      <Icon className="size-3.5 shrink-0" />
+      <span className="font-medium text-foreground">{source.label}</span>
+      <span className="hidden text-muted-foreground sm:inline">· {source.detail}</span>
     </div>
   )
 }
@@ -135,7 +165,7 @@ function FlowCard({
         <span className="flex size-10 items-center justify-center rounded-xl bg-when-bg text-when-fg">
           <Icon className="size-[18px]" />
         </span>
-        {status === "working" ? (
+        {status === JourneyActivity.Working ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground">
             <Loader2 className="size-3 animate-spin" /> Updating
           </span>

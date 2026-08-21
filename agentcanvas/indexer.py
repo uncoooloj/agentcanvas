@@ -7,6 +7,8 @@ import os
 import re
 import subprocess
 from collections import Counter, defaultdict
+from enum import Enum
+from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -15,7 +17,9 @@ from .core import (
     app_surface_for_path,
     detect_app_surfaces,
     enrich_app_surfaces,
+    prioritize_facts,
 )
+from .core.app_surface import SUPPORTED_MANIFESTS
 from .ir import SCHEMA, now_utc, resolve_workspace, save_ir, summarize_ir
 from .languages import (
     dart_lang,
@@ -38,6 +42,24 @@ LANGUAGE_MODULES = [
     ("swift", swift_lang.SOURCE_EXTENSIONS, swift_lang.parse_workspace),
     ("kotlin", kotlin_lang.SOURCE_EXTENSIONS, kotlin_lang.parse_workspace),
 ]
+
+
+class LanguageFactType(str, Enum):
+    BRANCH = "branch"
+    CALL = "call"
+    EXPORT = "export"
+    FILE = "file"
+    IMPORT = "import"
+    ROUTE = "route"
+    SYMBOL = "symbol"
+
+
+class RouteSourceKind(str, Enum):
+    FILE = "file"
+    HANDLER = "handler"
+    ROUTE_CALL = "route-call"
+
+
 SOURCE_EXTENSIONS = (
     set(js_ts.SOURCE_EXTENSIONS)
     | PYTHON_SOURCE_EXTENSIONS
@@ -79,6 +101,17 @@ SKIP_DIRS = {
 MAX_INDEXED_FILES = 3000
 MAX_FILE_BYTES = 1_000_000
 MAX_SOURCE_FACTS = 500
+IGNORE_FILE = ".agentcanvasignore"
+NON_BEHAVIOR_PATH_PARTS = {
+    "__tests__",
+    "demo_project",
+    "demo_projects",
+    "examples",
+    "fixture",
+    "fixtures",
+    "test",
+    "tests",
+}
 
 IMPORT_RE = re.compile(
     r"""
@@ -120,9 +153,11 @@ def index_workspace(workspace: str | Path) -> Dict[str, Any]:
 def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
     root = resolve_workspace(workspace)
     discovered, truncated = discover_files(root)
-    package_info = collect_package_info(root, discovered)
+    manifest_files, manifest_truncated = discover_manifest_files(root)
+    catalog_files = sorted({*discovered, *manifest_files})
+    package_info = collect_package_info(root, catalog_files)
     git = collect_git_info(root)
-    app_surfaces = detect_app_surfaces(root, discovered)
+    app_surfaces = detect_app_surfaces(root, catalog_files)
 
     source_paths = [path for path in discovered if is_source_file(path)]
     source_set = {to_posix(path.relative_to(root)) for path in source_paths}
@@ -164,6 +199,7 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
         },
         "summary": {
             "files_seen": len(discovered),
+            "manifest_files_seen": len(manifest_files),
             "source_files": len(file_infos),
             "test_files": len(tests),
             "imports": import_count,
@@ -172,7 +208,9 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
             "app_surfaces": len(app_surfaces),
             "components": len(components),
             "changed_files": len(changed_path_set),
-            "truncated": truncated,
+            "truncated": truncated or manifest_truncated,
+            "source_file_scan_truncated": truncated,
+            "manifest_scan_truncated": manifest_truncated,
         },
         "package": package_info,
         "git": git,
@@ -191,6 +229,12 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
     source_facts = build_source_facts(root, source_paths, workflow_ir)
     workflow_ir["source_facts"] = source_facts
     workflow_ir["summary"]["language_facts"] = len(source_facts.get("facts") or [])
+    workflow_ir["summary"]["language_facts_total"] = source_facts.get("fact_selection", {}).get(
+        "total_facts", len(source_facts.get("facts") or [])
+    )
+    workflow_ir["summary"]["language_facts_omitted"] = source_facts.get("fact_selection", {}).get(
+        "omitted_facts", 0
+    )
     workflow_ir["summary"]["language_modules"] = sorted(
         {
             fact.get("attributes", {}).get("language")
@@ -209,16 +253,19 @@ def build_workflow_ir(workspace: str | Path) -> Dict[str, Any]:
 def discover_files(root: Path) -> Tuple[List[Path], bool]:
     files: List[Path] = []
     truncated = False
+    ignore_patterns = load_ignore_patterns(root)
 
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
             dirname
             for dirname in dirnames
-            if should_descend_into(dirname)
+            if should_descend_into(root, Path(dirpath) / dirname, ignore_patterns)
         ]
 
         for filename in filenames:
             path = Path(dirpath) / filename
+            if is_ignored_path(to_posix(path.relative_to(root)), ignore_patterns):
+                continue
             files.append(path)
             if len(files) >= MAX_INDEXED_FILES:
                 return sorted(files), True
@@ -226,12 +273,90 @@ def discover_files(root: Path) -> Tuple[List[Path], bool]:
     return sorted(files), truncated
 
 
-def should_descend_into(dirname: str) -> bool:
+def discover_manifest_files(root: Path, *, max_manifests: int = 2000) -> Tuple[List[Path], bool]:
+    """Find project manifests without using the source-file analysis cap."""
+
+    files: List[Path] = []
+    truncated = False
+    ignore_patterns = load_ignore_patterns(root)
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            dirname
+            for dirname in dirnames
+            if should_descend_into(root, Path(dirpath) / dirname, ignore_patterns)
+        ]
+
+        for filename in filenames:
+            if filename not in SUPPORTED_MANIFESTS:
+                continue
+            path = Path(dirpath) / filename
+            if is_ignored_path(to_posix(path.relative_to(root)), ignore_patterns):
+                continue
+            files.append(path)
+            if len(files) >= max_manifests:
+                return sorted(files), True
+
+    return sorted(files), truncated
+
+
+def load_ignore_patterns(root: Path) -> List[str]:
+    ignore_path = root / IGNORE_FILE
+    text = safe_read_text(ignore_path)
+    if not text:
+        return []
+
+    patterns: List[str] = []
+    for line in text.splitlines():
+        pattern = line.strip()
+        if not pattern or pattern.startswith("#"):
+            continue
+        patterns.append(pattern.lstrip("/"))
+    return patterns
+
+
+def should_descend_into(root: Path, path: Path, ignore_patterns: Sequence[str]) -> bool:
+    dirname = path.name
     if dirname in SKIP_DIRS:
         return False
     if dirname.startswith(".") and dirname not in {".github"}:
         return False
+    if is_ignored_path(to_posix(path.relative_to(root)), ignore_patterns, directory=True):
+        return False
     return True
+
+
+def is_ignored_path(rel_path: str, patterns: Sequence[str], *, directory: bool = False) -> bool:
+    rel = to_posix(rel_path).strip("/")
+    if not rel:
+        return False
+
+    parts = rel.split("/")
+    basename = parts[-1]
+
+    for raw_pattern in patterns:
+        pattern = raw_pattern.strip().lstrip("/")
+        if not pattern:
+            continue
+
+        directory_only = pattern.endswith("/")
+        pattern = pattern.rstrip("/")
+        if directory_only and not directory:
+            if rel == pattern or rel.startswith(f"{pattern}/"):
+                return True
+            continue
+
+        if "/" not in pattern:
+            if any(fnmatch(part, pattern) for part in parts):
+                return True
+            continue
+
+        if fnmatch(rel, pattern) or rel == pattern or rel.startswith(f"{pattern}/"):
+            return True
+        if fnmatch(basename, pattern):
+            return True
+
+    return False
 
 
 def is_source_file(path: Path) -> bool:
@@ -239,7 +364,7 @@ def is_source_file(path: Path) -> bool:
 
 
 def to_posix(path: Path | PurePosixPath | str) -> str:
-    return PurePosixPath(str(path)).as_posix()
+    return PurePosixPath(str(path).replace("\\", "/")).as_posix()
 
 
 def safe_read_text(path: Path) -> Optional[str]:
@@ -329,19 +454,22 @@ def build_source_facts(
         repo,
         max_facts=150,
     )
-    facts.extend(base_bundle.get("facts") or [])
+    facts.extend(mark_projection_roles(fact) for fact in base_bundle.get("facts") or [])
 
-    if len(facts) > MAX_SOURCE_FACTS:
+    facts, fact_selection = prioritize_facts(facts, MAX_SOURCE_FACTS)
+    if fact_selection["omitted_facts"]:
         warnings.append(
-            f"Source facts truncated from {len(facts)} to {MAX_SOURCE_FACTS} facts."
+            "Source facts were prioritized; "
+            f"{fact_selection['omitted_facts']} of {fact_selection['total_facts']} facts "
+            "are omitted from this bounded fact payload."
         )
-        facts = facts[:MAX_SOURCE_FACTS]
 
     return {
         "schema": SOURCE_FACTS_SCHEMA,
         "version": "0.1.0",
         "repo": repo,
         "facts": facts,
+        "fact_selection": fact_selection,
         "warnings": warnings,
     }
 
@@ -352,7 +480,7 @@ def canonical_language_facts(
 ) -> List[Dict[str, Any]]:
     language = str(bundle.get("language") or bundle.get("language_family") or default_language)
     return [
-        canonical_language_fact(raw, language, index)
+        mark_projection_roles(canonical_language_fact(raw, language, index))
         for index, raw in enumerate(bundle.get("facts") or [])
         if isinstance(raw, dict)
     ]
@@ -383,8 +511,48 @@ def canonical_language_fact(
     }
 
 
+def mark_projection_roles(fact: Dict[str, Any]) -> Dict[str, Any]:
+    """Mark facts that are useful evidence but not product behavior sources."""
+
+    paths = [path for path in fact_path_strings(fact) if path]
+    if not any(is_non_behavior_path(path) for path in paths):
+        return fact
+
+    role = "test_fixture" if any(is_test_path(path) for path in paths) else "fixture"
+    attributes = fact.setdefault("attributes", {})
+    if isinstance(attributes, dict):
+        attributes.setdefault("behavior_source", False)
+        attributes.setdefault("is_fixture", True)
+        attributes.setdefault("projection_role", role)
+    fact.setdefault("behavior_source", False)
+    fact.setdefault("is_fixture", True)
+    fact.setdefault("projection_role", role)
+    return fact
+
+
+def fact_path_strings(value: Any) -> List[str]:
+    paths: List[str] = []
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            lowered = str(key).lower()
+            if lowered in {"file", "path", "source", "resolved_path"} and isinstance(item, str):
+                paths.append(to_posix(item))
+            paths.extend(fact_path_strings(item))
+    elif isinstance(value, list):
+        for item in value:
+            paths.extend(fact_path_strings(item))
+    return paths
+
+
+def is_non_behavior_path(path: str) -> bool:
+    if not path or path.startswith("/"):
+        return False
+    parts = {part.lower() for part in PurePosixPath(path).parts}
+    return bool(parts.intersection(NON_BEHAVIOR_PATH_PARTS))
+
+
 def language_fact_subject(raw: Dict[str, Any]) -> str:
-    if raw.get("type") == "route" and raw.get("path"):
+    if raw.get("type") == LanguageFactType.ROUTE.value and raw.get("path"):
         method = raw.get("method")
         return f"{method} {raw['path']}" if method else str(raw["path"])
     if raw.get("qualified_name"):
@@ -417,17 +585,17 @@ def language_fact_summary(
         if line:
             location += f":{line}"
 
-    if raw_type == "route":
+    if raw_type == LanguageFactType.ROUTE.value:
         method = raw.get("method")
         return f"{language} route {method + ' ' if method else ''}{subject}{location}"
-    if raw_type == "branch":
+    if raw_type == LanguageFactType.BRANCH.value:
         condition = raw.get("condition") or subject
         return f"{language} {raw_kind} branch {condition}{location}"
-    if raw_type == "call":
+    if raw_type == LanguageFactType.CALL.value:
         return f"{language} call {subject}{location}"
-    if raw_type == "symbol":
+    if raw_type == LanguageFactType.SYMBOL.value:
         return f"{language} {raw_kind} {subject}{location}"
-    if raw_type == "import":
+    if raw_type == LanguageFactType.IMPORT.value:
         return f"{language} import {subject}{location}"
     return f"{language} {raw_type} {subject}{location}"
 
@@ -458,9 +626,15 @@ def language_fact_evidence(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def language_fact_confidence(raw_type: str) -> float:
-    if raw_type in {"file", "import", "symbol", "export", "route"}:
+    if raw_type in {
+        LanguageFactType.FILE.value,
+        LanguageFactType.IMPORT.value,
+        LanguageFactType.SYMBOL.value,
+        LanguageFactType.EXPORT.value,
+        LanguageFactType.ROUTE.value,
+    }:
         return 0.9
-    if raw_type in {"branch", "call"}:
+    if raw_type in {LanguageFactType.BRANCH.value, LanguageFactType.CALL.value}:
         return 0.75
     if raw_type.endswith("error"):
         return 1.0
@@ -695,7 +869,7 @@ def classify_source_file(rel: str) -> str:
     if "/api/" in f"/{lowered}" or lowered.startswith("api/"):
         return "api"
     if any(part in lowered.split("/") for part in ["routes", "pages", "app"]):
-        return "route"
+        return LanguageFactType.ROUTE.value
     return "source"
 
 
@@ -778,10 +952,10 @@ def extract_routes(text: str, rel: str) -> List[Dict[str, Any]]:
     routes: Dict[Tuple[str, str], Dict[str, Any]] = {}
     file_route = route_from_path(rel)
     if file_route:
-        routes[(file_route, "file")] = {
+        routes[(file_route, RouteSourceKind.FILE.value)] = {
             "path": file_route,
             "method": None,
-            "source": "file",
+            "source": RouteSourceKind.FILE.value,
             "file": rel,
             "line": None,
         }
@@ -794,17 +968,17 @@ def extract_routes(text: str, rel: str) -> List[Dict[str, Any]]:
         routes[(route, method)] = {
             "path": route,
             "method": method,
-            "source": "handler",
+            "source": RouteSourceKind.HANDLER.value,
             "file": rel,
             "line": line_number(text, match.start()),
         }
 
     for match in GENERIC_ROUTE_RE.finditer(text):
         route = match.group(1)
-        routes[(route, "route")] = {
+        routes[(route, LanguageFactType.ROUTE.value)] = {
             "path": route,
             "method": None,
-            "source": "route-call",
+            "source": RouteSourceKind.ROUTE_CALL.value,
             "file": rel,
             "line": line_number(text, match.start()),
         }
@@ -1076,7 +1250,7 @@ def build_graph(
         add_node(
             {
                 "id": file_id,
-                "type": "file",
+                "type": LanguageFactType.FILE.value,
                 "label": PurePosixPath(info["path"]).name,
                 "path": info["path"],
                 "data": {
@@ -1108,7 +1282,7 @@ def build_graph(
             add_node(
                 {
                     "id": export_id,
-                    "type": "export",
+                    "type": LanguageFactType.EXPORT.value,
                     "label": exported["name"],
                     "path": exported["path"],
                     "data": exported,
@@ -1121,7 +1295,7 @@ def build_graph(
             add_node(
                 {
                     "id": route_id,
-                    "type": "route",
+                    "type": LanguageFactType.ROUTE.value,
                     "label": route["path"],
                     "path": route["file"],
                     "data": route,

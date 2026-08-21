@@ -1,11 +1,25 @@
 import { create } from "zustand"
-import { fetchPending, postChange, type ChangeRequest } from "./api"
-import type { FlowAction } from "@/components/FlowCanvas"
-import type { AppModel, BranchNode, FlowNode, PendingItem, PendingStatus, StepNode } from "./types"
+import { answerPendingRequest, fetchPending, fetchPendingRequest, isApiAuthExpired, postChange, type ChangeRequest } from "./api"
+import {
+  ChangeKind,
+  FlowAction,
+  FlowNodeKind,
+  PendingRefKind,
+  PendingStatus,
+  StepRole,
+  type AppModel,
+  type BranchNode,
+  type CanvasV2NodeKind,
+  type FlowNode,
+  type PendingConversationSummary,
+  type PendingConversationTurn,
+  type PendingItem,
+  type PendingRef,
+  type StepNode,
+} from "./types"
+export { ChangeKind } from "./types"
 
 // ---- Change-set model ----
-
-export type ChangeKind = "new" | "edited" | "removing"
 
 export interface ChangeEntry {
   id: string
@@ -15,14 +29,36 @@ export interface ChangeEntry {
   journeyId: string
   journeyTitle: string
   targetNodeId: string
+  targetNativeNodeId?: string
+  targetNativeKind?: CanvasV2NodeKind
+  targetFlowId?: string
   text1?: string // primary input (new step text / new condition / reason)
   text2?: string // secondary input (the "then" action for add_rule)
   createdAt: number
   updatedAt: number
 }
 
-export type Phase = "composing" | "sending" | "working" | "done" | "needs_input" | "blocked"
-export type HandoffItemStatus = "queued" | Exclude<PendingStatus, "pending">
+export enum HandoffPhase {
+  Composing = "composing",
+  Sending = "sending",
+  Working = "working",
+  Done = "done",
+  NeedsInput = "needs_input",
+  Blocked = "blocked",
+  Stopped = "stopped",
+}
+export enum HandoffItemStatus {
+  Creating = "creating",
+  Sent = "sent",
+  InProgress = "in_progress",
+  Implemented = "implemented",
+  NeedsInput = "needs_input",
+  Blocked = "blocked",
+  Verified = "verified",
+  Done = "done",
+  Cancelled = "cancelled",
+  Rejected = "rejected",
+}
 
 export interface HandoffItem {
   changeId: string
@@ -33,10 +69,12 @@ export interface HandoffItem {
   title?: string
   jsonPath?: string | null
   markdownPath?: string | null
+  conversationSummary?: PendingConversationSummary
+  conversation?: PendingConversationTurn[]
 }
 
 export interface HandoffState {
-  phase: Phase
+  phase: HandoffPhase
   items: HandoffItem[]
   summary?: string
   question?: string
@@ -45,21 +83,21 @@ export interface HandoffState {
 }
 
 export function kindForAction(action: FlowAction): ChangeKind {
-  if (action === "remove") return "removing"
-  if (action === "change" || action === "change_condition") return "edited"
-  return "new"
+  if (action === FlowAction.Remove) return ChangeKind.Removing
+  if (action === FlowAction.Change || action === FlowAction.ChangeCondition) return ChangeKind.Edited
+  return ChangeKind.New
 }
 
 const VERB: Record<ChangeKind, string> = {
-  new: "Adding",
-  edited: "Updating",
-  removing: "Removing",
+  [ChangeKind.New]: "Adding",
+  [ChangeKind.Edited]: "Updating",
+  [ChangeKind.Removing]: "Removing",
 }
 
 function summarize(changes: ChangeEntry[]): string {
-  const n = changes.filter((c) => c.kind === "new").length
-  const e = changes.filter((c) => c.kind === "edited").length
-  const r = changes.filter((c) => c.kind === "removing").length
+  const n = changes.filter((c) => c.kind === ChangeKind.New).length
+  const e = changes.filter((c) => c.kind === ChangeKind.Edited).length
+  const r = changes.filter((c) => c.kind === ChangeKind.Removing).length
   const parts: string[] = []
   if (n) parts.push(`added ${n} step${n === 1 ? "" : "s"}`)
   if (e) parts.push(`updated ${e}`)
@@ -86,14 +124,16 @@ interface ChangeStore {
   discardAll: () => void
   send: () => void
   refreshHandoff: () => Promise<void>
+  answerHandoffQuestion: (pendingId: string, answer: string) => Promise<void>
   acknowledgeDone: () => ChangeEntry[] // returns the applied changes so the caller can update the model
+  dismissHandoff: () => void
   badgeForNode: (nodeId: string) => ChangeKind | null
 }
 
 let counter = 0
 const newId = () => `c${Date.now().toString(36)}${counter++}`
 
-const idle: HandoffState = { phase: "composing", items: [] }
+const idle: HandoffState = { phase: HandoffPhase.Composing, items: [] }
 
 export const useChanges = create<ChangeStore>((set, get) => ({
   changes: [],
@@ -112,7 +152,7 @@ export const useChanges = create<ChangeStore>((set, get) => ({
       createdAt: now,
       updatedAt: now,
     }
-    const working = get().handoff.phase !== "composing"
+    const working = get().handoff.phase !== HandoffPhase.Composing
     if (working) {
       set((s) => ({ queuedNext: [...s.queuedNext, entry] }))
     } else {
@@ -140,14 +180,14 @@ export const useChanges = create<ChangeStore>((set, get) => ({
 
   send: () => {
     const { changes, handoff } = get()
-    if (handoff.phase !== "composing" || !changes.length) return
+    if (handoff.phase !== HandoffPhase.Composing || !changes.length) return
 
     const items: HandoffItem[] = changes.map((c) => ({
       changeId: c.id,
       label: `${VERB[c.kind]}: ${c.summary}`,
-      status: "queued",
+      status: HandoffItemStatus.Creating,
     }))
-    set({ handoff: { phase: "sending", items, prompt: buildHandoffPrompt(changes, get().assistantName) } })
+    set({ handoff: { phase: HandoffPhase.Sending, items, prompt: buildHandoffPrompt(changes, get().assistantName) } })
 
     Promise.allSettled(changes.map((change) => postChange(changeRequestFor(change))))
       .then((results) => {
@@ -182,7 +222,7 @@ export const useChanges = create<ChangeStore>((set, get) => ({
           return {
             handoff: {
               ...s.handoff,
-              phase: "blocked",
+              phase: HandoffPhase.Blocked,
               error: message,
               items: nextItems,
               question: "AgentCanvas could not write the pending files. Copy the fallback prompt below and paste it into your assistant instead.",
@@ -195,9 +235,15 @@ export const useChanges = create<ChangeStore>((set, get) => ({
 
   refreshHandoff: async () => {
     const handoff = get().handoff
-    if (handoff.phase === "composing" || handoff.phase === "done") return
+    if (
+      handoff.phase === HandoffPhase.Composing ||
+      handoff.phase === HandoffPhase.Done ||
+      handoff.phase === HandoffPhase.Stopped
+    ) {
+      return
+    }
     try {
-      const pending = await fetchPending()
+      const pending = await hydratePendingDetails(await fetchPending())
       const byId = new Map(pending.map((item) => [item.id, item]))
       const byChangeId = new Map(pending.filter((item) => item.changeId).map((item) => [item.changeId!, item]))
       set((s) => {
@@ -206,22 +252,29 @@ export const useChanges = create<ChangeStore>((set, get) => ({
           return pendingItem ? handoffItemFromPending(item, pendingItem) : item
         })
         const phase = phaseForItems(items)
-        const needsInput = items.find((item) => item.status === "needs_input")
-        const blocked = items.find((item) => item.status === "blocked")
+        const needsInput = items.find((item) => item.status === HandoffItemStatus.NeedsInput)
+        const blocked = items.find((item) => STOPPED_STATUSES.has(item.status))
         return {
           handoff: {
             ...s.handoff,
             phase,
             items,
-            summary: phase === "done" ? summarize(get().changes) : s.handoff.summary,
-            question: needsInput?.note || blocked?.note || s.handoff.question,
-            error: phase === "working" || phase === "done" ? undefined : s.handoff.error,
+            summary: phase === HandoffPhase.Done ? summarize(get().changes) : s.handoff.summary,
+            question: questionForItem(needsInput) || questionForItem(blocked) || s.handoff.question,
+            error:
+              phase === HandoffPhase.Working || phase === HandoffPhase.Done
+                ? undefined
+                : blocked?.note || s.handoff.error,
             prompt: buildHandoffPrompt(s.changes, s.assistantName, items),
           },
         }
       })
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not refresh pending request status."
+      const message = isApiAuthExpired(error)
+        ? "This AgentCanvas link cannot read status anymore. Reopen AgentCanvas from your agent, or use the fallback prompt."
+        : error instanceof Error
+          ? error.message
+          : "Could not refresh pending request status."
       set((s) => ({
         handoff: {
           ...s.handoff,
@@ -232,11 +285,60 @@ export const useChanges = create<ChangeStore>((set, get) => ({
     }
   },
 
+  answerHandoffQuestion: async (pendingId, answer) => {
+    const text = answer.trim()
+    if (!text) return
+
+    try {
+      const pending = await answerPendingRequest(pendingId, text)
+      set((s) => {
+        const items = s.handoff.items.map((item) =>
+          item.pendingId === pendingId ? handoffItemFromPending(item, pending) : item
+        )
+        const phase = phaseForItems(items)
+        const needsInput = items.find((item) => item.status === HandoffItemStatus.NeedsInput)
+        const blocked = items.find((item) => STOPPED_STATUSES.has(item.status))
+        return {
+          handoff: {
+            ...s.handoff,
+            phase,
+            items,
+            question: needsInput ? questionForItem(needsInput) : blocked ? questionForItem(blocked) : undefined,
+            error:
+              phase === HandoffPhase.Working || phase === HandoffPhase.Done || phase === HandoffPhase.Sending
+                ? undefined
+                : blocked?.note || s.handoff.error,
+            prompt: buildHandoffPrompt(s.changes, s.assistantName, items),
+          },
+        }
+      })
+      void get().refreshHandoff()
+    } catch (error) {
+      const message = isApiAuthExpired(error)
+        ? "This AgentCanvas link cannot send answers anymore. Reopen AgentCanvas from your agent, or copy the fallback prompt."
+        : error instanceof Error
+          ? error.message
+          : "Could not send answer."
+      set((s) => ({
+        handoff: {
+          ...s.handoff,
+          error: `Could not send answer: ${message}`,
+          prompt: buildHandoffPrompt(s.changes, s.assistantName, s.handoff.items),
+        },
+      }))
+    }
+  },
+
   acknowledgeDone: () => {
+    if (get().handoff.phase !== HandoffPhase.Done) return []
     const applied = get().changes
     const promoted = get().queuedNext
     set({ changes: promoted, queuedNext: [], handoff: idle })
     return applied
+  },
+
+  dismissHandoff: () => {
+    set({ handoff: idle })
   },
 
   badgeForNode: (nodeId) => {
@@ -245,7 +347,7 @@ export const useChanges = create<ChangeStore>((set, get) => ({
   },
 }))
 
-function changeRequestFor(change: ChangeEntry): ChangeRequest {
+export function changeRequestFor(change: ChangeEntry): ChangeRequest {
   return {
     changeId: change.id,
     clientChangeId: change.id,
@@ -258,40 +360,123 @@ function changeRequestFor(change: ChangeEntry): ChangeRequest {
     journeyTitle: change.journeyTitle,
     targetStep: change.targetNodeId,
     targetNodeId: change.targetNodeId,
+    targetNativeNodeId: change.targetNativeNodeId,
+    targetNativeKind: change.targetNativeKind,
+    targetFlowId: change.targetFlowId,
+    refs: refsForChange(change),
     text1: change.text1,
     text2: change.text2,
   }
+}
+
+export function refsForChange(change: ChangeEntry): PendingRef[] {
+  const refs: PendingRef[] = []
+  const flowId = change.targetFlowId || change.journeyId
+  if (flowId) {
+    refs.push({
+      kind: PendingRefKind.Flow,
+      id: flowId,
+      source: change.targetFlowId ? "change.targetFlowId" : "change.journeyId",
+    })
+  }
+  const nodeId = change.targetNativeNodeId || change.targetNodeId
+  if (nodeId) {
+    refs.push({
+      kind: PendingRefKind.Node,
+      id: nodeId,
+      flow: flowId,
+      source: change.targetNativeNodeId ? "change.targetNativeNodeId" : "change.targetNodeId",
+    })
+  }
+  return dedupeRefs(refs)
+}
+
+function dedupeRefs(refs: PendingRef[]): PendingRef[] {
+  const seen = new Set<string>()
+  const deduped: PendingRef[] = []
+  for (const ref of refs) {
+    const key = `${ref.kind}\u0000${ref.id}\u0000${ref.flow ?? ""}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(ref)
+  }
+  return deduped
 }
 
 function handoffItemFromPending(item: HandoffItem, pending: PendingItem): HandoffItem {
   const status = normalizePendingStatus(pending.status)
   return {
     ...item,
-    status: status === "pending" ? "sent" : status,
+    status: status === PendingStatus.Pending ? HandoffItemStatus.Sent : status,
     pendingId: pending.id,
     title: pending.title,
-    note: pending.note || pending.error,
+    note: pending.note || pending.conversationSummary?.unansweredQuestion?.text || pending.error,
     jsonPath: pending.jsonPath,
     markdownPath: pending.markdownPath,
+    conversationSummary: pending.conversationSummary,
+    conversation: pending.conversation,
   }
 }
 
+async function hydratePendingDetails(pending: PendingItem[]): Promise<PendingItem[]> {
+  return Promise.all(
+    pending.map(async (item) => {
+      if (item.status !== PendingStatus.NeedsInput) return item
+      try {
+        const detail = await fetchPendingRequest(item.id)
+        return { ...item, ...detail, changeId: detail.changeId || item.changeId }
+      } catch {
+        return item
+      }
+    })
+  )
+}
+
+function questionForItem(item?: HandoffItem): string | undefined {
+  return item?.conversationSummary?.unansweredQuestion?.text || item?.note
+}
+
 function blockedHandoffItem(item: HandoffItem, note: string): HandoffItem {
-  return { ...item, status: "blocked", note }
+  return { ...item, status: HandoffItemStatus.Blocked, note }
 }
 
-function normalizePendingStatus(status: PendingStatus): HandoffItemStatus | "pending" {
-  return status
+function normalizePendingStatus(status: PendingStatus): HandoffItemStatus | PendingStatus.Pending {
+  if (status === PendingStatus.Pending) return PendingStatus.Pending
+  return PENDING_TO_HANDOFF_STATUS[status]
 }
 
-function phaseForItems(items: HandoffItem[]): Phase {
-  if (!items.length) return "composing"
-  if (items.some((item) => item.status === "queued")) return "sending"
-  if (items.every((item) => item.status === "done")) return "done"
-  if (items.some((item) => item.status === "sent" || item.status === "in_progress")) return "working"
-  if (items.some((item) => item.status === "blocked")) return "blocked"
-  if (items.some((item) => item.status === "needs_input")) return "needs_input"
-  return "working"
+const PENDING_TO_HANDOFF_STATUS: Record<Exclude<PendingStatus, PendingStatus.Pending>, HandoffItemStatus> = {
+  [PendingStatus.Sent]: HandoffItemStatus.Sent,
+  [PendingStatus.InProgress]: HandoffItemStatus.InProgress,
+  [PendingStatus.Implemented]: HandoffItemStatus.Implemented,
+  [PendingStatus.NeedsInput]: HandoffItemStatus.NeedsInput,
+  [PendingStatus.Blocked]: HandoffItemStatus.Blocked,
+  [PendingStatus.Verified]: HandoffItemStatus.Verified,
+  [PendingStatus.Done]: HandoffItemStatus.Done,
+  [PendingStatus.Cancelled]: HandoffItemStatus.Cancelled,
+  [PendingStatus.Rejected]: HandoffItemStatus.Rejected,
+}
+
+const FINISHED_STATUSES = new Set<HandoffItemStatus>([HandoffItemStatus.Done, HandoffItemStatus.Verified])
+const WORKING_STATUSES = new Set<HandoffItemStatus>([
+  HandoffItemStatus.Sent,
+  HandoffItemStatus.InProgress,
+  HandoffItemStatus.Implemented,
+])
+const STOPPED_STATUSES = new Set<HandoffItemStatus>([
+  HandoffItemStatus.Blocked,
+  HandoffItemStatus.Cancelled,
+  HandoffItemStatus.Rejected,
+])
+
+function phaseForItems(items: HandoffItem[]): HandoffPhase {
+  if (!items.length) return HandoffPhase.Composing
+  if (items.some((item) => item.status === HandoffItemStatus.Creating)) return HandoffPhase.Sending
+  if (items.every((item) => FINISHED_STATUSES.has(item.status))) return HandoffPhase.Done
+  if (items.some((item) => STOPPED_STATUSES.has(item.status))) return HandoffPhase.Stopped
+  if (items.some((item) => item.status === HandoffItemStatus.NeedsInput)) return HandoffPhase.NeedsInput
+  if (items.some((item) => WORKING_STATUSES.has(item.status))) return HandoffPhase.Working
+  return HandoffPhase.Working
 }
 
 function rejectionMessage(result: PromiseSettledResult<PendingItem> | undefined): string {
@@ -313,8 +498,10 @@ export function buildHandoffPrompt(changes: ChangeEntry[], assistantName = "your
     "4. Make the smallest code change that satisfies the request.",
     "5. Run the relevant test or smoke check.",
     "6. Re-index with `agentcanvas index --workspace .`.",
-    "7. Mark the request done, or needs_input with a clear note if blocked:",
-    "   `agentcanvas status --workspace . <pending-id> --status done --note \"Implemented and verified.\"`",
+    "7. Mark it implemented, then verified with evidence, or needs_input with a clear note if blocked:",
+    "   `agentcanvas status --workspace . <pending-id> --status implemented --note \"Implemented.\"`",
+    "   `agentcanvas status --workspace . <pending-id> --status verified --note \"Verified.\" --evidence-check \"<command or smoke test>\" --evidence-result \"passed\" --evidence-actor \"<agent name>\"`",
+    "   `agentcanvas status --workspace . <pending-id> --status done --note \"Done.\"`",
     "",
     `Target assistant: ${assistantName}`,
     "",
@@ -330,6 +517,8 @@ export function buildHandoffPrompt(changes: ChangeEntry[], assistantName = "your
         `   - JSON: ${item?.jsonPath || "not available"}`,
         `   - Journey: ${change.journeyTitle} (${change.journeyId})`,
         `   - Target node: ${change.targetNodeId}`,
+        ...(change.targetNativeNodeId ? [`   - Native node: ${change.targetNativeNodeId}`] : []),
+        ...(change.targetNativeKind ? [`   - Native kind: ${change.targetNativeKind}`] : []),
         `   - Action: ${change.action}`,
         ...(change.text1 ? [`   - Primary text: ${change.text1}`] : []),
         ...(change.text2 ? [`   - Secondary text: ${change.text2}`] : []),
@@ -346,13 +535,20 @@ export function buildHandoffPrompt(changes: ChangeEntry[], assistantName = "your
 }
 
 function statusLabel(status?: HandoffItemStatus): string {
-  if (status === "queued") return "creating pending file"
-  if (status === "sent") return "sent"
-  if (status === "in_progress") return "in progress"
-  if (status === "done") return "done"
-  if (status === "needs_input") return "needs input"
-  if (status === "blocked") return "blocked"
-  return "not sent"
+  return status ? STATUS_LABELS[status] : "not sent"
+}
+
+const STATUS_LABELS: Record<HandoffItemStatus, string> = {
+  [HandoffItemStatus.Creating]: "creating pending file",
+  [HandoffItemStatus.Sent]: "sent",
+  [HandoffItemStatus.InProgress]: "in progress",
+  [HandoffItemStatus.Implemented]: "implemented",
+  [HandoffItemStatus.Verified]: "verified",
+  [HandoffItemStatus.Done]: "done",
+  [HandoffItemStatus.NeedsInput]: "needs input",
+  [HandoffItemStatus.Blocked]: "blocked",
+  [HandoffItemStatus.Cancelled]: "cancelled",
+  [HandoffItemStatus.Rejected]: "rejected",
 }
 
 // ---- Optimistic apply: reflect staged changes on the model when the assistant "finishes" ----
@@ -368,11 +564,11 @@ export function applyChanges(model: AppModel, changes: ChangeEntry[]): AppModel 
 }
 
 function mkStep(text: string): StepNode {
-  return { kind: "step", id: newId(), role: "do", text }
+  return { kind: FlowNodeKind.Step, id: newId(), role: StepRole.Do, text }
 }
 function mkBranch(condition: string, thenText?: string): BranchNode {
   return {
-    kind: "branch",
+    kind: FlowNodeKind.Branch,
     id: newId(),
     condition,
     then: thenText ? [mkStep(thenText)] : [],
@@ -384,38 +580,38 @@ function applyToNodes(nodes: FlowNode[], c: ChangeEntry): FlowNode[] {
   const out: FlowNode[] = []
   for (const node of nodes) {
     if (node.id === c.targetNodeId) {
-      if (c.action === "remove") {
+      if (c.action === FlowAction.Remove) {
         continue // drop it
       }
-      if (c.action === "change" && node.kind === "step") {
+      if (c.action === FlowAction.Change && node.kind === FlowNodeKind.Step) {
         out.push({ ...node, text: c.text1 || node.text })
         continue
       }
-      if (c.action === "change_condition" && node.kind === "branch") {
+      if (c.action === FlowAction.ChangeCondition && node.kind === FlowNodeKind.Branch) {
         out.push({ ...node, condition: c.text1 || node.condition })
         continue
       }
-      if (c.action === "add_after") {
+      if (c.action === FlowAction.AddAfter) {
         out.push(node)
         out.push(mkStep(c.text1 || "New step"))
         continue
       }
-      if (c.action === "add_rule") {
+      if (c.action === FlowAction.AddRule) {
         out.push(node)
         out.push(mkBranch(c.text1 || "this applies", c.text2))
         continue
       }
-      if (c.action === "add_then" && node.kind === "branch") {
+      if (c.action === FlowAction.AddThen && node.kind === FlowNodeKind.Branch) {
         out.push({ ...node, then: [...node.then, mkStep(c.text1 || "New step")] })
         continue
       }
-      if (c.action === "add_else" && node.kind === "branch") {
+      if (c.action === FlowAction.AddElse && node.kind === FlowNodeKind.Branch) {
         out.push({ ...node, otherwise: [...node.otherwise, mkStep(c.text1 || "New step")] })
         continue
       }
     }
     // recurse into branches
-    if (node.kind === "branch") {
+    if (node.kind === FlowNodeKind.Branch) {
       out.push({
         ...node,
         then: applyToNodes(node.then, c),

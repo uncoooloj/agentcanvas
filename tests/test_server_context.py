@@ -1,10 +1,24 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from urllib.parse import urlparse
 
+from agentcanvas.agent_presence import record_agent_presence
+from agentcanvas.canvas_v2.evidence import build_workflow_evidence_from_path
+from agentcanvas.ir import canvas_map_handoff
 from agentcanvas.server import make_handler
+
+
+def _prompt_path(path: Path) -> str:
+    return str(path).replace("\\", "/")
+
+
+def _write(root: Path, relative_path: str, content: str) -> None:
+    path = root / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
 
 
 class _FakeHandler:
@@ -26,6 +40,396 @@ class _FakeHandler:
 
 
 class ServerContextTests(unittest.TestCase):
+    def test_canvas_map_handoff_instruction_for_missing_map_is_agent_agnostic(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            resolved = workspace.resolve()
+
+            handoff = canvas_map_handoff(workspace)
+
+            self.assertFalse(handoff["readable"])
+            self.assertTrue(handoff["needsAuthoring"])
+            self.assertEqual("missing", handoff["reason"])
+            self.assertEqual(".agentcanvas/canvas.ir.json", handoff["relativeOutputPath"])
+            self.assertEqual(
+                str(resolved / ".agentcanvas" / "canvas.ir.json"),
+                handoff["outputPath"],
+            )
+            instruction = handoff["instruction"]
+            self.assertIn(_prompt_path(resolved), instruction)
+            self.assertIn(".agentcanvas/canvas.ir.json", instruction)
+            self.assertIn("pip install use-agentcanvas", instruction)
+            self.assertNotRegex(instruction, r"pip install\s+agentcanvas\b")
+            self.assertNotIn("agentcanvas start", instruction)
+            self.assertIn("uvx --from use-agentcanvas agentcanvas setup --agent auto", instruction)
+            self.assertIn("agentcanvas up --workspace", instruction)
+            self.assertIn("ask clarifying questions", instruction)
+            for agent_name in ["Codex", "Claude", "Cursor", "Antigravity"]:
+                self.assertNotIn(agent_name, instruction)
+
+    def test_canvas_map_handoff_suppresses_instruction_when_map_is_readable(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps({"schema": "agentcanvas.behavior_canvas_response.v1"}),
+            )
+
+            handoff = canvas_map_handoff(workspace)
+
+            self.assertTrue(handoff["readable"])
+            self.assertFalse(handoff["needsAuthoring"])
+            self.assertIsNone(handoff["reason"])
+            self.assertIsNone(handoff["instruction"])
+
+    def test_context_includes_canvas_map_handoff_for_missing_map(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            resolved = workspace.resolve()
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/context?token=token"))
+
+            context = fake.response["payload"]["context"]
+            self.assertFalse(context["agentPresence"]["connected"])
+            handoff = context["handoff"]["canvasMap"]
+            self.assertFalse(handoff["readable"])
+            self.assertTrue(handoff["needsAuthoring"])
+            self.assertEqual("missing", handoff["reason"])
+            self.assertEqual(str(resolved), handoff["workspacePath"])
+            self.assertIn(_prompt_path(resolved), handoff["instruction"])
+            self.assertIn(".agentcanvas/canvas.ir.json", handoff["instruction"])
+            self.assertNotIn("agentcanvas start", handoff["instruction"])
+            self.assertIn("agentcanvas up --workspace", handoff["instruction"])
+
+    def test_context_exposes_only_a_matching_fresh_agent_connection(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            record_agent_presence(
+                workspace,
+                agent="codex",
+                agent_name="Codex",
+                session_id="session-123",
+            )
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+                session_id="session-123",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/context?token=token&sessionId=session-123"))
+
+            presence = fake.response["payload"]["context"]["agentPresence"]
+            self.assertTrue(presence["connected"])
+            self.assertEqual("codex", presence["agent"])
+            self.assertEqual("Codex", presence["agentName"])
+
+    def test_health_api_returns_map_health_summary(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            _write(
+                workspace,
+                ".agentcanvas/workflow.ir.json",
+                json.dumps({"schema": "agentcanvas.workflow.v1"}),
+            )
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps({"schema": "agentcanvas.behavior_canvas_response.v1"}),
+            )
+            workflow_path = workspace / ".agentcanvas" / "workflow.ir.json"
+            canvas_path = workspace / ".agentcanvas" / "canvas.ir.json"
+            os.utime(workflow_path, (1000, 1000))
+            os.utime(canvas_path, (2000, 2000))
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/health?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            payload = fake.response["payload"]
+            self.assertTrue(payload["ok"])
+            health = payload["health"]
+            self.assertEqual("agentcanvas.map_health.v1", health["schema"])
+            self.assertEqual(str(workspace.resolve()), health["workspacePath"])
+            self.assertTrue(health["workflowIr"]["exists"])
+            self.assertTrue(health["canvasIr"]["exists"])
+            self.assertTrue(health["canvasIr"]["readable"])
+            self.assertFalse(health["freshness"]["stale"])
+            self.assertEqual("ready", health["status"])
+            self.assertTrue(health["ready"])
+            self.assertIn("Map is ready", health["summary"][0])
+            self.assertEqual(
+                str(workspace.resolve() / ".agentcanvas" / "pending"),
+                health["pendingFiles"]["path"],
+            )
+
+    def test_health_api_uses_v2_evidence_before_file_mtime(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            workflow_path = workspace / ".agentcanvas" / "workflow.ir.json"
+            _write(
+                workspace,
+                ".agentcanvas/workflow.ir.json",
+                json.dumps(
+                    {
+                        "schema": "agentcanvas.workflow.v1",
+                        "generated_at": "2026-07-05T12:00:00Z",
+                        "source_facts": {"schema": "agentcanvas.source_facts.v1", "facts": []},
+                    },
+                    sort_keys=True,
+                ),
+            )
+            evidence = build_workflow_evidence_from_path(workflow_path, workspace=workspace)
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps(
+                    {
+                        "schema": "agentcanvas.canvas.v2",
+                        "revision": 1,
+                        "evidence": evidence,
+                        "app": {"name": "Evidence app", "summary": "", "is_demo": False},
+                        "flows": [],
+                    },
+                    sort_keys=True,
+                ),
+            )
+            canvas_path = workspace / ".agentcanvas" / "canvas.ir.json"
+            os.utime(workflow_path, (2000, 2000))
+            os.utime(canvas_path, (1000, 1000))
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/health?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            health = fake.response["payload"]["health"]
+            self.assertEqual("fresh", health["freshness"]["status"])
+            self.assertFalse(health["freshness"]["stale"])
+            self.assertEqual("fresh", health["freshness"]["evidence"]["status"])
+            self.assertEqual("ready", health["status"])
+
+    def test_health_api_does_not_report_v2_canvas_ready_without_evidence(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            _write(
+                workspace,
+                ".agentcanvas/workflow.ir.json",
+                json.dumps({"schema": "agentcanvas.workflow.v1", "source_facts": {"facts": []}}),
+            )
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps(
+                    {
+                        "schema": "agentcanvas.canvas.v2",
+                        "revision": 1,
+                        "app": {"name": "Evidence app", "summary": "", "is_demo": False},
+                        "flows": [],
+                    }
+                ),
+            )
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/health?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            health = fake.response["payload"]["health"]
+            self.assertFalse(health["ready"])
+            self.assertEqual("unknown_canvas_freshness", health["status"])
+            self.assertEqual("possibly-stale", health["freshness"]["status"])
+            self.assertIsNone(health["freshness"]["stale"])
+
+    def test_canvas_api_serves_v2_compatibility_envelope(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            canvas_v2 = {
+                "schema": "agentcanvas.canvas.v2",
+                "revision": 4,
+                "app": {
+                    "name": "Sunset Photos",
+                    "summary": "People upload and share photos.",
+                    "is_demo": False,
+                },
+                "flows": [
+                    {
+                        "id": "flow:signup",
+                        "title": "Signing up",
+                        "summary": "How a new person gets an account.",
+                        "entry_node": "n:signup:visit",
+                        "nodes": [
+                            {
+                                "id": "n:signup:visit",
+                                "kind": "When",
+                                "title": "Someone opens signup",
+                                "status": "verified",
+                            },
+                            {
+                                "id": "n:signup:create",
+                                "kind": "Do",
+                                "title": "Create the account",
+                                "detail": "Stores the new account.",
+                                "evidence_refs": ["src/signup.ts"],
+                                "status": "verified",
+                            },
+                        ],
+                        "edges": [
+                            {
+                                "id": "e:signup:visit:create",
+                                "source": "n:signup:visit",
+                                "target": "n:signup:create",
+                                "kind": "normal",
+                            }
+                        ],
+                    }
+                ],
+            }
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps(canvas_v2),
+            )
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/canvas?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            payload = fake.response["payload"]
+            self.assertEqual("agentcanvas.behavior_canvas_response.v1", payload["schema"])
+            self.assertEqual(4, payload["revision"])
+            self.assertEqual(canvas_v2, payload["canvas_v2"])
+            self.assertEqual("Sunset Photos", payload["canvas"]["appName"])
+            self.assertEqual("Signing up", payload["canvas"]["journeys"][0]["title"])
+            self.assertEqual(
+                ["Someone opens signup", "Create the account"],
+                [node["text"] for node in payload["canvas"]["journeys"][0]["nodes"]],
+            )
+            self.assertEqual("agent-authored", payload["mapping"]["mode"])
+            self.assertEqual(1, payload["mapping"]["flowCount"])
+
+    def test_canvas_api_v2_envelope_preserves_all_native_node_kinds(self):
+        fixture_path = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "canvas_v2"
+            / "all_node_kinds.json"
+        )
+        with fixture_path.open(encoding="utf-8") as handle:
+            canvas_v2 = json.load(handle)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            _write(
+                workspace,
+                ".agentcanvas/canvas.ir.json",
+                json.dumps(canvas_v2),
+            )
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/canvas?token=token"))
+
+            self.assertEqual(fake.response["status"], 200)
+            payload = fake.response["payload"]
+            self.assertEqual("agentcanvas.behavior_canvas_response.v1", payload["schema"])
+            self.assertEqual(canvas_v2["revision"], payload["revision"])
+            self.assertEqual(canvas_v2, payload["canvas_v2"])
+            self.assertFalse(payload["canvas"]["isDemo"])
+            self.assertEqual("agent-authored", payload["mapping"]["mode"])
+            self.assertFalse(payload["mapping"]["demoFallback"])
+            self.assertFalse(payload["mapping"]["source"]["isFallback"])
+            self.assertEqual("agent-authored", payload["mapping"]["source"]["kind"])
+
+            raw_kinds = {
+                node["kind"]
+                for flow in payload["canvas_v2"]["flows"]
+                for node in flow["nodes"]
+            }
+            self.assertEqual(
+                {"When", "Do", "Decision", "Loop", "Parallel", "Join", "Wait", "SubFlow", "End"},
+                raw_kinds,
+            )
+
+            display_native_by_kind = {}
+            display_native_by_node = {}
+
+            def visit(nodes):
+                for node in nodes:
+                    native = node.get("native") or {}
+                    if native.get("nodeKind"):
+                        display_native_by_kind.setdefault(native["nodeKind"], native)
+                    if native.get("nodeId"):
+                        display_native_by_node[native["nodeId"]] = native
+                    visit(node.get("then") or [])
+                    visit(node.get("otherwise") or [])
+
+            for journey in payload["canvas"]["journeys"]:
+                visit(journey["nodes"])
+
+            self.assertEqual(raw_kinds, set(display_native_by_kind))
+            all_flow_nodes = {
+                node["id"]
+                for flow in payload["canvas_v2"]["flows"]
+                if flow["id"] == "flow:all-node-kinds"
+                for node in flow["nodes"]
+            }
+            self.assertTrue(all_flow_nodes.issubset(display_native_by_node))
+            for node_id in all_flow_nodes:
+                native = display_native_by_node[node_id]
+                self.assertEqual("agentcanvas.canvas.v2", native["schema"])
+                self.assertEqual("flow:all-node-kinds", native["flowId"])
+            self.assertEqual(
+                "flow:receipt-follow-up",
+                display_native_by_node["n:all:subflow"]["flowRef"],
+            )
+
     def test_demo_context_uses_workspace_name(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "agentcanvas-demo"
@@ -46,7 +450,10 @@ class ServerContextTests(unittest.TestCase):
             context = fake.response["payload"]["context"]
             self.assertEqual(context["mode"], "demo")
             self.assertTrue(context["isDemo"])
+            self.assertTrue(context["isDemoContent"])
+            self.assertFalse(context["demoFallback"])
             self.assertEqual(context["demoFixture"], "agentcanvas-demo")
+            self.assertEqual("demo", context["source"]["kind"])
             self.assertEqual(context["assistant"], "No agent connected")
             self.assertEqual(context["sessionId"], "agent-session-1")
 
@@ -54,6 +461,7 @@ class ServerContextTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "agentcanvas-demo"
             workspace.mkdir()
+            _write(workspace, ".agentcanvas-demo", "fixture=agentcanvas-demo\n")
             handler_cls = make_handler(
                 workspace,
                 token="token",
@@ -68,7 +476,10 @@ class ServerContextTests(unittest.TestCase):
             context = fake.response["payload"]["context"]
             self.assertEqual(context["mode"], "landing")
             self.assertFalse(context["isDemo"])
-            self.assertIsNone(context["demoFixture"])
+            self.assertTrue(context["isDemoContent"])
+            self.assertTrue(context["demoFallback"])
+            self.assertEqual(context["demoFixture"], "agentcanvas-demo")
+            self.assertEqual("demo-fallback", context["source"]["kind"])
             self.assertEqual(context["workspacePath"], "")
 
             handler_cls.handle_api_get(fake, urlparse("/api/context?token=token&demo=1"))
@@ -76,10 +487,13 @@ class ServerContextTests(unittest.TestCase):
             context = fake.response["payload"]["context"]
             self.assertEqual(context["mode"], "demo")
             self.assertTrue(context["isDemo"])
+            self.assertTrue(context["isDemoContent"])
+            self.assertFalse(context["demoFallback"])
             self.assertEqual(context["demoFixture"], "agentcanvas-demo")
+            self.assertEqual("demo", context["source"]["kind"])
             self.assertEqual(context["workspacePath"], str(workspace))
 
-    def test_query_session_id_overrides_server_session_id(self):
+    def test_bound_server_token_ignores_query_session_id(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "workspace"
             workspace.mkdir()
@@ -100,9 +514,42 @@ class ServerContextTests(unittest.TestCase):
             context = fake.response["payload"]["context"]
             self.assertEqual(context["mode"], "workspace")
             self.assertFalse(context["isDemo"])
+            self.assertFalse(context["isDemoContent"])
+            self.assertFalse(context["demoFallback"])
             self.assertIsNone(context["demoFixture"])
+            self.assertEqual("workspace", context["source"]["kind"])
             self.assertEqual(context["workspacePath"], str(workspace))
-            self.assertEqual(context["sessionId"], "query-session")
+            self.assertEqual(context["sessionId"], "server-session")
+
+    def test_context_includes_learning_program_workspace_profile(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "learning-lab"
+            workspace.mkdir()
+            _write(
+                workspace,
+                "README.md",
+                (
+                    "# Learning Lab\n\n"
+                    "A curriculum project with lessons, modules, and student labs.\n"
+                ),
+            )
+            _write(workspace, "lessons/lesson-1.md", "# Lesson 1\n")
+            handler_cls = make_handler(
+                workspace,
+                token="token",
+                assistant_id="codex",
+                assistant_name="Codex",
+            )
+            fake = _FakeHandler(handler_cls)
+
+            handler_cls.handle_api_get(fake, urlparse("/api/context?token=token"))
+
+            context = fake.response["payload"]["context"]
+            profile = context["workspaceProfile"]
+            self.assertEqual("learning_program", context["workspaceKind"])
+            self.assertEqual("learning_program", profile["kind"])
+            self.assertEqual("project", context["productLanguage"]["singular"])
+            self.assertEqual("lesson", profile["product_language"]["entry_noun"])
 
 
 if __name__ == "__main__":

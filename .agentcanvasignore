@@ -1,0 +1,7 @@
+# Ignore bundled fixtures and generated assets when AgentCanvas indexes itself.
+agentcanvas/demo_project/
+agentcanvas/web/
+demo_projects/
+dist/
+examples/
+tests/fixtures/

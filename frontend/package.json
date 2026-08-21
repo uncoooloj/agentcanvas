@@ -3,11 +3,16 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0 <23"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "generate:bootstrap-prompt": "cd .. && python3 scripts/render_frontend_bootstrap_prompt.py",
+    "build": "npm run generate:bootstrap-prompt && tsc -b && vite build",
     "build:agentcanvas": "AGENTCANVAS_VITE_BASE=/agentcanvas/ AGENTCANVAS_VITE_OUT_DIR=../dist/cloudflare-agentcanvas npm run build",
     "lint": "eslint .",
+    "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -22,6 +27,7 @@
     "@radix-ui/react-tooltip": "^1.2.10",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "elkjs": "^0.11.1",
     "lucide-react": "^1.21.0",
     "next-themes": "^0.4.6",
     "react": "^19.2.6",
@@ -38,7 +44,7 @@
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
+    "@vitejs/plugin-react": "^5.1.4",
     "autoprefixer": "^10.5.0",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -48,6 +54,7 @@
     "tailwindcss": "^3.4.19",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
-    "vite": "^8.0.12"
+    "vite": "^7.3.5",
+    "vitest": "^4.1.9"
   }
 }

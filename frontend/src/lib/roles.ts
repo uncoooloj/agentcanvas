@@ -1,6 +1,11 @@
 import { GitBranch, Play, Zap, type LucideIcon } from "lucide-react"
+import { StepRole } from "./types"
 
-type RoleKey = "when" | "do" | "if"
+export enum RuleRole {
+  If = "if",
+}
+
+type RoleKey = StepRole | RuleRole
 
 interface RoleStyle {
   label: string
@@ -11,21 +16,21 @@ interface RoleStyle {
 }
 
 export const ROLE: Record<RoleKey, RoleStyle> = {
-  when: {
+  [StepRole.When]: {
     label: "When",
     chip: "bg-when-bg text-when-fg",
     accent: "bg-when-accent",
     dot: "bg-when-accent",
     icon: Zap,
   },
-  do: {
+  [StepRole.Do]: {
     label: "Do",
     chip: "bg-act-bg text-act-fg",
     accent: "bg-act-accent",
     dot: "bg-act-accent",
     icon: Play,
   },
-  if: {
+  [RuleRole.If]: {
     label: "If",
     chip: "bg-rule-bg text-rule-fg",
     accent: "bg-rule-accent",

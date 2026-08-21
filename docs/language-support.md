@@ -5,7 +5,16 @@ useful. The primary MVP path is LLM-assisted projection: language modules gather
 grounded facts, chunks, and provenance, then the calling agent or LLM translates
 those facts into human-readable canvas flows.
 
-Language support is therefore a grounding layer, not the whole product.
+Language support is therefore a grounding layer, not the whole product. The
+primary product experience is still an LLM- or agent-authored map that a person
+can read.
+
+In simple terms:
+
+- parsers and indexers find evidence
+- agents and LLMs turn that evidence into the visible canvas
+- stronger parsers make the evidence better, but they do not replace the
+  agent-authored canvas
 
 ## Architecture
 
@@ -22,14 +31,16 @@ LLM-assisted canvas_query.v1
   |
   | validation + materialization
   v
-workflow.ir.json
+canvas.ir.json
   |
   v
 AgentCanvas UI
 ```
 
-The indexer can also keep deterministic fallback graph nodes and edges, but the
-LLM-assisted path is expected to produce the best human-readable journeys.
+The indexer keeps deterministic fallback graph nodes and edges in
+`workflow.ir.json`, but the LLM-assisted path writes the browser display canvas
+to `canvas.ir.json`. Language modules ground evidence; they should not try to
+narrate the whole product on their own.
 
 ## What A Language Module Must Do
 
@@ -191,11 +202,25 @@ grounded facts with enough evidence for an LLM to safely translate:
 - "this queue/job/event can start behavior without a user request"
 
 The projection layer then asks the caller LLM to produce `canvas_query.v1`. The
-response must cite `fact_ids`, then AgentCanvas validates and materializes it:
+response must cite `fact_ids`, then AgentCanvas validates and materializes the
+display canvas:
 
 ```bash
 agentcanvas apply-query --workspace <workspace> --query canvas-query.json
 ```
+
+This writes `.agentcanvas/canvas.ir.json`. It does not overwrite
+`.agentcanvas/workflow.ir.json`.
+
+The projected canvas should be a human-readable journey, not a raw inventory of
+files. It should use AgentCanvas step language (`When`, `Do`, `If`, `ElseIf`,
+`Else`) with source provenance. `app_surfaces` should be treated as lanes or
+participants inside a journey unless the actor, outcome, or business rules truly
+differ.
+
+If the facts do not make the intended journey clear, the invoking agent should
+ask clarifying questions before applying a projection. Partial grounded mapping
+with warnings is better than unsupported inference.
 
 Use `--dry-run` first when integrating a new adapter:
 
@@ -216,7 +241,10 @@ stronger parser when it materially improves one of these:
 - source ranges and provenance
 
 Keep the module API stable so the parser strategy can improve without changing
-the rest of AgentCanvas.
+the rest of AgentCanvas. Treat parser upgrades as better evidence collection,
+not a change in product philosophy. The final map should still be written or
+reviewed by an agent/LLM that can ask clarifying questions when the evidence is
+not enough.
 
 ## Non-Goals
 

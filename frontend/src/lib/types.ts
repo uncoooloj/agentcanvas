@@ -41,28 +41,63 @@ export interface CodeGraph {
 
 // ---- The behavioral projection that the canvas renders ----
 
-// A trigger or an action. ("when" only appears as the first node of a journey.)
-export type StepRole = "when" | "do"
+// A trigger or an action. (When only appears as the first node of a journey.)
+export enum StepRole {
+  When = "when",
+  Do = "do",
+}
+
+export enum FlowNodeKind {
+  Step = "step",
+  Branch = "branch",
+}
+
+export enum CodeGraphNodeType {
+  AppSurface = "app_surface",
+  Component = "component",
+  Export = "export",
+  File = "file",
+}
+
+export enum CanvasStepKind {
+  When = "when",
+  Do = "do",
+  If = "if",
+  ElseIf = "elseIf",
+  Else = "else",
+}
+
+export enum FlowAction {
+  Change = "change",
+  AddAfter = "add_after",
+  AddRule = "add_rule",
+  Remove = "remove",
+  ChangeCondition = "change_condition",
+  AddThen = "add_then",
+  AddElse = "add_else",
+}
 
 export interface StepNode {
-  kind: "step"
+  kind: FlowNodeKind.Step
   id: string
   role: StepRole
   text: string
   detail?: string
   uncertain?: boolean
   tech?: { nodeId?: string; refs: string[] }
+  native?: CanvasV2NativeRef
 }
 
 // A decision: the "then" path runs when the condition holds, "otherwise" when it doesn't.
 export interface BranchNode {
-  kind: "branch"
+  kind: FlowNodeKind.Branch
   id: string
   condition: string
   then: FlowNode[]
   otherwise: FlowNode[]
   uncertain?: boolean
   tech?: { nodeId?: string; refs: string[] }
+  native?: CanvasV2NativeRef
 }
 
 export type FlowNode = StepNode | BranchNode
@@ -84,7 +119,490 @@ export interface AppModel {
   thin?: boolean
 }
 
-export type PendingStatus = "pending" | "sent" | "in_progress" | "done" | "needs_input" | "blocked"
+export enum CanvasV2Schema {
+  Canvas = "agentcanvas.canvas.v2",
+}
+
+export enum CanvasV2NodeKind {
+  When = "When",
+  Do = "Do",
+  Decision = "Decision",
+  Loop = "Loop",
+  Parallel = "Parallel",
+  Join = "Join",
+  Wait = "Wait",
+  SubFlow = "SubFlow",
+  End = "End",
+}
+
+export enum CanvasV2EdgeKind {
+  Normal = "normal",
+  Branch = "branch",
+  LoopBody = "loop_body",
+  LoopBack = "loop_back",
+  LoopExit = "loop_exit",
+  Parallel = "parallel",
+  Error = "error",
+  Async = "async",
+}
+
+export enum CanvasV2Status {
+  Verified = "verified",
+  Inferred = "inferred",
+  Proposed = "proposed",
+  Stale = "stale",
+}
+
+export enum CanvasV2ConfidenceLevel {
+  Low = "low",
+  Medium = "medium",
+  High = "high",
+}
+
+export interface CanvasV2Confidence {
+  level?: CanvasV2ConfidenceLevel
+  reason?: string
+}
+
+export interface CanvasV2Evidence {
+  ref: string
+  status?: CanvasV2Status
+  confidence?: CanvasV2Confidence
+  reason?: string
+}
+
+export interface CanvasV2Node {
+  id: string
+  kind: CanvasV2NodeKind
+  title: string
+  summary?: string
+  evidence: CanvasV2Evidence[]
+  evidenceRefs: string[]
+  confidence?: CanvasV2Confidence
+  status?: CanvasV2Status
+  flowRef?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface CanvasV2Edge {
+  id: string
+  kind: CanvasV2EdgeKind
+  source: string
+  target: string
+  label?: string
+  isDefault?: boolean
+  evidence: CanvasV2Evidence[]
+  evidenceRefs: string[]
+  confidence?: CanvasV2Confidence
+  metadata?: Record<string, unknown>
+}
+
+export interface CanvasV2NodeOperationPayload {
+  id: string
+  kind: CanvasV2NodeKind
+  title: string
+  summary?: string
+  evidence?: CanvasV2Evidence[]
+  evidence_refs?: string[]
+  confidence?: CanvasV2Confidence
+  status?: CanvasV2Status
+  flow_ref?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface CanvasV2EdgeOperationPayload {
+  id: string
+  kind: CanvasV2EdgeKind
+  source: string
+  target: string
+  label?: string
+  is_default?: boolean
+  evidence?: CanvasV2Evidence[]
+  evidence_refs?: string[]
+  confidence?: CanvasV2Confidence
+  metadata?: Record<string, unknown>
+}
+
+export interface CanvasV2Flow {
+  id: string
+  title: string
+  summary: string
+  entryNode?: string
+  altitude?: string
+  nodes: CanvasV2Node[]
+  edges: CanvasV2Edge[]
+  evidence: CanvasV2Evidence[]
+  evidenceRefs: string[]
+  confidence?: CanvasV2Confidence
+  metadata?: Record<string, unknown>
+}
+
+export interface CanvasV2Document {
+  schema: CanvasV2Schema
+  revision: number
+  authoredBy?: string
+  updatedAt?: string | null
+  evidence?: Record<string, unknown>
+  app: {
+    name: string
+    summary: string
+    isDemo: boolean
+  }
+  flows: CanvasV2Flow[]
+  metadata?: Record<string, unknown>
+}
+
+export interface CanvasV2NativeRef {
+  schema: CanvasV2Schema
+  flowId?: string
+  nodeId: string
+  nodeKind: CanvasV2NodeKind
+  edgeKinds?: CanvasV2EdgeKind[]
+  flowRef?: string
+}
+
+export interface MappingStage {
+  id: string
+  label: string
+  status: MappingStageStatus
+  detail?: string
+}
+
+export enum MappingStageStatus {
+  Pending = "pending",
+  Active = "active",
+  Done = "done",
+  Ready = "ready",
+  Error = "error",
+}
+
+export enum WorkspaceProgressStage {
+  Indexing = "indexing",
+  Surveying = "surveying",
+  MappingFlows = "mapping_flows",
+  Done = "done",
+}
+
+export interface WorkspaceProgressPayload {
+  schema: "agentcanvas.progress.v1"
+  stage: WorkspaceProgressStage
+  message: string
+  updated_at?: string
+  current?: number
+  total?: number
+}
+
+export interface WorkspaceProgressStatus extends Partial<WorkspaceProgressPayload> {
+  exists: boolean
+  readable: boolean
+  path?: string
+  relativePath?: string
+  progress?: WorkspaceProgressPayload | null
+  notice?: string
+  error?: unknown
+}
+
+export enum CanvasStateKind {
+  Idle = "idle",
+  Ready = "ready",
+  Loading = "loading",
+  Reindexing = "reindexing",
+  Empty = "empty",
+  Error = "error",
+}
+
+export enum JourneyActivity {
+  Idle = "idle",
+  Edited = "edited",
+  Working = "working",
+}
+
+export interface CanvasMapping {
+  schema?: string
+  status?: CanvasSourceStatus
+  mode?: CanvasMappingMode
+  primaryMode?: CanvasMappingMode
+  fallbackMode?: CanvasMappingMode
+  flowCount?: number
+  displayFlowCount?: number
+  stale?: boolean
+  empty?: boolean
+  demoFallback?: boolean
+  cacheStatus?: CanvasSourceStatus
+  source?: CanvasSourceMetadata
+  warnings?: string[]
+  stages?: MappingStage[]
+}
+
+export interface CanvasSourceMetadata {
+  kind?: CanvasSourceKind
+  status?: CanvasSourceStatus
+  label?: string
+  reason?: CanvasSourceReason
+  flowCount?: number
+  isDemoContent?: boolean
+  isFallback?: boolean
+  isStale?: boolean
+  isEmpty?: boolean
+}
+
+export enum CanvasSourceKind {
+  AgentAuthored = "agent-authored",
+  HeuristicProjection = "heuristic-projection",
+  Demo = "demo",
+  DemoFallback = "demo-fallback",
+  Empty = "empty",
+  Workspace = "workspace",
+  StaleCache = "stale-cache",
+  NoFlow = "no-flow",
+  Loading = "loading",
+  Error = "error",
+  Unknown = "unknown",
+}
+
+export enum CanvasSourceStatus {
+  Ready = "ready",
+  Demo = "demo",
+  DemoFallback = "demo_fallback",
+  Empty = "empty",
+  StaleCache = "stale_cache",
+  Workspace = "workspace",
+}
+
+export enum CanvasSourceReason {
+  DemoWorkspace = "demo_workspace",
+  LaunchPageWithoutWorkspace = "launch_page_without_workspace",
+  RequestedDemoWorkspace = "requested_demo_workspace",
+}
+
+export enum CanvasMappingMode {
+  AgentAuthored = "agent-authored",
+  Deterministic = "deterministic",
+  Empty = "empty",
+  Heuristic = "heuristic",
+  HeuristicProjection = "heuristic-projection",
+  LlmAssisted = "llm-assisted",
+  V2Compat = "v2-compat",
+}
+
+export enum CanvasSourceTone {
+  Default = "default",
+  Info = "info",
+  Warning = "warning",
+  Error = "error",
+}
+
+export enum MapFreshnessStatus {
+  Unknown = "unknown",
+  Stale = "stale",
+  Fresh = "fresh",
+}
+
+export enum MapHealthStatus {
+  Ready = "ready",
+  MissingWorkflowIr = "missing_workflow_ir",
+  MissingCanvasIr = "missing_canvas_ir",
+  UnreadableCanvasIr = "unreadable_canvas_ir",
+  StaleCanvasIr = "stale_canvas_ir",
+  UnknownCanvasFreshness = "unknown_canvas_freshness",
+}
+
+export enum MapHealthReason {
+  Missing = "missing",
+  InvalidJson = "invalid_json",
+  InvalidShape = "invalid_shape",
+  Unreadable = "unreadable",
+}
+
+export interface MapHealthFileRef {
+  path: string
+  relativePath: string
+  exists: boolean
+  readable?: boolean
+  reason?: MapHealthReason
+  error?: string
+}
+
+export interface MapHealth {
+  schema: "agentcanvas.map_health.v1"
+  workspacePath: string
+  stateDir: MapHealthFileRef
+  workflowIr: MapHealthFileRef
+  canvasIr: MapHealthFileRef
+  freshness: {
+    status: MapFreshnessStatus
+    stale?: boolean | null
+    reason?: string | null
+  }
+  pendingFiles: MapHealthFileRef & {
+    fileCount: number
+    changeCount: number
+  }
+  status: MapHealthStatus
+  ready: boolean
+  summary: string[]
+}
+
+export interface CanvasHistoryEntry {
+  revision: number
+  sha256?: string
+  updatedAt?: string | null
+  authoredBy?: string
+  path?: string
+  sizeBytes?: number
+  opSummary?: Record<string, unknown>
+  allowRewriteReason?: string | null
+  flowSummary?: {
+    count: number
+    titles: string[]
+    truncated: boolean
+  }
+  document?: CanvasV2Document
+}
+
+export interface CanvasHistoryResponse {
+  ok: boolean
+  currentRevision: number
+  current?: CanvasHistoryEntry
+  history: CanvasHistoryEntry[]
+}
+
+export interface CanvasApplyBatch {
+  base_revision?: number
+  authored_by?: string
+  operations: CanvasApplyOperation[]
+  allow_rewrite?: Record<string, unknown> | null
+}
+
+export type CanvasApplyOperation =
+  | { op: "set_app"; app: Record<string, unknown> }
+  | { op: "upsert_flow"; flow: Record<string, unknown> }
+  | { op: "upsert_node"; flow: string; node: CanvasV2NodeOperationPayload }
+  | { op: "upsert_edge"; flow: string; edge: CanvasV2EdgeOperationPayload }
+  | { op: "delete_node"; flow: string; target: string }
+  | { op: "delete_edge"; flow: string; target: string }
+  | { op: "delete_flow"; target: string }
+
+export interface CanvasApplyResult {
+  ok: boolean
+  autoMigrated?: boolean
+  dryRun?: boolean
+  revision: number
+  baseRevision: number
+  path?: string
+}
+
+export interface CanvasRestoreRequest {
+  revision: number
+  baseRevision?: number
+  authoredBy?: string
+}
+
+export interface CanvasRestoreResult {
+  ok: boolean
+  revision: number
+  baseRevision: number
+  restoredRevision: number
+  path?: string
+}
+
+export enum CopyState {
+  Idle = "idle",
+  Copied = "copied",
+  Manual = "manual",
+}
+
+export interface CanvasSourceSummary {
+  kind: CanvasSourceKind
+  label: string
+  shortLabel: string
+  detail: string
+  tone: CanvasSourceTone
+  flowCount?: number
+}
+
+export enum PendingStatus {
+  Pending = "pending",
+  Sent = "sent",
+  InProgress = "in_progress",
+  Implemented = "implemented",
+  NeedsInput = "needs_input",
+  Blocked = "blocked",
+  Verified = "verified",
+  Done = "done",
+  Cancelled = "cancelled",
+  Rejected = "rejected",
+}
+
+export enum LegacyPendingStatus {
+  Queued = "queued",
+}
+
+export const PENDING_STATUS_LABELS: Record<PendingStatus, string> = {
+  [PendingStatus.Pending]: "pending",
+  [PendingStatus.Sent]: "sent",
+  [PendingStatus.InProgress]: "in progress",
+  [PendingStatus.Implemented]: "implemented",
+  [PendingStatus.NeedsInput]: "needs input",
+  [PendingStatus.Blocked]: "blocked",
+  [PendingStatus.Verified]: "verified",
+  [PendingStatus.Done]: "done",
+  [PendingStatus.Cancelled]: "cancelled",
+  [PendingStatus.Rejected]: "rejected",
+}
+
+export function pendingStatusLabel(status: PendingStatus): string {
+  return PENDING_STATUS_LABELS[status]
+}
+
+export enum ConversationRole {
+  Agent = "agent",
+  User = "user",
+}
+
+export enum ConversationTurnKind {
+  Question = "question",
+  Answer = "answer",
+  Note = "note",
+}
+
+export interface PendingConversationTurn {
+  id: string
+  at?: string
+  role: ConversationRole
+  kind: ConversationTurnKind
+  text: string
+}
+
+export interface PendingConversationSummary {
+  turns: number
+  lastRole?: ConversationRole
+  lastKind?: ConversationTurnKind
+  lastAt?: string
+  unansweredQuestion?: {
+    id?: string
+    text?: string
+    at?: string
+  } | null
+}
+
+export enum ChangeKind {
+  New = "new",
+  Edited = "edited",
+  Removing = "removing",
+}
+
+export enum PendingRefKind {
+  Flow = "flow",
+  Node = "node",
+}
+
+export interface PendingRef {
+  kind: PendingRefKind
+  id: string
+  flow?: string
+  source?: string
+}
 
 export interface PendingStatusHistoryEntry {
   status: PendingStatus
@@ -109,6 +627,8 @@ export interface PendingItem {
   jsonPath?: string | null
   markdownPath?: string | null
   statusHistory?: PendingStatusHistoryEntry[]
+  conversationSummary?: PendingConversationSummary
+  conversation?: PendingConversationTurn[]
 }
 
 // ---- helpers ----
@@ -116,7 +636,7 @@ export interface PendingItem {
 export function findNode(nodes: FlowNode[], id: string): FlowNode | null {
   for (const n of nodes) {
     if (n.id === id) return n
-    if (n.kind === "branch") {
+    if (n.kind === FlowNodeKind.Branch) {
       const found = findNode(n.then, id) ?? findNode(n.otherwise, id)
       if (found) return found
     }
@@ -128,7 +648,7 @@ export function countSteps(nodes: FlowNode[]): number {
   let c = 0
   for (const n of nodes) {
     c += 1
-    if (n.kind === "branch") c += countSteps(n.then) + countSteps(n.otherwise)
+    if (n.kind === FlowNodeKind.Branch) c += countSteps(n.then) + countSteps(n.otherwise)
   }
   return c
 }

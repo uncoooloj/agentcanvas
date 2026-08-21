@@ -22,6 +22,8 @@ from .validation import (
     materialize_canvas_model,
     validate_canvas_model,
     validate_canvas_query,
+    validate_canvas_query_quality,
+    validate_canvas_query_result,
 )
 
 __all__ = [
@@ -40,4 +42,6 @@ __all__ = [
     "normalize_fact_bundle",
     "validate_canvas_model",
     "validate_canvas_query",
+    "validate_canvas_query_quality",
+    "validate_canvas_query_result",
 ]

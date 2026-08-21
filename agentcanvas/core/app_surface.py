@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -83,7 +84,43 @@ GEM_FRAMEWORKS = {
     "sinatra": "sinatra",
 }
 
-TYPE_PRIORITY = {"mobile": 4, "web": 3, "backend": 2, "package": 1}
+class AppSurfaceType(str, Enum):
+    BACKEND = "backend"
+    CLI = "cli"
+    MOBILE = "mobile"
+    PACKAGE = "package"
+    WEB = "web"
+
+
+class EntryHintKind(str, Enum):
+    BACKEND_ENTRY = "backend-entry"
+    BACKEND_HANDLER = "backend-handler"
+    CLI_COMMAND = "cli-command"
+    CLI_ENTRY = "cli-entry"
+    FLOW = "flow"
+    MOBILE_ENTRY = "mobile-entry"
+    MOBILE_SCREEN = "mobile-screen"
+    ROUTE = "route"
+    WEB_ENTRY = "web-entry"
+    WEB_ROUTE = "web-route"
+
+
+TYPE_PRIORITY = {
+    AppSurfaceType.MOBILE.value: 5,
+    AppSurfaceType.WEB.value: 4,
+    AppSurfaceType.BACKEND.value: 3,
+    AppSurfaceType.CLI.value: 2,
+    AppSurfaceType.PACKAGE.value: 1,
+}
+
+
+def app_surface_type_value(value: Any) -> str:
+    if isinstance(value, AppSurfaceType):
+        return value.value
+    candidate = str(value or AppSurfaceType.PACKAGE.value)
+    if candidate in TYPE_PRIORITY:
+        return candidate
+    return AppSurfaceType.PACKAGE.value
 
 
 class _SurfaceAccumulator:
@@ -186,6 +223,7 @@ def enrich_app_surfaces(
         surface["source_files"] += 1
         if info.get("is_test"):
             surface["test_files"] += 1
+            continue
 
         for route in info.get("routes") or []:
             if not isinstance(route, Mapping):
@@ -199,7 +237,7 @@ def enrich_app_surfaces(
             if _append_hint(
                 surface,
                 {
-                    "kind": "route",
+                    "kind": EntryHintKind.ROUTE.value,
                     "path": route_file,
                     "detail": detail,
                     "source": "route-extraction",
@@ -322,6 +360,10 @@ def _classify_manifest(path: Path, rel: str) -> Optional[Dict[str, Any]]:
             scores["backend"] += 1
         elif _contains_any(text, ["fastapi", "django", "flask", "starlette"]):
             scores["backend"] += 3
+        elif _contains_any(text, ["[project.scripts]", "[project.gui-scripts]", "[tool.poetry.scripts]"]):
+            scores["cli"] += 4
+        elif _contains_any(text, ["[tool.setuptools.packages.find]", "[tool.poetry]", "[project]"]):
+            scores["package"] += 1
         if not scores:
             return None
         return _manifest_signal(
@@ -446,7 +488,7 @@ def _manifest_signal(
 
 def _dominant_type(scores: Counter[str]) -> str:
     if not scores:
-        return "package"
+        return AppSurfaceType.PACKAGE.value
     return sorted(
         scores.items(),
         key=lambda item: (item[1], TYPE_PRIORITY.get(item[0], 0), item[0]),
@@ -477,7 +519,8 @@ def _path_type_score(root: str) -> Counter[str]:
     return scores
 
 
-def _entry_hints(root: str, app_type: str, rel_path_set: set[str]) -> List[Dict[str, str]]:
+def _entry_hints(root: str, app_type: str | AppSurfaceType, rel_path_set: set[str]) -> List[Dict[str, str]]:
+    app_type = app_surface_type_value(app_type)
     hints: List[Tuple[int, Dict[str, str]]] = []
     for rel in sorted(rel_path_set):
         if not _path_is_under_root(rel, root):
@@ -508,38 +551,46 @@ def _entry_hints(root: str, app_type: str, rel_path_set: set[str]) -> List[Dict[
 def _entry_hint_for_path(
     rel: str,
     relative_parts: Tuple[str, ...],
-    app_type: str,
+    app_type: str | AppSurfaceType,
 ) -> Optional[Dict[str, str]]:
+    app_type = app_surface_type_value(app_type)
     lowered = rel.lower()
     part_set = {part.lower() for part in relative_parts}
     name = PurePosixPath(rel).name.lower()
 
-    if app_type == "mobile":
+    if app_type == AppSurfaceType.MOBILE.value:
         if relative_parts == ("lib", "main.dart") or name in {"main.dart", "app.dart"}:
-            return {"kind": "mobile-entry", "path": rel, "detail": "Flutter/Dart app entry"}
+            return {"kind": EntryHintKind.MOBILE_ENTRY.value, "path": rel, "detail": "Flutter/Dart app entry"}
         if part_set.intersection({"features", "flows", "pages", "routes", "screens", "views"}) or "signup" in lowered:
-            return {"kind": "mobile-screen", "path": rel, "detail": _human_flow_detail(rel)}
+            return {"kind": EntryHintKind.MOBILE_SCREEN.value, "path": rel, "detail": _human_flow_detail(rel)}
         return None
 
-    if app_type == "web":
+    if app_type == AppSurfaceType.WEB.value:
         if name in {"main.tsx", "main.jsx", "app.tsx", "app.jsx", "index.tsx", "index.jsx"}:
-            return {"kind": "web-entry", "path": rel, "detail": "browser app entry"}
+            return {"kind": EntryHintKind.WEB_ENTRY.value, "path": rel, "detail": "browser app entry"}
         route = _web_route_from_parts(relative_parts)
         if route:
-            return {"kind": "web-route", "path": rel, "detail": route}
+            return {"kind": EntryHintKind.WEB_ROUTE.value, "path": rel, "detail": route}
         if "signup" in lowered:
-            return {"kind": "web-route", "path": rel, "detail": _human_flow_detail(rel)}
+            return {"kind": EntryHintKind.WEB_ROUTE.value, "path": rel, "detail": _human_flow_detail(rel)}
         return None
 
-    if app_type == "backend":
+    if app_type == AppSurfaceType.BACKEND.value:
         if name in {"main.go", "server.go", "app.go", "index.js", "server.js", "main.py"}:
-            return {"kind": "backend-entry", "path": rel, "detail": "service entry"}
+            return {"kind": EntryHintKind.BACKEND_ENTRY.value, "path": rel, "detail": "service entry"}
         if part_set.intersection({"controllers", "handlers", "routes", "router", "views"}) or "signup" in lowered:
-            return {"kind": "backend-handler", "path": rel, "detail": _human_flow_detail(rel)}
+            return {"kind": EntryHintKind.BACKEND_HANDLER.value, "path": rel, "detail": _human_flow_detail(rel)}
+        return None
+
+    if app_type == AppSurfaceType.CLI.value:
+        if name in {"cli.py", "__main__.py", "main.py"}:
+            return {"kind": EntryHintKind.CLI_ENTRY.value, "path": rel, "detail": "command line entry"}
+        if part_set.intersection({"commands", "cli", "cmd"}):
+            return {"kind": EntryHintKind.CLI_COMMAND.value, "path": rel, "detail": _human_flow_detail(rel)}
         return None
 
     if "signup" in lowered:
-        return {"kind": "flow", "path": rel, "detail": _human_flow_detail(rel)}
+        return {"kind": EntryHintKind.FLOW.value, "path": rel, "detail": _human_flow_detail(rel)}
     return None
 
 

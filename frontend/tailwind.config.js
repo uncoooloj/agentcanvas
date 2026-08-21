@@ -6,11 +6,11 @@ export default {
     container: { center: true, padding: "2rem", screens: { "2xl": "1400px" } },
     extend: {
       fontFamily: {
-        sans: ["Plus Jakarta Sans Variable", "system-ui", "sans-serif"],
+        sans: ["Open Runde", "system-ui", "sans-serif"],
       },
       fontWeight: {
-        semibold: "700",
-        bold: "800",
+        semibold: "600",
+        bold: "700",
       },
       colors: {
         border: "hsl(var(--border))",

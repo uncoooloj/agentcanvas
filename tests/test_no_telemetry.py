@@ -48,7 +48,7 @@ class NoTelemetryTests(unittest.TestCase):
         for path in (PROJECT_ROOT / "frontend" / "src").rglob("*"):
             if path.suffix not in {".ts", ".tsx"}:
                 continue
-            rel = str(path.relative_to(PROJECT_ROOT))
+            rel = path.relative_to(PROJECT_ROOT).as_posix()
             if rel == "frontend/src/components/landing/studioDemo.ts":
                 # Contains static demo code snippet strings, not live network calls.
                 continue

@@ -1,13 +1,13 @@
 import { useShallow } from "zustand/react/shallow"
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
 import {
   Background, BackgroundVariant, Controls, MarkerType, MiniMap, Panel,
   ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type OnNodesChange,
 } from "@xyflow/react"
 import { ArrowRight, GitCompareArrows, Layers3, PanelLeftOpen, Pin, Sparkles, Workflow } from "lucide-react"
-import { FLOW_WIDTH, layoutFlow, layoutSystem, SYSTEM_WIDTH, type LayoutNode, type MeasuredSizes } from "@/lib/studioLayout"
+import { FLOW_WIDTH, SYSTEM_WIDTH, layoutFlow, layoutSystem, type LayoutNode, type MeasuredSizes } from "@/lib/studioLayout"
 import { diffCounts, isPendingRun, runnerLabels, type StudioDocument, type StudioFlow } from "@/lib/studioTypes"
-import { useStudioStore, visibleDocument } from "@/lib/studioStore"
+import { studioStore, useStudioStore, visibleDocument } from "@/lib/studioStore"
 import { CopyMappingPrompt, DiffCounts } from "./StudioTopBar"
 import { studioNodeTypes, type StudioGraphNode } from "./StudioNodes"
 
@@ -36,17 +36,17 @@ export function SpatialCanvas(props: SpatialCanvasProps) {
 function CanvasGraph({ document, flow, focusCommand, onPaneClear }: SpatialCanvasProps & { document: StudioDocument; flow?: StudioFlow }) {
   const {
     activeTab, diffOnlyFilter, setDiffOnlyFilter, sidebarOpen, setSidebarOpen, pinMode, setPinMode,
-    inspectedNodeId, inspectedComponentId, setInspectedNode, setInspectedComponent, selectedNodeIds,
+    inspectedNodeId, inspectedComponentId, setInspectedNode, setInspectedComponent,
     toggleNodeSelection, goToFlow, startRun, approvePlan, discardPlan, setTab,
-    annotations, staleNodeIds, workspacePath, unmapped, runner, busy, proposal,
+    workspacePath, unmapped, runner, busy, proposal,
   } = useStudioStore(useShallow((state) => ({
     activeTab: state.activeTab, diffOnlyFilter: state.diffOnlyFilter, setDiffOnlyFilter: state.setDiffOnlyFilter,
     sidebarOpen: state.sidebarOpen, setSidebarOpen: state.setSidebarOpen, pinMode: state.pinMode, setPinMode: state.setPinMode,
     inspectedNodeId: state.inspectedNodeId, inspectedComponentId: state.inspectedComponentId,
-    setInspectedNode: state.setInspectedNode, setInspectedComponent: state.setInspectedComponent, selectedNodeIds: state.selectedNodeIds,
+    setInspectedNode: state.setInspectedNode, setInspectedComponent: state.setInspectedComponent,
     toggleNodeSelection: state.toggleNodeSelection, goToFlow: state.goToFlow, startRun: state.startRun,
     approvePlan: state.approvePlan, discardPlan: state.discardPlan, setTab: state.setTab,
-    annotations: state.data?.annotations, staleNodeIds: state.data?.stale_node_ids, workspacePath: state.data?.workspace,
+    workspacePath: state.data?.workspace,
     unmapped: state.data?.mode === "workspace" && !state.data.has_mapped_canvas,
     runner: state.data?.runner.preferred ?? "copy",
     busy: isPendingRun(state.data?.active_run),
@@ -126,55 +126,52 @@ function CanvasGraph({ document, flow, focusCommand, onPaneClear }: SpatialCanva
     })
   }
 
-  const openPins = (annotations ?? []).filter((pin) => !pin.resolved)
-  const componentById = new Map(components.map((component) => [component.id, component]))
-  const stepById = new Map(filteredFlow?.nodes.map((step) => [step.id, step]))
-  function inspect(id: string, pins = pinMode) {
+  const inspect = useCallback((id: string, pins = studioStore.getState().pinMode) => {
     setPinMode(pins)
     if (system) setInspectedComponent(id)
     else setInspectedNode(id)
-  }
+  }, [system, setPinMode, setInspectedComponent, setInspectedNode])
 
-  const nodes = positions.flatMap<StudioGraphNode>(({ id, x, y }) => {
-    const position = { x, y }
-    const component = componentById.get(id)
-    if (system && component) {
-      const firstFlow = document.flows.find((item) => item.component_ids.includes(id))
+  const nodes = useMemo(() => {
+    const componentById = new Map(components.map((component) => [component.id, component]))
+    const stepById = new Map(filteredFlow?.nodes.map((step) => [step.id, step]))
+    return positions.flatMap<StudioGraphNode>(({ id, x, y }) => {
+      const position = { x, y }
+      const component = componentById.get(id)
+      if (system && component) {
+        const firstFlow = document.flows.find((item) => item.component_ids.includes(id))
+        return [{
+          id, position, type: "system", draggable: false, measured: measured[id],
+          style: { width: SYSTEM_WIDTH }, ariaLabel: component.name,
+          data: { component, inspect: (pins) => inspect(id, pins), viewFlows: firstFlow && (() => goToFlow(firstFlow.id)) },
+        }]
+      }
+      const step = stepById.get(id)
+      if (system || !step) return []
+      const nextFlow = step.flow_ref
       return [{
-        id, position, type: "system", draggable: false, style: { width: SYSTEM_WIDTH }, ariaLabel: component.name,
+        id, position, type: "step", draggable: false, measured: measured[id], style: { width: FLOW_WIDTH }, ariaLabel: step.title,
         data: {
-          component, inspected: inspectedComponentId === id,
-          pins: openPins.filter((pin) => pin.target_type === "component" && pin.target_id === id).length,
+          step, flowId: filteredFlow?.id, component: step.component_id ? componentById.get(step.component_id) : undefined,
           inspect: (pins) => inspect(id, pins),
-          viewFlows: firstFlow && (() => goToFlow(firstFlow.id)),
+          steer: () => { toggleNodeSelection(id); focusCommand() },
+          jump: nextFlow && document.flows.some((item) => item.id === nextFlow) ? () => goToFlow(nextFlow) : undefined,
         },
       }]
-    }
-    const step = stepById.get(id)
-    if (system || !step) return []
-    const nextFlow = step.flow_ref
-    return [{
-      id, position, type: "step", draggable: false, style: { width: FLOW_WIDTH }, ariaLabel: step.title,
-      data: {
-        step, component: step.component_id ? componentById.get(step.component_id) : undefined,
-        inspected: inspectedNodeId === id, steered: selectedNodeIds.includes(id),
-        stale: Boolean(staleNodeIds?.includes(id)),
-        pins: openPins.filter((pin) => pin.target_type === "node" && pin.target_id === id && (!pin.flow_id || pin.flow_id === flow?.id)).length,
-        inspect: (pins) => inspect(id, pins),
-        steer: () => { toggleNodeSelection(id); focusCommand() },
-        jump: nextFlow && document.flows.some((item) => item.id === nextFlow) ? () => goToFlow(nextFlow) : undefined,
-      },
-    }]
-  })
-  const nodeIds = new Set(nodes.map((node) => node.id))
-  const edges: Edge[] = (system ? componentEdges : filteredFlow?.edges ?? [])
-    .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
-    .map((edge) => ({
-      id: edge.id, source: edge.source, target: edge.target, type: "smoothstep",
-      label: "protocol" in edge && edge.protocol ? [edge.label, edge.protocol].filter(Boolean).join(" · ") : edge.label, selectable: false, focusable: false,
-      markerEnd: { type: MarkerType.ArrowClosed, color: "var(--s-edge)", width: 14, height: 14 },
-      className: `s-edge ${"kind" in edge ? `s-edge-${edge.kind}` : ""} ${edge.diff_status ? `s-edge-${edge.diff_status}` : ""}`,
-    }))
+    })
+  }, [components, document.flows, filteredFlow, focusCommand, goToFlow, inspect, measured, positions, system, toggleNodeSelection])
+
+  const edges = useMemo<Edge[]>(() => {
+    const nodeIds = new Set(nodes.map((node) => node.id))
+    return (system ? componentEdges : filteredFlow?.edges ?? [])
+      .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+      .map((edge) => ({
+        id: edge.id, source: edge.source, target: edge.target, type: "smoothstep",
+        label: "protocol" in edge && edge.protocol ? [edge.label, edge.protocol].filter(Boolean).join(" · ") : edge.label, selectable: false, focusable: false,
+        markerEnd: { type: MarkerType.ArrowClosed, color: "var(--s-edge)", width: 14, height: 14 },
+        className: `s-edge ${"kind" in edge ? `s-edge-${edge.kind}` : ""} ${edge.diff_status ? `s-edge-${edge.diff_status}` : ""}`,
+      }))
+  }, [nodes, system, componentEdges, filteredFlow?.edges])
   const counts = diffCounts(proposal && !diff ? proposal.flows.flatMap((item) => item.nodes) : flow?.nodes ?? [])
   const heading = system ? "System topology" : flow?.title ?? (diff ? "Behavioral diff" : "Flows")
   const caption = system

@@ -1,11 +1,28 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import { createStudioApi } from "@/lib/studioApi"
 import { demoBootstrap, demoFileDiff, demoFileSlice, demoProposal, demoVerified } from "@/lib/studioDemo"
 import { layoutFlow, layoutSystem, type LayoutNode } from "@/lib/studioLayout"
 import { createStudioStore, visibleDocument } from "@/lib/studioStore"
 import { diffCounts, type StudioAnnotation, type StudioRun } from "@/lib/studioTypes"
+import { RunVerification } from "./CommandDock"
 
 const demo = demoBootstrap()
+const workspace = { ...demo, mode: "workspace" as const }
+const runFixture = (overrides: Partial<StudioRun> = {}): StudioRun => ({
+  id: "run-1", kind: "plan", status: "running", runner: "codex", logs: [], changed_files: [], ...overrides,
+})
+
+class StudioEventSource extends EventTarget {
+  static current: StudioEventSource
+  constructor() { super(); StudioEventSource.current = this }
+  emit(type: string, payload: unknown) {
+    this.dispatchEvent(new MessageEvent(type, { data: JSON.stringify(payload) }))
+  }
+  close() {}
+}
+const eventSource = StudioEventSource as unknown as typeof EventSource
 
 function assertGraph(nodes: LayoutNode[], ids: string[]) {
   expect(nodes.map(({ id }) => id)).toEqual(ids)
@@ -90,7 +107,7 @@ describe("Studio transport", () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it("authenticates API fetches with a header and the event stream with a query token", async () => {
-    const fetcher = vi.fn(async (_url: string, _init: RequestInit) => Response.json(demo))
+    const fetcher = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => Response.json(demo))
     vi.stubGlobal("fetch", fetcher)
     const api = createStudioApi({ baseUrl: "http://studio.test", token: "studio-fixture-token" })
     await api.bootstrap({ diffBase: "main..HEAD" })
@@ -101,10 +118,127 @@ describe("Studio transport", () => {
     expect(new Headers(init.headers).get("X-AgentCanvas-Token")).toBe("studio-fixture-token")
     expect(new URL(api.eventUrl()).searchParams.get("token")).toBe("studio-fixture-token")
   })
+
+  it("normalizes malformed runs and log entries across snapshots, run responses, and SSE", async () => {
+    const log = { at: "2026-11-21T01:00:00Z", kind: "build", text: "Applying changes" }
+    const run = {
+      ...runFixture(),
+      logs: [log, { ...log, id: "replay" }, null, "malformed", { at: log.at, kind: "build", text: 42 },
+        { timestamp: log.at, message: "Runner emitted legacy activity" }],
+      changed_files: ["src/main.ts", 12, null],
+    }
+    const malformedRun = { ...run, id: "malformed", status: "imaginary" }
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json({
+      ...workspace, active_run: { ...run, logs: { text: "not a list" } }, recent_runs: [malformedRun, null, run],
+    })).mockResolvedValueOnce(Response.json({ ok: true, run }))
+    vi.stubGlobal("fetch", fetcher)
+    const api = createStudioApi()
+    const snapshot = await api.bootstrap()
+    expect(snapshot.active_run?.logs).toEqual([])
+    expect(snapshot.recent_runs).toHaveLength(1)
+    const expectedLogs = [log, { at: log.at, kind: "runner", text: "Runner emitted legacy activity" }]
+    expect(snapshot.recent_runs[0].logs).toEqual(expectedLogs)
+    const started = await api.startRun({ kind: "plan" })
+    expect(started.run.logs).toEqual(expectedLogs)
+    expect(started.run.changed_files).toEqual(["src/main.ts"])
+
+    const onEvent = vi.fn()
+    const subscription = api.subscribeEvents({}, { onEvent }, eventSource)
+    StudioEventSource.current.emit("run.updated", { run: malformedRun })
+    StudioEventSource.current.emit("run.updated", { run, seq: 1 })
+    expect(onEvent).toHaveBeenCalledTimes(1)
+    expect(onEvent).toHaveBeenCalledWith({ type: "run.updated", seq: 1, payload: { run: started.run } })
+    subscription.close()
+  })
+
+  it("renders Lane A verification with a summary, output, tests, or changed files", async () => {
+    const api = createStudioApi()
+    const nested = {
+      summary: "Verified checkout retries.",
+      output: "Typecheck succeeded.",
+      tests: [{ command: "vitest run checkout", passed: true, output: "4 tests passed." }],
+      changed_files: ["checkout.ts"],
+    }
+    for (const verification of [
+      { summary: nested.summary },
+      { output: nested.output },
+      { tests: nested.tests },
+      { changed_files: nested.changed_files },
+      { command: "tsc -b", passed: false },
+      nested,
+    ]) {
+      vi.stubGlobal("fetch", async () => Response.json({
+        ok: true, run: { ...runFixture({ kind: "build", status: "completed" }), verification },
+      }))
+      const { run } = await api.startRun({ kind: "build" })
+      const html = renderToStaticMarkup(createElement(RunVerification, { run }))
+      expect(html).toContain('aria-label="Verification"')
+      if ("summary" in verification) expect(html).toContain(nested.summary)
+      if ("output" in verification) expect(html).toContain(nested.output)
+      if ("tests" in verification) expect(html).toContain("4 tests passed.")
+      if ("changed_files" in verification) expect(html).toContain("checkout.ts")
+      if ("command" in verification) expect(html).toContain("Failed")
+    }
+    vi.stubGlobal("fetch", async () => Response.json({
+      ok: true, run: { ...runFixture({ kind: "build", status: "completed" }), verification_summary: "Agent verification complete." },
+    }))
+    const { run } = await api.startRun({ kind: "build" })
+    expect(renderToStaticMarkup(createElement(RunVerification, { run }))).toContain("Agent verification complete.")
+  })
 })
 
 describe("Studio state", () => {
-  afterEach(() => vi.useRealTimers())
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it.each([
+    () => Promise.resolve(new Response("Not found", { status: 404 })),
+    () => Promise.resolve(new Response("<html>Static site</html>", { headers: { "content-type": "text/html" } })),
+    () => Promise.reject(new TypeError("Failed to fetch")),
+  ])("shows the landing page on a public static URL and enters demo only for ?demo=1", async (fetchResponse) => {
+    vi.stubGlobal("fetch", fetchResponse)
+    const location = { origin: "https://studio.test", search: "" }
+    vi.stubGlobal("window", { location, sessionStorage: { getItem: () => null } })
+    const store = createStudioStore()
+    await store.getState().bootstrap()
+    expect(store.getState().data?.mode).toBe("landing")
+    location.search = "?demo=1"
+    await store.getState().bootstrap()
+    expect(store.getState().data?.mode).toBe("demo")
+  })
+
+  it("keeps connection errors for token-bound and previously open workspaces", async () => {
+    const api = createStudioApi({ token: "recognized-token" })
+    vi.stubGlobal("fetch", async () => new Response(null, { status: 404 }))
+    const store = createStudioStore({ api })
+    await store.getState().bootstrap()
+    expect(store.getState().data).toBeNull()
+    expect(store.getState().error).toBeTruthy()
+
+    vi.stubGlobal("fetch", async () => Response.json(workspace))
+    await store.getState().bootstrap()
+    vi.stubGlobal("fetch", async () => { throw new TypeError("Network offline") })
+    await store.getState().bootstrap()
+    expect(store.getState().data?.mode).toBe("workspace")
+    expect(store.getState().error).toMatch(/unreachable/)
+  })
+
+  it("recognizes the same workspace after its token moves from the URL to session storage", async () => {
+    const location = { origin: "https://studio.test", search: "?token=recognized-token" }
+    const storage = new Map<string, string>()
+    vi.stubGlobal("window", { location, sessionStorage: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+    } })
+    const store = createStudioStore()
+    vi.stubGlobal("fetch", async () => Response.json(workspace))
+    await store.getState().bootstrap({ token: "recognized-token" })
+
+    location.search = ""
+    vi.stubGlobal("fetch", async () => { throw new TypeError("Workspace offline") })
+    await store.getState().bootstrap()
+    expect(store.getState().data?.mode).toBe("workspace")
+    expect(store.getState().error).toMatch(/unreachable/)
+  })
 
   it("handles SSE graph, run, log, and annotation updates", async () => {
     const store = createStudioStore()
@@ -115,9 +249,9 @@ describe("Studio state", () => {
     expect(store.getState().data?.document).toBe(document)
     expect(store.getState().data?.stale_node_ids).toEqual(["old-step"])
 
-    const run: StudioRun = { id: "run-sse", kind: "plan", runner: "codex", status: "running" }
+    const run = runFixture({ id: "run-sse" })
     handleEvent({ type: "run.updated", payload: { run } })
-    const entry = { id: "log-sse", stage: "Inspect", tool: "read_file", message: "Read checkout route" }
+    const entry = { id: "log-sse", at: "2026-11-21T01:00:00Z", kind: "Inspect", tool: "read_file", text: "Read checkout route" }
     handleEvent({ type: "run.log", payload: { run_id: run.id, entry } })
     expect(store.getState().data?.active_run?.logs).toContainEqual(entry)
     handleEvent({ type: "run.updated", payload: { run: { ...run, status: "completed" } } })
@@ -140,12 +274,109 @@ describe("Studio state", () => {
     const store = createStudioStore({ api })
     await store.getState().bootstrap()
     const starting = store.getState().startRun({ kind: "map" })
-    const run = { id: "map-fast", kind: "map", runner: "codex", status: "running" } as const
+    const run = runFixture({ id: "map-fast", kind: "map" })
     store.getState().handleEvent({ type: "run.updated", payload: { run: { ...run, status: "completed" } } })
     settle({ ok: true, run })
     await starting
     expect(store.getState().activeRun?.status).toBe("completed")
     expect(store.getState().data?.active_run).toBeNull()
+    store.getState().disconnectEvents()
+  })
+
+  it("omits implicit flow and node scope on System and includes pins only when explicitly scoped", async () => {
+    const [flow, other] = demo.document.flows
+    const [componentId] = flow.component_ids
+    const annotations: StudioAnnotation[] = [
+      { id: "flow-pin", target_type: "node", target_id: flow.nodes[0].id, flow_id: flow.id, text: "Flow note", resolved: false },
+      { id: "other-pin", target_type: "flow", target_id: other.id, flow_id: other.id, text: "Other note", resolved: false },
+      { id: "component-pin", target_type: "component", target_id: componentId, text: "Component note", resolved: false },
+    ]
+    const api = createStudioApi()
+    vi.spyOn(api, "bootstrap").mockResolvedValue({ ...workspace, annotations })
+    const startRun = vi.spyOn(api, "startRun").mockResolvedValue({ ok: true, run: runFixture({ status: "completed" }) })
+    const store = createStudioStore({ api })
+    await store.getState().bootstrap()
+    const state = store.getState()
+    state.goToFlow(flow.id)
+    state.toggleNodeSelection(flow.nodes[0].id)
+    await state.startRun({ kind: "plan" })
+    expect(startRun).toHaveBeenLastCalledWith(expect.objectContaining({
+      flow_id: flow.id, node_ids: [flow.nodes[0].id], annotation_ids: ["flow-pin", "component-pin"],
+    }))
+    state.setTab("system")
+    await state.startRun({ kind: "plan" })
+    const payload = JSON.parse(JSON.stringify(startRun.mock.lastCall![0]))
+    expect(payload).not.toHaveProperty("flow_id")
+    expect(payload).not.toHaveProperty("node_ids")
+    expect(payload.annotation_ids).toEqual([])
+    state.setInspectedComponent(componentId)
+    await state.startRun({ kind: "build" })
+    expect(startRun).toHaveBeenLastCalledWith(expect.objectContaining({ node_ids: [componentId], annotation_ids: ["component-pin"] }))
+    state.setIncludeAllPins(true)
+    await state.startRun({ kind: "build" })
+    expect(startRun).toHaveBeenLastCalledWith(expect.objectContaining({
+      annotation_ids: ["flow-pin", "other-pin", "component-pin"],
+    }))
+  })
+
+  it.each(["delete", "SSE removal", "SSE replacement"])("ignores a late pin edit after %s", async (removal) => {
+    const pin: StudioAnnotation = { id: "pin-1", target_type: "flow", target_id: demo.document.flows[0].id, text: "Original", resolved: false }
+    const api = createStudioApi()
+    vi.spyOn(api, "bootstrap").mockResolvedValue({ ...workspace, annotations: [pin] })
+    vi.spyOn(api, "deleteAnnotation").mockResolvedValue({ ok: true })
+    let settle!: (value: { ok: true; annotation: StudioAnnotation }) => void
+    vi.spyOn(api, "updateAnnotation").mockReturnValue(new Promise((resolve) => { settle = resolve }))
+    const store = createStudioStore({ api })
+    await store.getState().bootstrap()
+    const { editAnnotation, deleteAnnotation, handleEvent } = store.getState()
+    const editing = editAnnotation(pin.id, { text: "A late edit" })
+    if (removal === "delete") await deleteAnnotation(pin.id)
+    else handleEvent({ type: "annotations.updated", payload: removal === "SSE removal" ? { deleted: pin.id } : { annotations: [] } })
+    settle({ ok: true, annotation: { ...pin, text: "A late edit" } })
+    await editing
+    expect(store.getState().data?.annotations).toEqual([])
+  })
+
+  it("promotes a waiting run when the foreground run ends", async () => {
+    const store = createStudioStore()
+    await store.getState().bootstrap({ demo: true })
+    const active = runFixture()
+    const waiting = runFixture({ id: "waiting", status: "needs_input", question: "Which provider?" })
+    const { handleEvent } = store.getState()
+    handleEvent({ type: "run.updated", payload: { run: active } })
+    handleEvent({ type: "run.updated", payload: { run: waiting } })
+    expect(store.getState().activeRun?.id).toBe(active.id)
+    handleEvent({ type: "run.updated", payload: { run: { ...active, status: "failed" } } })
+    expect(store.getState().activeRun).toEqual(waiting)
+    expect(store.getState().data?.active_run).toEqual(waiting)
+  })
+
+  it("resyncs on a gap or overflow and ignores a superseded refresh failure", async () => {
+    const api = createStudioApi()
+    const bootstrap = vi.spyOn(api, "bootstrap").mockResolvedValueOnce(workspace)
+    const store = createStudioStore({ api, eventSource })
+    await store.getState().bootstrap()
+    const source = StudioEventSource.current
+    let rejectRefresh!: (error: Error) => void
+    bootstrap.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectRefresh = reject }))
+    const run = runFixture()
+    const entry = { at: "2026-11-21T01:00:00Z", kind: "runner", text: "Working" }
+    bootstrap.mockResolvedValueOnce({ ...workspace, active_run: { ...run, logs: [entry] } })
+    source.emit("run.updated", { seq: 1, run })
+    source.emit("run.log", { seq: 3, run_id: run.id, entry })
+    expect(bootstrap).toHaveBeenCalledTimes(2)
+    source.emit("studio.resync", { seq: 8 })
+    expect(bootstrap).toHaveBeenCalledTimes(3)
+    await Promise.resolve()
+    rejectRefresh(new Error("Old request failed"))
+    await Promise.resolve()
+    expect(store.getState().error).toBeNull()
+    source.emit("run.log", { seq: 9, run_id: run.id, entry })
+    expect(store.getState().activeRun?.logs).toEqual([entry])
+    bootstrap.mockResolvedValueOnce({ ...workspace, active_run: { ...run, logs: [entry] } })
+    source.emit("run.updated", { seq: 10, run: { id: run.id, status: "invalid" } })
+    expect(bootstrap).toHaveBeenCalledTimes(4)
+    await Promise.resolve()
     store.getState().disconnectEvents()
   })
 
@@ -203,5 +434,24 @@ describe("Studio state", () => {
     expect(store.getState().activeRun?.verification?.tests).toEqual(expect.arrayContaining([expect.objectContaining({ passed: true })]))
     const verified = finished?.document.flows.flatMap(({ nodes }) => nodes) ?? []
     for (const step of proposed) expect(verified.find(({ id }) => id === step.id)?.status).toBe("verified")
+  })
+
+  it("streams and directly applies a sandbox Build without needing approval", async () => {
+    vi.useFakeTimers()
+    const store = createStudioStore()
+    await store.getState().bootstrap({ demo: true })
+    const original = store.getState().data?.document
+    const statuses = new Set<string>()
+    const unsubscribe = store.subscribe(({ activeRun }) => { if (activeRun) statuses.add(activeRun.status) })
+    const building = store.getState().startRun({ kind: "build", prompt: "Retry transient provider errors." })
+    await vi.advanceTimersByTimeAsync(2100)
+    expect(store.getState().activeRun?.status).toBe("running")
+    await vi.advanceTimersByTimeAsync(2500)
+    await building
+    expect([...statuses]).toEqual(["running", "completed"])
+    expect(store.getState().data?.document).not.toBe(original)
+    expect(store.getState().activeRun?.logs.map(({ kind }) => kind)).toEqual(expect.arrayContaining(["Apply", "Verify"]))
+    expect(store.getState().activeRun?.verification?.tests?.[0]?.passed).toBe(true)
+    unsubscribe()
   })
 })

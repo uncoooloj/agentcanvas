@@ -192,12 +192,12 @@ function EvidenceContent(props: EvidenceContentProps) {
     setTab(tabs[index].id)
     event.currentTarget.querySelectorAll("button")[index]?.focus()
   }
-  return <aside className="s-evidence s-surface flex flex-col overflow-hidden rounded-2xl" aria-label="Evidence panel">
-    <header className="flex items-start justify-between gap-2 px-4 pb-3 pt-4">
+  return <aside className="s-evidence s-surface flex flex-col overflow-auto rounded-2xl" aria-label="Evidence panel">
+    <header className="flex shrink-0 items-start justify-between gap-2 px-4 pb-3 pt-4">
       <div className="min-w-0"><p className="text-xs text-muted-foreground">{subtitle}</p><h2 className="break-words text-lg font-bold leading-tight tracking-tight">{title}</h2></div>
       <button type="button" className="s-icon shrink-0" onClick={props.onClose} aria-label="Close evidence panel"><X size={17} /></button>
     </header>
-    <div className="flex flex-wrap gap-1 border-b px-2" role="tablist" aria-label="Evidence views" onKeyDown={tabShortcut}>
+    <div className="flex shrink-0 flex-wrap gap-1 border-b px-2" role="tablist" aria-label="Evidence views" onKeyDown={tabShortcut}>
       {tabs.map(({ id, label, icon: Icon }) => (
         <button key={id} type="button" id={`studio-evidence-${id}`} role="tab" tabIndex={tab === id ? 0 : -1}
           aria-selected={tab === id} aria-controls="studio-evidence-content" onClick={() => setTab(id)}
@@ -206,7 +206,7 @@ function EvidenceContent(props: EvidenceContentProps) {
         </button>
       ))}
     </div>
-    <div id="studio-evidence-content" role="tabpanel" aria-labelledby={`studio-evidence-${tab}`} className="min-h-0 flex-1 overflow-auto p-4">
+    <div id="studio-evidence-content" role="tabpanel" aria-labelledby={`studio-evidence-${tab}`} className="min-h-24 flex-1 overflow-auto p-4">
       {tab === "pins" ? <PinPanel target={target} pins={pins} /> : <>
         {tab === "diff" && diffSummary && <p className="mb-3 rounded-lg border border-when-accent/30 bg-when-bg p-3 text-sm text-when-fg">{diffSummary}</p>}
         {reference && <div className="mb-3 flex flex-wrap items-center gap-2">

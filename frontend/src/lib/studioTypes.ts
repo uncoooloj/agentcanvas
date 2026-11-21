@@ -4,7 +4,7 @@ export type DiffStatus = "added" | "modified" | "removed" | "unchanged"
 export type ComponentKind = "web" | "mobile" | "service" | "package" | "worker" | "db" | "external"
 export type RunnerId = "codex" | "claude" | "copy"
 export type RunKind = "map" | "diff" | "plan" | "build"
-export type RunStatus = "queued" | "running" | "needs_input" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "discarded"
+export type RunStatus = "queued" | "running" | "needs_input" | "awaiting_approval" | "copy_ready" | "completed" | "failed" | "cancelled" | "discarded"
 export type TargetType = "node" | "component" | "flow"
 
 export interface CodeRef {
@@ -103,16 +103,25 @@ export interface RunInput {
 
 export interface RunLog {
   id?: string
-  stage?: string
+  at: string
+  kind: string
+  text: string
   tool?: string
-  message: string
-  timestamp?: string
 }
 
 export interface RunTest {
-  command: string
-  passed: boolean
+  command?: string
+  passed?: boolean
   output?: string
+}
+
+export interface RunVerification {
+  summary?: string | null
+  output?: string | null
+  command?: string
+  passed?: boolean
+  tests?: RunTest[]
+  changed_files?: string[]
 }
 
 export interface StudioRun extends RunInput {
@@ -123,12 +132,13 @@ export interface StudioRun extends RunInput {
   started_at?: string
   updated_at?: string
   finished_at?: string
-  logs?: RunLog[]
+  logs: RunLog[]
   question?: string | null
   plan_summary?: string | null
   proposed_document?: StudioDocument | null
-  verification?: { tests?: RunTest[]; changed_files?: string[] } | null
-  changed_files?: string[]
+  verification?: RunVerification | null
+  verification_summary?: string | null
+  changed_files: string[]
   error?: string | null
 }
 
@@ -177,10 +187,12 @@ export type StudioEvents = {
   "studio.updated": Pick<StudioBootstrapResponse, "document" | "has_mapped_canvas" | "stale_node_ids">
   "run.updated": { run: StudioRun }
   "run.log": { run_id: string; entry: RunLog }
+  /** A server-directed snapshot reconciliation request. */
+  "studio.resync": { reason?: string }
   "annotations.updated": { annotations: StudioAnnotation[] } | { annotation: StudioAnnotation } | { deleted: string } | { id: string; deleted: true }
 }
 
-export type StudioEvent = { [K in keyof StudioEvents]: { type: K; payload: StudioEvents[K] } }[keyof StudioEvents]
+export type StudioEvent = { [K in keyof StudioEvents]: { type: K; payload: StudioEvents[K]; seq?: number } }[keyof StudioEvents]
 
 export function diffCounts(nodes: readonly { diff_status?: DiffStatus }[]) {
   const counts = { added: 0, modified: 0, removed: 0 }

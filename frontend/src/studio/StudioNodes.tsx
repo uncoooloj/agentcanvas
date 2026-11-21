@@ -1,5 +1,7 @@
 import { ArrowDownRight, ArrowRight, AtSign, Braces, Cable, CircleHelp, Database, Layers3, Monitor, Pin, Smartphone, Workflow, Zap } from "lucide-react"
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react"
+import { useShallow } from "zustand/react/shallow"
+import { useStudioStore } from "@/lib/studioStore"
 import { formatRef, type DiffStatus, type StudioComponent, type StudioNode } from "@/lib/studioTypes"
 
 export const componentIcons = { web: Monitor, mobile: Smartphone, service: Layers3, package: Braces, worker: Zap, db: Database, external: Cable }
@@ -7,8 +9,6 @@ export const componentLabels = { web: "Web", mobile: "Mobile", service: "Service
 
 type ComponentData = {
   component: StudioComponent
-  pins: number
-  inspected: boolean
   inspect: (pins?: boolean) => void
   viewFlows?: () => void
 }
@@ -16,10 +16,7 @@ type ComponentData = {
 type StepData = {
   step: StudioNode
   component?: StudioComponent
-  pins: number
-  stale: boolean
-  inspected: boolean
-  steered: boolean
+  flowId?: string
   inspect: (pins?: boolean) => void
   steer: () => void
   jump?: () => void
@@ -53,7 +50,11 @@ function NodePin({ count, onClick }: { count: number; onClick: () => void }) {
 }
 
 export function SystemNode({ data }: NodeProps<SystemGraphNode>) {
-  const { component, pins, inspected, inspect, viewFlows } = data
+  const { component, inspect, viewFlows } = data
+  const { inspected, pins } = useStudioStore(useShallow((state) => ({
+    inspected: state.inspectedComponentId === component.id,
+    pins: state.data?.annotations.filter((pin) => !pin.resolved && pin.target_type === "component" && pin.target_id === component.id).length ?? 0,
+  })))
   const Icon = componentIcons[component.kind]
   return (
     <article className="s-node s-system-node" data-diff={component.diff_status} data-inspected={inspected}>
@@ -74,7 +75,14 @@ export function SystemNode({ data }: NodeProps<SystemGraphNode>) {
 }
 
 export function FlowStepNode({ data }: NodeProps<FlowGraphNode>) {
-  const { step, component, pins, stale, inspected, steered, inspect, steer, jump } = data
+  const { step, component, flowId, inspect, steer, jump } = data
+  const { inspected, steered, stale, pins } = useStudioStore(useShallow((state) => ({
+    inspected: state.inspectedNodeId === step.id,
+    steered: state.selectedNodeIds.includes(step.id),
+    stale: state.data?.stale_node_ids.includes(step.id),
+    pins: state.data?.annotations.filter((pin) => !pin.resolved && pin.target_type === "node"
+      && pin.target_id === step.id && (!pin.flow_id || pin.flow_id === flowId)).length ?? 0,
+  })))
   const ref = step.code_refs[0]
   const role = step.kind === "When" ? "when" : step.kind === "Do" || step.kind === "End" ? "act" : "rule"
   const status = stale ? "stale" : step.status
@@ -101,7 +109,7 @@ export function FlowStepNode({ data }: NodeProps<FlowGraphNode>) {
       )}
       <div className="s-quick-actions nodrag nopan" onClick={(event) => event.stopPropagation()}>
         <button type="button" title="Pin note" aria-label="Pin note" onClick={() => inspect(true)}><Pin size={14} /></button>
-        <button type="button" title="Inspect code" aria-label="Inspect code" onClick={() => inspect()}>{ref ? <Braces size={14} /> : <CircleHelp size={14} />}</button>
+        <button type="button" title="Inspect code" aria-label="Inspect code" onClick={() => inspect(false)}>{ref ? <Braces size={14} /> : <CircleHelp size={14} />}</button>
         <button type="button" title="Steer with this step" aria-label="Steer with this step" aria-pressed={steered} onClick={steer}><AtSign size={14} /></button>
         {jump && <button type="button" onClick={jump}><Workflow size={14} /> Jump to flow <ArrowDownRight size={12} /></button>}
       </div>

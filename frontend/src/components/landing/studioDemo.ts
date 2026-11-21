@@ -84,37 +84,54 @@ export const services: StudioNode[] = [
 
 export const steeringExamples = ["Add fraud check over $500", "Retry failed SMS"] as const
 
+type ProposalAnchor = "charge" | "sms" | "confirm"
+
+function proposalAt(anchor: ProposalAnchor, label: string, edit: (source: string) => string[]) {
+  const node = checkout.find((node) => node.id === anchor)
+  if (!node) throw new Error(`Missing steering anchor: ${anchor}`)
+
+  const changes = edit(node.source)
+  const before = changes.filter((line) => !line.startsWith("+")).length
+  const after = changes.filter((line) => !line.startsWith("-")).length
+  return {
+    label,
+    anchor,
+    file: node.file,
+    line: node.line,
+    draft: [`@@ -${node.line},${before} +${node.line},${after} @@`, ...changes].join("\n"),
+  }
+}
+
 export function createProposal(input: string) {
   const request = input.trim()
   if (!request) return null
 
   if (request === steeringExamples[0]) {
-    return {
-      label: "Screen orders over $500",
-      anchor: "charge" as const,
-      file: "src/payments/charge.ts",
-      line: 42,
-      draft: "@@ -42,0 +42,3 @@\n+if (order.totalCents > 50_000) {\n+  await fraud.screen(order)\n+}",
-    }
+    return proposalAt("charge", "Screen orders over $500", (source) => [
+      "+if (order.totalCents > 50_000) {",
+      "+  await fraud.screen(order)",
+      "+}",
+      ` ${source.split("\n")[0]}`,
+    ])
   }
 
   if (request === steeringExamples[1]) {
-    return {
-      label: "Retry failed SMS",
-      anchor: "sms" as const,
-      file: "src/notify/receipt.ts",
-      line: 9,
-      draft: "@@ -9,1 +9,1 @@\n-await sendDeliveryText(order)\n+await retryWithBackoff(() => sendDeliveryText(order))",
-    }
+    return proposalAt("sms", "Retry failed SMS", (source) => {
+      const [first, ...rest] = source.split("\n")
+      return [
+        `-${first}`,
+        `+${first.replace("await ", "await retryWithBackoff(() => ")}`,
+        ...rest.slice(0, -1).map((line) => ` ${line}`),
+        `-${rest.at(-1)}`,
+        `+${rest.at(-1)})`,
+      ]
+    })
   }
 
-  return {
-    label: request,
-    anchor: "confirm" as const,
-    file: "src/orders/checkout.ts",
-    line: 42,
-    draft: `@@ -42,0 +42,1 @@\n+// Steering pin: ${request}`,
-  }
+  return proposalAt("confirm", request, (source) => [
+    ...`Steering pin: ${request}`.split(/\r\n?|\n/).map((line) => `+// ${line}`),
+    ` ${source.split("\n")[0]}`,
+  ])
 }
 
 export function getSandboxUrl(href: string, tab: SandboxTab) {

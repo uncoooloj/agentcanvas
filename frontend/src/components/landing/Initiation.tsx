@@ -15,9 +15,10 @@ const COMMANDS: ReadonlyArray<{
   { id: "install", label: "Install", context: "", command: "pip install use-agentcanvas" },
 ]
 
-function useCopyFeedback() {
-  const [copied, setCopied] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+const COPY_ERROR = "Could not copy. Select the command and copy it manually."
+
+function useCopyFeedback<Id extends string>() {
+  const [feedback, setFeedback] = useState<{ id: Id; status: "copied" | "error" } | null>(null)
   const timer = useRef<number | undefined>(undefined)
   const request = useRef(0)
 
@@ -28,15 +29,14 @@ function useCopyFeedback() {
     }
   }, [])
 
-  async function copy(id: string, value: string) {
+  async function copy(id: Id, value: string) {
     const requestId = request.current + 1
     request.current = requestId
     if (timer.current !== undefined) {
       window.clearTimeout(timer.current)
       timer.current = undefined
     }
-    setCopied(null)
-    setError(null)
+    setFeedback(null)
 
     try {
       if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
@@ -44,26 +44,28 @@ function useCopyFeedback() {
       }
       await navigator.clipboard.writeText(value)
       if (request.current !== requestId) return
-      setCopied(id)
+      setFeedback({ id, status: "copied" })
       timer.current = window.setTimeout(() => {
         if (request.current !== requestId) return
-        setCopied(null)
+        setFeedback(null)
         timer.current = undefined
       }, 1600)
     } catch {
       if (request.current !== requestId) return
-      setCopied(null)
-      setError("Could not copy. Select the command and copy it manually.")
+      setFeedback({ id, status: "error" })
     }
   }
 
-  return { copied, error, copy }
+  return { feedback, copy }
 }
 
 export function CommandStrip() {
   const [selectedId, setSelectedId] = useState<CommandId>("map")
-  const { copied, error, copy } = useCopyFeedback()
+  const { feedback, copy } = useCopyFeedback<CommandId>()
   const selected = COMMANDS.find(({ id }) => id === selectedId) ?? COMMANDS[0]
+  const copied = feedback?.id === selectedId && feedback.status === "copied"
+  const error = feedback?.id === selectedId && feedback.status === "error"
+  const feedbackLabel = COMMANDS.find(({ id }) => id === feedback?.id)?.label
 
   return (
     <div className="overflow-hidden rounded-[15px] border border-primary/20 bg-primary text-primary-foreground shadow-[0_18px_42px_-28px_rgba(42,27,19,0.9)]">
@@ -87,11 +89,11 @@ export function CommandStrip() {
                 "inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary-foreground",
                 active
                   ? "border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground"
-                  : "border-transparent text-primary-foreground/55 hover:border-primary-foreground/10 hover:bg-primary-foreground/5 hover:text-primary-foreground/85",
+                  : "border-transparent text-primary-foreground/85 hover:border-primary-foreground/10 hover:bg-primary-foreground/5 hover:text-primary-foreground",
               )}
             >
               {item.label}
-              {item.context && <span className="font-mono text-[9px] font-normal text-primary-foreground/45">{item.context}</span>}
+              {item.context && <span className="font-mono text-[9px] font-normal text-primary-foreground/80">{item.context}</span>}
             </button>
           )
         })}
@@ -108,18 +110,19 @@ export function CommandStrip() {
           aria-label={`Copy ${selected.label.toLowerCase()} command`}
           className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md border border-primary-foreground/15 px-2.5 text-[10px] font-semibold text-primary-foreground/75 transition-colors hover:border-primary-foreground/30 hover:bg-primary-foreground/10 hover:text-primary-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary-foreground"
         >
-          {copied === selected.id ? <Check aria-hidden="true" className="size-3.5" /> : <Clipboard aria-hidden="true" className="size-3.5" />}
-          <span>{copied === selected.id ? "Copied" : "Copy"}</span>
+          {copied ? <Check aria-hidden="true" className="size-3.5" /> : <Clipboard aria-hidden="true" className="size-3.5" />}
+          <span>{copied ? "Copied" : "Copy"}</span>
         </button>
       </div>
 
       <span role="status" aria-live="polite" className="sr-only">
-        {copied === selected.id ? "Copied to clipboard." : ""}
+        {feedback?.status === "copied" && `${feedbackLabel} command copied to clipboard.`}
+        {feedback?.status === "error" && `${feedbackLabel} command. ${COPY_ERROR}`}
       </span>
 
       {error && (
-        <p role="status" className="border-t border-destructive-foreground/10 px-3.5 py-2 text-[10px] leading-relaxed text-primary-foreground/70 sm:px-4">
-          {error}
+        <p className="border-t border-primary-foreground/10 px-3.5 py-2 text-[10px] leading-relaxed text-primary-foreground/85 sm:px-4">
+          {COPY_ERROR}
         </p>
       )}
     </div>
@@ -128,18 +131,21 @@ export function CommandStrip() {
 
 const START_CARDS = [
   {
+    id: "install-map",
     eyebrow: "Install + map",
     title: "Run in your repo",
     detail: "Install once, then map the current directory.",
     command: "pip install use-agentcanvas\nagentcanvas .",
   },
   {
+    id: "branch-diff",
     eyebrow: "Branch diff",
     title: "Review a branch visually",
     detail: "See the behavior delta before you merge.",
     command: "agentcanvas diff main..HEAD",
   },
   {
+    id: "agent-prompt",
     eyebrow: "Codex / Claude",
     title: "Hand one line to your agent",
     detail: "A tiny prompt for the repo you are already in.",
@@ -148,12 +154,15 @@ const START_CARDS = [
 ] as const
 
 function StartCard({
+  id,
   eyebrow,
   title,
   detail,
   command,
 }: (typeof START_CARDS)[number]) {
-  const { copied, error, copy } = useCopyFeedback()
+  const { feedback, copy } = useCopyFeedback<typeof id>()
+  const copied = feedback?.status === "copied"
+  const error = feedback?.status === "error"
 
   return (
     <article className="flex min-w-0 flex-col rounded-xl border border-border/80 bg-card/70 p-4 sm:p-5">
@@ -167,16 +176,19 @@ function StartCard({
         <div className="flex justify-end border-t border-border/70 px-2 py-1.5">
           <button
             type="button"
-            onClick={() => void copy("card", command)}
+            onClick={() => void copy(id, command)}
             aria-label={`Copy ${title.toLowerCase()} command`}
             className="inline-flex min-h-7 items-center gap-1.5 rounded-md px-2 text-[10px] font-semibold text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
           >
-            {copied === "card" ? <Check aria-hidden="true" className="size-3.5" /> : <Clipboard aria-hidden="true" className="size-3.5" />}
-            {copied === "card" ? "Copied" : "Copy"}
+            {copied ? <Check aria-hidden="true" className="size-3.5" /> : <Clipboard aria-hidden="true" className="size-3.5" />}
+            {copied ? "Copied" : "Copy"}
           </button>
         </div>
       </div>
-      {error && <p role="status" className="mt-2 text-[10px] leading-relaxed text-destructive">{error}</p>}
+      <p role="status" aria-live="polite" className={error ? "mt-2 text-[10px] leading-relaxed text-foreground/85" : "sr-only"}>
+        {copied && `${title} command copied to clipboard.`}
+        {error && COPY_ERROR}
+      </p>
     </article>
   )
 }
@@ -192,7 +204,7 @@ export function StartSection({ children }: { children?: ReactNode } = {}) {
       </div>
 
       <div className="mt-10 grid gap-3.5 md:grid-cols-3">
-        {START_CARDS.map((card) => <StartCard key={card.eyebrow} {...card} />)}
+        {START_CARDS.map((card) => <StartCard key={card.id} {...card} />)}
       </div>
       {children}
     </section>

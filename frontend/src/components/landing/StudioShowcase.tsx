@@ -44,7 +44,7 @@ function DiffArtifact({ tone, label, detail }: { tone: DiffTone; label: string; 
   const toneStyles = {
     added: "bg-act-bg/80 text-act-fg",
     changed: "bg-rule-bg/80 text-rule-fg",
-    removed: "bg-destructive/10 text-destructive",
+    removed: "bg-destructive/10 text-[#a43628] dark:text-[#ff9384]",
   }
   const marks = { added: "+", changed: "~", removed: "-" }
 
@@ -53,7 +53,7 @@ function DiffArtifact({ tone, label, detail }: { tone: DiffTone; label: string; 
       <span className="mt-px w-3 shrink-0 font-mono text-sm font-semibold leading-5">{marks[tone]}</span>
       <span className="min-w-0">
         <span className="block text-[13px] font-semibold leading-5">{label}</span>
-        <span className="block text-[11px] leading-4 opacity-75">{detail}</span>
+        <span className="block text-[11px] leading-4">{detail}</span>
       </span>
     </div>
   )
@@ -129,30 +129,30 @@ export function StudioShowcase() {
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1 font-mono text-[10px] text-muted-foreground">
                   <span className="rounded-full bg-act-bg px-2 py-1 font-semibold text-act-fg">+482</span>
-                  <span className="rounded-full bg-destructive/10 px-2 py-1 font-semibold text-destructive">-119</span>
+                  <span className="rounded-full bg-destructive/10 px-2 py-1 font-semibold text-[#a43628] dark:text-[#ff9384]">-119</span>
                   <span className="mt-0.5">14 files</span>
                 </div>
               </div>
 
               <div className="mt-8 grid flex-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center">
-                <div className="overflow-hidden rounded-xl bg-primary p-3.5 text-primary-foreground shadow-inner sm:p-4">
+                <div className="min-w-0 rounded-xl bg-primary p-3.5 text-primary-foreground shadow-inner sm:p-4">
                   <div className="mb-3 flex items-center justify-between border-b border-primary-foreground/10 pb-2.5">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary-foreground/50">
+                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary-foreground/85">
                       before
                     </span>
-                    <span className="font-mono text-[10px] text-primary-foreground/40">checkout.ts</span>
+                    <span className="font-mono text-[10px] text-primary-foreground/85">checkout.ts</span>
                   </div>
-                  <div className="space-y-1 font-mono text-[10px] leading-4 sm:text-[11px]">
+                  <div role="region" aria-label="Before code in checkout.ts" tabIndex={0} className="space-y-1 overflow-x-auto rounded-sm font-mono text-[10px] leading-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-foreground sm:text-[11px]">
                     {BEFORE_CODE.map((line, index) => (
                       <div key={`${line}-${index}`} className={cn("flex gap-2", !line && "h-2")}>
-                        <span className="w-4 shrink-0 text-right text-primary-foreground/25">{index + 38}</span>
-                        <span className={cn("truncate text-primary-foreground/55", index === 2 && "text-primary-foreground/75")}>
+                        <span aria-hidden="true" className="w-4 shrink-0 text-right text-primary-foreground/80">{index + 38}</span>
+                        <code className={cn("whitespace-pre text-primary-foreground/85", index === 2 && "text-primary-foreground")}>
                           {line || " "}
-                        </span>
+                        </code>
                       </div>
                     ))}
                   </div>
-                  <div className="mt-4 flex items-center gap-1.5 text-[10px] text-primary-foreground/40">
+                  <div className="mt-4 flex items-center gap-1.5 text-[10px] text-primary-foreground/85">
                     <Code2 className="size-3" />
                     <span>dense implementation detail</span>
                   </div>
@@ -189,16 +189,16 @@ export function StudioShowcase() {
             <div className="flex h-full flex-col p-5 sm:p-6">
               <div>
                 <h3 className="mt-2 text-xl font-semibold tracking-tight">Direct Local Agent Loop</h3>
-                <p className="mt-2 text-sm leading-relaxed text-primary-foreground/65">Run an agent beside the canvas over local SSE.</p>
+                <p className="mt-2 text-sm leading-relaxed text-primary-foreground/85">Run an agent beside the canvas over local SSE.</p>
               </div>
 
               <div className="mt-6 rounded-xl border border-primary-foreground/15 bg-primary-foreground/[0.06] p-3.5 font-mono text-[11px]">
-                <div className="flex items-center gap-2 text-primary-foreground/55">
+                <div className="flex items-center gap-2 text-primary-foreground/85">
                   <Terminal className="size-3.5" />
                   <span>$ codex exec</span>
-                  <span className="text-primary-foreground/30">/</span>
+                  <span>/</span>
                   <span>claude</span>
-                  <span className="ml-auto rounded-full bg-primary-foreground/10 px-2 py-0.5 text-[9px] text-act-accent">
+                  <span className="ml-auto rounded-full bg-primary-foreground/10 px-2 py-0.5 text-[9px] text-primary-foreground">
                     local SSE
                   </span>
                 </div>
@@ -206,8 +206,8 @@ export function StudioShowcase() {
                 <div className="flex items-start gap-2.5">
                   <Radio className="mt-0.5 size-3.5 shrink-0 text-act-accent" />
                   <div className="min-w-0">
-                    <p className="text-primary-foreground/75">trace checkout → canvas</p>
-                    <div className="mt-2 flex items-center gap-2 rounded-lg border border-primary-foreground/15 bg-primary-foreground/[0.06] px-2.5 py-2 text-[10px] text-primary-foreground/60">
+                    <p className="text-primary-foreground/85">trace checkout → canvas</p>
+                    <div className="mt-2 flex items-center gap-2 rounded-lg border border-primary-foreground/15 bg-primary-foreground/[0.06] px-2.5 py-2 text-[10px] text-primary-foreground/85">
                       <MessageSquare className="size-3 shrink-0 text-when-accent" />
                       <span className="leading-4">Which billing source should this use?</span>
                     </div>
@@ -215,7 +215,7 @@ export function StudioShowcase() {
                 </div>
               </div>
 
-              <div className="mt-auto flex flex-wrap gap-x-4 gap-y-2 pt-5 text-[10px] font-medium text-primary-foreground/55">
+              <div className="mt-auto flex flex-wrap gap-x-4 gap-y-2 pt-5 text-[10px] font-medium text-primary-foreground/85">
                 <span className="inline-flex items-center gap-1.5">
                   <Check className="size-3 text-act-accent" /> no copy-paste
                 </span>

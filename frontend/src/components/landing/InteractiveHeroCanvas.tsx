@@ -19,6 +19,12 @@ const roles = {
   Service: "bg-secondary text-secondary-foreground",
 }
 
+const topology = {
+  current: "Current Map. POST /orders leads to Reserve stock, then In stock. When in stock, the flow continues to Charge Stripe, then Send confirmation.",
+  diff: "Visual Diff. POST /orders leads to Reserve stock, then In stock, then the modified Charge Stripe step and Send confirmation. Send confirmation leads to the added Text delivery ETA via Twilio step, which leads to the added Queue manual retry fallback.",
+  system: "System Map. Web App calls Order API. Order API connects to Inventory, Stripe, and Notify Worker.",
+}
+
 type Proposal = NonNullable<ReturnType<typeof createProposal>>
 type Plan = { proposal: Proposal; phase: "reading" | "drafting" | "proposed" | "applied" }
 
@@ -28,9 +34,12 @@ export function InteractiveHeroCanvas() {
   const [request, setRequest] = useState("")
   const [plan, setPlan] = useState<Plan | null>(null)
   const lastNode = useRef<HTMLButtonElement | null>(null)
+  const proposalNode = useRef<HTMLButtonElement>(null)
   const composer = useRef<HTMLInputElement>(null)
   const inspectorTitle = useRef<HTMLHeadingElement>(null)
   const canvasId = useId()
+  const canvasTitleId = useId()
+  const topologyId = useId()
   const inspectorId = useId()
   const isDiff = mode === "diff"
   const isSystem = mode === "system"
@@ -39,6 +48,7 @@ export function InteractiveHeroCanvas() {
   const nodes = isSystem ? services : isDiff ? checkout : checkout.filter((node) => node.change !== "Added")
   const selected = nodes.find((node) => node.id === selectedId)
   const selectedPlan = selectedId === "proposal" ? visiblePlan?.proposal : null
+  const proposalAnchor = visiblePlan && checkout.find((node) => node.id === visiblePlan.proposal.anchor)
   const inspector = selectedPlan
     ? { label: selectedPlan.label, file: selectedPlan.file, line: selectedPlan.line, code: selectedPlan.draft }
     : selected && {
@@ -66,7 +76,8 @@ export function InteractiveHeroCanvas() {
 
   function closeInspector() {
     setSelectedId(null)
-    lastNode.current?.focus()
+    const trigger = selectedId === "proposal" ? proposalNode.current : lastNode.current
+    trigger?.focus()
   }
 
   function draft(input: string) {
@@ -139,14 +150,21 @@ export function InteractiveHeroCanvas() {
         <div className="flex flex-col [@container_(min-width:560px)]:flex-row">
           <div
             id={canvasId}
+            role="region"
+            aria-labelledby={canvasTitleId}
+            aria-describedby={topologyId}
             className="min-w-0 flex-1 bg-secondary/35 bg-[radial-gradient(circle,hsl(var(--muted-foreground)/0.28)_0.75px,transparent_0.9px)] [background-size:15px_15px]"
           >
             <div className="flex items-center justify-between gap-2 px-3.5 pt-3.5 sm:px-5">
-              <h2 className="text-xs font-semibold">{isSystem ? "Service topology" : "Checkout flow"}</h2>
+              <h2 id={canvasTitleId} className="text-xs font-semibold">{isSystem ? "Service topology" : "Checkout flow"}</h2>
               <span className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
                 <ScanLine aria-hidden="true" className="size-3" /> {isDiff ? "main..HEAD" : isSystem ? "5 services" : "main"}
               </span>
             </div>
+            <p id={topologyId} className="sr-only">
+              {topology[mode]}
+              {visiblePlan && proposalAnchor && ` ${visiblePlan.phase === "applied" ? "Applied change" : "Steering proposal"}: ${visiblePlan.proposal.label} attaches to ${proposalAnchor.label}.`}
+            </p>
             <div key={mode} className="relative mx-2 grid h-[278px] grid-cols-3 grid-rows-3 items-center gap-x-2 py-0 sm:mx-4 sm:h-[285px] sm:gap-x-5 motion-safe:animate-fade-in">
               <Connections mode={mode} proposalAnchor={visiblePlan?.proposal.anchor} />
               {nodes.map((node) => {
@@ -185,6 +203,7 @@ export function InteractiveHeroCanvas() {
               })}
               {visiblePlan && (
                 <button
+                  ref={proposalNode}
                   type="button"
                   aria-expanded={selectedId === "proposal"}
                   aria-controls={selectedId === "proposal" ? inspectorId : undefined}
@@ -285,14 +304,17 @@ export function InteractiveHeroCanvas() {
             <button
               type="button"
               onClick={() => {
-                if (!isDiff) setSelectedId(null)
-                setMode("diff")
+                if (!isDiff) {
+                  setMode("diff")
+                  setSelectedId("proposal")
+                  return
+                }
                 setPlan({ ...plan, phase: "applied" })
                 composer.current?.focus()
               }}
               className="min-h-7 rounded-md bg-act-bg px-2 text-[11px] font-semibold text-act-fg hover:ring-1 hover:ring-act-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
             >
-              Approve &amp; Build
+              {isDiff ? "Approve & Build" : "Review proposal"}
             </button>
           )}
         </div>

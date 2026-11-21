@@ -34,6 +34,22 @@ describe("playable checkout studio", () => {
     })
   })
 
+  it.each([...steeringExamples, "Offer pickup at checkout"])(
+    "grounds the location and before lines for %s in the anchor snippet",
+    (request) => {
+      const proposal = createProposal(request)!
+      const anchor = checkout.find((node) => node.id === proposal.anchor)!
+      const [header, ...changes] = proposal.draft.split("\n")
+      const before = changes.filter((line) => !line.startsWith("+")).map((line) => line.slice(1))
+      const after = changes.filter((line) => !line.startsWith("-"))
+
+      expect(proposal).toMatchObject({ file: anchor.file, line: anchor.line })
+      expect(before.length).toBeGreaterThan(0)
+      expect(before).toEqual(anchor.source.split("\n").slice(0, before.length))
+      expect(header).toBe(`@@ -${anchor.line},${before.length} +${anchor.line},${after.length} @@`)
+    },
+  )
+
   it("keeps a visitor's custom pin and ignores whitespace-only input", () => {
     expect(createProposal("  Offer pickup at checkout  ")).toMatchObject({
       label: "Offer pickup at checkout",

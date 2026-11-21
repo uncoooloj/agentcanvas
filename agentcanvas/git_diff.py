@@ -284,7 +284,8 @@ def _untracked_patch(root: Path, path: str, limit: int) -> bytes:
 
 def _hunks(patch: str) -> list[dict]:
     hunks: list[dict] = []
-    for line in patch.split("\n"):
+    for raw_line in patch.split("\n"):
+        line = raw_line.removesuffix("\r")
         if line.startswith("@@ "):
             hunks.append({"header": line, "lines": []})
         elif hunks:

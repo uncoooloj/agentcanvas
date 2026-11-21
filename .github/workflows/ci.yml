@@ -28,6 +28,12 @@ jobs:
         python-version:
           - "3.9"
           - "3.12"
+        exclude:
+          - os: ubuntu-latest
+            python-version: "3.9"
+        include:
+          - os: ubuntu-24.04
+            python-version: "3.9"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlencode
 
 from . import __version__
+from .git_diff import safe_resolve_workspace_file
 from .ir import ensure_state_dirs, now_utc, resolve_workspace
 from .workspace_lock import workspace_write_lock
 from .server import server_heartbeat_path, token_hint
@@ -71,9 +72,15 @@ def ensure_server_up(
     agent: Optional[str] = None,
     session_id: Optional[str] = None,
     open_browser: bool = False,
+    diff_base: Optional[str] = None,
 ) -> Dict[str, Any]:
     validate_loopback_host(host)
     root = resolve_workspace(workspace)
+    try:
+        safe_resolve_workspace_file(root, ".agentcanvas/launch.json")
+        safe_resolve_workspace_file(root, ".agentcanvas/server.log")
+    except ValueError as exc:
+        raise SupervisorError("PATH_OUTSIDE_WORKSPACE", "AgentCanvas launch files must be inside the workspace") from exc
     record = read_launch_record(root)
     live = validate_launch_record(record, workspace=root) if record else None
     if live:
@@ -86,6 +93,7 @@ def ensure_server_up(
             "ok": True,
             "already_running": True,
         }
+        result["url"] = scoped_studio_url(result["url"], diff_base)
         if open_browser:
             webbrowser.open(result["url"])
         return result
@@ -102,6 +110,7 @@ def ensure_server_up(
         token=token,
         agent=agent,
         session_id=session_id,
+        diff_base=diff_base,
     )
     url = launch_url(host, selected_port, token, session_id=session_id)
     record = {
@@ -139,8 +148,9 @@ def ensure_server_up(
         "ok": True,
         "already_running": False,
     }
+    result["url"] = scoped_studio_url(url, diff_base)
     if open_browser:
-        webbrowser.open(url)
+        webbrowser.open(result["url"])
     return result
 
 
@@ -313,6 +323,7 @@ def spawn_server(
     token: str,
     agent: Optional[str],
     session_id: Optional[str],
+    diff_base: Optional[str] = None,
 ) -> subprocess.Popen:
     log_path = server_log_path(workspace)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -331,6 +342,8 @@ def spawn_server(
         args.extend(["--agent", agent])
     if session_id:
         args.extend(["--session-id", session_id])
+    if diff_base is not None:
+        args.append(f"--diff-base={diff_base}")
     env = os.environ.copy()
     env[TOKEN_ENV] = token
     env[SUPERVISED_ENV] = "1"
@@ -485,6 +498,12 @@ def launch_url(host: str, port: int, token: str, *, session_id: Optional[str] = 
     if session_id:
         query["sessionId"] = session_id
     return f"http://{host}:{int(port)}/?{urlencode(query)}"
+
+
+def scoped_studio_url(url: str, diff_base: Optional[str]) -> str:
+    if diff_base is None:
+        return url
+    return url + "&" + urlencode({"tab": "diff", "diffBase": diff_base})
 
 
 def api_url(host: str, port: int, path: str, token: str, *, session_id: Optional[str] = None) -> str:

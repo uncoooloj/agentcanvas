@@ -53,13 +53,26 @@ from .server import run_server
 from .supervisor import SupervisorError, ensure_server_up, is_loopback_host, stop_server
 
 
+class WorkspaceArgumentParser(argparse.ArgumentParser):
+    def parse_args(self, args=None, namespace=None):
+        argv = list(sys.argv[1:] if args is None else args)
+        if argv and argv[0] == "init":
+            argv[0] = "setup"
+        if argv and not argv[0].startswith("-") and argv[0] not in self.commands:
+            path = Path(argv[0]).expanduser()
+            if argv[0] in {".", ".."} or path.anchor or path.parent != Path(".") or path.is_dir():
+                argv.insert(0, "up")
+        return super().parse_args(argv, namespace)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = WorkspaceArgumentParser(
         prog="agentcanvas",
         description="Index a workspace and serve a local agent workflow canvas.",
     )
     parser.add_argument("--version", action="version", version=f"agentcanvas {__version__}")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=True, parser_class=argparse.ArgumentParser)
+    parser.commands = subparsers.choices
 
     index_parser = subparsers.add_parser("index", help="index a workspace into workflow IR")
     index_parser.add_argument("path", nargs="?", help="workspace path to index")
@@ -76,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="allow start --host to bind a non-loopback interface; prints a warning",
     )
     start_parser.add_argument("--port", default=8765, type=int, help="port to bind; 0 picks a free port")
+    start_parser.add_argument("--diff-base", help=argparse.SUPPRESS)
     start_parser.add_argument(
         "--agent",
         help="coding agent invoking AgentCanvas (claude-code, codex, cursor, antigravity)",
@@ -106,9 +120,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional launching agent session id to bind browser requests and pending changes",
     )
     up_parser.add_argument("--json", action="store_true", help="print a stable JSON launch record")
-    up_parser.add_argument("--open", action="store_true", help="open the browser after the server is ready")
+    up_parser.add_argument("--open", action=argparse.BooleanOptionalAction, help="open the browser after the server is ready")
     up_parser.add_argument("--stop", action="store_true", help="stop the recorded background server")
     up_parser.set_defaults(func=cmd_up)
+
+    diff_parser = subparsers.add_parser("diff", help="open the studio on the Diff tab")
+    diff_parser.add_argument("range", nargs="?", default="", help="Git range or ref (default: working tree against HEAD)")
+    diff_parser.add_argument("--workspace", help="workspace path to serve")
+    diff_parser.add_argument("--port", default=8765, type=int, help="first port to try")
+    diff_parser.add_argument("--open", action=argparse.BooleanOptionalAction, help="open the browser after the server is ready")
+    diff_parser.add_argument("--json", action="store_true", help="print a stable JSON launch record")
+    diff_parser.set_defaults(func=cmd_up, host="127.0.0.1", stop=False, path=None, port_end=8865)
 
     pending_parser = subparsers.add_parser("pending", help="list pending change requests")
     pending_parser.add_argument("path", nargs="?", help="workspace path to inspect")
@@ -329,6 +351,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         landing_mode=landing_mode,
         session_id=getattr(args, "session_id", None),
         supervised=bool(os.environ.get("AGENTCANVAS_SUPERVISED")),
+        diff_base=args.diff_base,
     )
     return 0
 
@@ -339,14 +362,18 @@ def cmd_up(args: argparse.Namespace) -> int:
         if args.stop:
             result = stop_server(workspace)
         else:
+            launch_options = {}
+            if args.command == "diff":
+                launch_options["diff_base"] = args.range
             result = ensure_server_up(
                 workspace,
                 host=args.host,
                 port=args.port,
-                port_end=args.port_end,
+                port_end=max(args.port, args.port_end) if args.command == "diff" else args.port_end,
                 agent=getattr(args, "agent", None),
                 session_id=getattr(args, "session_id", None),
-                open_browser=bool(getattr(args, "open", False)) and not bool(getattr(args, "json", False)),
+                open_browser=bool(args.open) and (args.command == "diff" or not args.json),
+                **launch_options,
             )
     except SupervisorError as exc:
         payload = exc.to_dict()
@@ -872,10 +899,7 @@ def selected_workspace(args: argparse.Namespace, *, demo_default: bool = False) 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    actual_argv: Sequence[str] = sys.argv[1:] if argv is None else argv
-    if len(actual_argv) > 0 and actual_argv[0] == "init":
-        actual_argv = ("setup", *actual_argv[1:])
-    args = parser.parse_args(actual_argv)
+    args = parser.parse_args(argv)
     return args.func(args)
 
 

@@ -12,8 +12,8 @@ import { CopyMappingPrompt, DiffCounts } from "./StudioTopBar"
 import { studioNodeTypes, type StudioGraphNode } from "./StudioNodes"
 
 const emptyNodes: LayoutNode[] = []
-const fitOptions = { padding: { top: "110px", bottom: "145px", x: "36px" }, maxZoom: 1.05 } as const
-const diffFitOptions = { ...fitOptions, padding: { ...fitOptions.padding, top: "174px" } } as const
+const fitOptions = { padding: { top: "96px", bottom: "136px", x: "40px" }, minZoom: 0.45, maxZoom: 0.92 } as const
+const diffFitOptions = { ...fitOptions, padding: { ...fitOptions.padding, top: "160px" } } as const
 
 type SpatialCanvasProps = { focusCommand: () => void; onPaneClear: () => void }
 
@@ -91,8 +91,8 @@ function CanvasGraph({ document, flow, focusCommand, onPaneClear }: SpatialCanva
     if (!ready || lastFit.current === geometry) return
     lastFit.current = geometry
     const firstY = Math.min(...positions.map((node) => node.y))
-    const entryNodes = positions.filter((node) => node.y <= firstY + 110).map(({ id }) => ({ id }))
-    void fitView({ ...(diff ? diffFitOptions : fitOptions), nodes: system || diff ? undefined : entryNodes, duration: 0 })
+    const entryNodes = positions.filter((node) => node.y <= firstY + 480).map(({ id }) => ({ id }))
+    void fitView({ ...(diff ? diffFitOptions : fitOptions), nodes: system || diff || positions.length <= 10 ? undefined : entryNodes, duration: 0 })
   }, [positions, geometry, ready, system, diff, fitView])
 
   const inspectedId = system ? inspectedComponentId : inspectedNodeId

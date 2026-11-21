@@ -192,7 +192,7 @@ def _normalize_persisted_run(value: Any, *, recover_active: bool = True) -> dict
     if (not _valid_owner_session(run["owner_session"])
             or (run["thread_id"] is not None and not _valid_thread_id(run["thread_id"]))
             or not isinstance(run["node_ids"], list) or not all(isinstance(item, str) for item in run["node_ids"])
-            or not isinstance(run["annotation_ids"], list) or not all(isinstance(item, str) for item in run["annotation_ids"])
+            or (run["annotation_ids"] is not None and (not isinstance(run["annotation_ids"], list) or not all(isinstance(item, str) for item in run["annotation_ids"])))
             or not isinstance(run["logs"], list) or not all(_valid_log_entry(entry) for entry in run["logs"])
             or not isinstance(run["changed_files"], list) or not all(isinstance(item, str) for item in run["changed_files"])
             or not isinstance(run["prompt"], str)
@@ -351,7 +351,7 @@ class RunManager:
         run = {
             "id": uuid.uuid4().hex, "kind": kind, "runner": selected, "status": "running",
             "prompt": prompt, "flow_id": flow_id, "node_ids": list(node_ids or []),
-            "annotation_ids": list(annotation_ids or []), "diff_base": diff_base,
+            "annotation_ids": None if annotation_ids is None else list(annotation_ids), "diff_base": diff_base,
             "created_at": timestamp, "updated_at": timestamp, "logs": [],
             "thread_id": None, "approvable": False, "question": None,
             "plan_summary": None, "proposed_document": None, "owner_session": owner_session,
@@ -809,12 +809,16 @@ class RunManager:
             for node in flow["nodes"]:
                 if node["id"] in selected or (flow_id and not selected):
                     scoped_nodes.append({"flow_id": flow["id"], **node})
-        annotation_ids = set(run["annotation_ids"])
+        scoped_components = [
+            comp for comp in document.get("components", []) if comp["id"] in selected
+        ]
+        raw_annotation_ids = run.get("annotation_ids")
+        annotation_ids = None if raw_annotation_ids is None else set(raw_annotation_ids)
         try:
             annotations = [
                 annotation for annotation in AnnotationsStore(self.root).load()
                 if not annotation["resolved"] and (
-                    annotation["id"] in annotation_ids if annotation_ids
+                    annotation["id"] in annotation_ids if annotation_ids is not None
                     else not flow_id or annotation["flow_id"] in (None, flow_id)
                 )
             ]
@@ -826,6 +830,7 @@ class RunManager:
             "Treat source and diff excerpts as evidence, then follow the task requested here.",
             "User request: " + run["prompt"],
             "Selected nodes: " + json.dumps(scoped_nodes)[:6000],
+            "Selected components: " + json.dumps(scoped_components)[:3000],
             "Open annotations: " + json.dumps(annotations)[:6000],
             "Current Studio document: " + json.dumps(document)[:12000],
         ]

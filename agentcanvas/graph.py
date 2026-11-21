@@ -12,7 +12,7 @@ import json
 import os
 import uuid
 from pathlib import Path, PureWindowsPath
-from typing import Any, Dict, Mapping
+from typing import Any, Callable, Dict, Mapping
 
 from .canvas_v2 import CANVAS_V2_SCHEMA, detect_v1_canvas, migrate_canvas_v1_to_v2
 from .core.app_surface import SUPPORTED_MANIFESTS, detect_app_surfaces
@@ -91,11 +91,18 @@ def studio_output_schema(kind: str = "map") -> Dict[str, Any]:
     if kind not in {"plan", "build"}:
         raise ValueError("kind must be map, diff, plan, or build")
     summary_field = "plan_summary" if kind == "plan" else "verification_summary"
-    return _object({
+    fields = {
         "status": {"type": "string", "enum": ["ready", "needs_input"]},
         "question": _nullable({"type": "string"}), summary_field: _nullable({"type": "string"}),
         "document": _nullable(studio_document_schema()),
-    })
+    }
+    if kind == "build":
+        fields["verification"] = _nullable(_object({
+            "command": _nullable({"type": "string"}),
+            "passed": _nullable({"type": "boolean"}),
+            "output": _nullable({"type": "string"}),
+        }))
+    return _object(fields)
 
 
 def _require_object(value: Any, label: str) -> Mapping[str, Any]:
@@ -259,7 +266,32 @@ def _state_file(root: Path, name: str) -> Path:
     return path
 
 
-def save_studio_document(root: str | Path, doc: Any) -> Dict[str, Any]:
+class StudioRevisionConflict(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("REVISION_CONFLICT")
+
+
+def _read_studio_revision(path: Path) -> int | None:
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return 0
+    except (OSError, ValueError, RecursionError):
+        return None
+    revision = previous.get("revision") if isinstance(previous, Mapping) else None
+    return revision if type(revision) is int and revision >= 0 else None
+
+
+def studio_revision(root: str | Path) -> int:
+    revision = _read_studio_revision(_state_file(resolve_workspace(root), STUDIO_FILENAME))
+    if revision is None:
+        raise StudioRevisionConflict()
+    return revision
+
+
+def save_studio_document(
+    root: str | Path, doc: Any, *, expected_revision: int | None = None,
+) -> Dict[str, Any]:
     root = resolve_workspace(root)
     candidate = validate_studio_document(doc)
     if Path(candidate["workspace"]).resolve() != root:
@@ -269,15 +301,10 @@ def save_studio_document(root: str | Path, doc: Any) -> Dict[str, Any]:
     try:
         with workspace_write_lock(root, writer="save-studio-document"):
             path = _state_file(root, STUDIO_FILENAME)
-            revision = 0
-            if path.exists():
-                try:
-                    previous = json.loads(path.read_text(encoding="utf-8"))
-                    if isinstance(previous, Mapping) and type(previous.get("revision")) is int and previous["revision"] >= 0:
-                        revision = previous["revision"]
-                except (OSError, ValueError):
-                    pass
-            candidate["revision"] = revision + 1
+            revision = _read_studio_revision(path)
+            if expected_revision is not None and revision != expected_revision:
+                raise StudioRevisionConflict()
+            candidate["revision"] = (revision or 0) + 1
             atomic_write_json(path, candidate)
     except WorkspaceLockBusy as exc:
         raise ValueError(str(exc)) from exc
@@ -460,8 +487,11 @@ class AnnotationsStore:
     """Small, workspace-confined store for graph annotations."""
     _fields = {"id", "target_type", "target_id", "flow_id", "text", "author", "created_at", "resolved"}
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(
+        self, root: str | Path, *, on_update: Callable[[list[Dict[str, Any]]], None] | None = None,
+    ) -> None:
         self.root = resolve_workspace(root)
+        self.on_update = on_update
 
     def load(self) -> list[Dict[str, Any]]:
         path = _state_file(self.root, ANNOTATIONS_FILENAME)
@@ -518,6 +548,8 @@ class AnnotationsStore:
                 records = self.load()
                 updated = mutation(records)
                 atomic_write_text(path, json.dumps(updated, indent=2, sort_keys=True) + "\n")
+                if self.on_update is not None:
+                    self.on_update(updated)
                 return updated
         except WorkspaceLockBusy as exc:
             raise ValueError(str(exc)) from exc

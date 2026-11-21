@@ -23,21 +23,48 @@ _LANGUAGES = {
 }
 
 
-def safe_resolve_workspace_file(root: Path, rel_path: str) -> Path:
-    """Resolve a relative path, rejecting traversal and symlink escapes."""
+_INTERNAL_PATH_COMPONENTS = frozenset({".agentcanvas", ".git"})
+
+
+def _resolve_workspace_path(root: Path, rel_path: str, *, reject_internal: bool) -> Path:
     if not isinstance(rel_path, str) or not rel_path or "\x00" in rel_path:
         raise ValueError("PATH_OUTSIDE_WORKSPACE")
     path = Path(rel_path)
     windows = PureWindowsPath(rel_path)
+    # Workspaces can be on case-insensitive filesystems.
+    if reject_internal and any(
+        parts and parts[0].casefold() in _INTERNAL_PATH_COMPONENTS for parts in (path.parts, windows.parts)
+    ):
+        raise ValueError("INTERNAL_PATH_FORBIDDEN")
     if path.is_absolute() or windows.drive or windows.root or ".." in windows.parts or ".." in path.parts:
         raise ValueError("PATH_OUTSIDE_WORKSPACE")
     try:
         root = Path(root).resolve()
         candidate = (root / path).resolve()
-        candidate.relative_to(root)
+        relative = candidate.relative_to(root)
     except (OSError, RuntimeError, ValueError) as exc:
         raise ValueError("PATH_OUTSIDE_WORKSPACE") from exc
+    if reject_internal and relative.parts and relative.parts[0].casefold() in _INTERNAL_PATH_COMPONENTS:
+        raise ValueError("INTERNAL_PATH_FORBIDDEN")
+    try:
+        current = root
+        for component in path.parts:
+            current /= component
+            if current.is_symlink():
+                raise ValueError("PATH_OUTSIDE_WORKSPACE")
+    except OSError as exc:
+        raise ValueError("PATH_OUTSIDE_WORKSPACE") from exc
     return candidate
+
+
+def resolve_workspace_path(root: Path, rel_path: str) -> Path:
+    """Resolve a confined path for trusted AgentCanvas state access."""
+    return _resolve_workspace_path(root, rel_path, reject_internal=False)
+
+
+def safe_resolve_workspace_file(root: Path, rel_path: str) -> Path:
+    """Resolve a source path, rejecting traversal, internal paths, and symlinks."""
+    return _resolve_workspace_path(root, rel_path, reject_internal=True)
 
 
 def _git(root: Path, *args: str, limit: int | None = None, diff_exit: bool = False) -> bytes | None:

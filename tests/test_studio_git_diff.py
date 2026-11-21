@@ -11,6 +11,7 @@ from agentcanvas.git_diff import (
     get_git_status,
     get_workspace_diff_summary,
     read_file_slice,
+    resolve_workspace_path,
     safe_resolve_workspace_file,
 )
 
@@ -67,7 +68,40 @@ class GitDiffTests(unittest.TestCase):
         self.assertEqual(read_file_slice(self.root, "empty")["lines"], [])
         target = self.write("sample.py", "print('hi')\n")
         (self.root / "local.py").symlink_to(target)
-        self.assertEqual(read_file_slice(self.root, "local.py", 1)["absolute_path"], str(target))
+        with self.assertRaisesRegex(ValueError, "^PATH_OUTSIDE_WORKSPACE$"):
+            read_file_slice(self.root, "local.py", 1)
+
+    def test_rejects_internal_paths_and_internal_symlink_aliases(self):
+        state = self.root / ".agentcanvas"
+        state.mkdir()
+        (state / "launch.json").write_text("{}", encoding="utf-8")
+        metadata = self.root / ".git"
+        metadata.mkdir()
+        (metadata / "config").write_text("[core]\n", encoding="utf-8")
+        (self.root / "state-alias").symlink_to(state, target_is_directory=True)
+        (self.root / "metadata-alias").symlink_to(metadata, target_is_directory=True)
+        for path in (
+            ".agentcanvas/launch.json",
+            ".AGENTCANVAS/launch.json",
+            ".git/config",
+            ".GIT/config",
+            "state-alias/launch.json",
+            "metadata-alias/config",
+        ):
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, "^INTERNAL_PATH_FORBIDDEN$"):
+                    safe_resolve_workspace_file(self.root, path)
+
+    def test_resolve_workspace_path_allows_internal_paths_but_rejects_symlinks(self):
+        state = self.root / ".agentcanvas"
+        state.mkdir()
+        launch = state / "launch.json"
+        launch.write_text("{}", encoding="utf-8")
+        target = self.write("source.py", "print('hi')\n")
+        (self.root / "source-alias.py").symlink_to(target)
+        self.assertEqual(resolve_workspace_path(self.root, ".agentcanvas/launch.json"), launch)
+        with self.assertRaisesRegex(ValueError, "^PATH_OUTSIDE_WORKSPACE$"):
+            resolve_workspace_path(self.root, "source-alias.py")
 
     def test_rejects_traversal_absolute_paths_and_symlink_escapes(self):
         outside = self.base / "neighbor.txt"

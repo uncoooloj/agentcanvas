@@ -124,8 +124,14 @@ def build_parser() -> argparse.ArgumentParser:
     up_parser.add_argument("--stop", action="store_true", help="stop the recorded background server")
     up_parser.set_defaults(func=cmd_up)
 
-    diff_parser = subparsers.add_parser("diff", help="open the studio on the Diff tab")
-    diff_parser.add_argument("range", nargs="?", default="", help="Git range or ref (default: working tree against HEAD)")
+    diff_parser = subparsers.add_parser(
+        "diff", help="launch Studio in Diff mode",
+        description="Start or reuse Studio and print a link to the Diff tab for this Git comparison.",
+    )
+    diff_parser.add_argument(
+        "range", nargs="?", default="",
+        help="Git range such as main..HEAD, a base ref, or omit to compare the working tree against HEAD",
+    )
     diff_parser.add_argument("--workspace", help="workspace path to serve")
     diff_parser.add_argument("--port", default=8765, type=int, help="first port to try")
     diff_parser.add_argument("--open", action=argparse.BooleanOptionalAction, help="open the browser after the server is ready")

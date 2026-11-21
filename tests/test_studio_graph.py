@@ -10,6 +10,7 @@ from pathlib import Path
 
 from agentcanvas.graph import (
     AnnotationsStore,
+    StudioRevisionConflict,
     build_demo_studio_document,
     load_studio_document,
     save_studio_document,
@@ -90,6 +91,19 @@ class StudioGraphTests(unittest.TestCase):
             for thread in threads: thread.join()
             self.assertEqual([], failures)
             self.assertEqual(list(range(1, 9)), sorted(revisions))
+
+    def test_save_rejects_an_outdated_expected_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            original, _ = load_studio_document(root)
+            newer = save_studio_document(root, {**original, "summary": "Newer canvas"}, expected_revision=0)
+            with self.assertRaisesRegex(StudioRevisionConflict, "^REVISION_CONFLICT$"):
+                save_studio_document(root, original, expected_revision=0)
+            self.assertEqual(load_studio_document(root)[0], newer)
+            (root / ".agentcanvas" / "studio.json").write_text("invalid JSON", encoding="utf-8")
+            with self.assertRaises(StudioRevisionConflict):
+                save_studio_document(root, original, expected_revision=0)
+            self.assertEqual(save_studio_document(root, original)["revision"], 1)
 
     def test_annotations_crud_and_workspace_confinement(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

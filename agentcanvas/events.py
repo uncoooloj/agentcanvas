@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from queue import Empty, Full, Queue
 from threading import Lock
-from typing import Any
+from typing import Any, Callable
 
 
 StudioEvent = tuple[str, dict[str, Any]]
+EventFilter = Callable[[str, dict[str, Any]], bool]
 
 
 class EventBus:
@@ -15,29 +16,34 @@ class EventBus:
         if queue_size < 1:
             raise ValueError("event queues must have positive capacity")
         self._queue_size = queue_size
-        self._subscribers: set[Queue[StudioEvent]] = set()
+        self._subscribers: dict[Queue[StudioEvent], EventFilter | None] = {}
         self._lock = Lock()
+        self._seq = 0
 
-    def subscribe(self) -> Queue[StudioEvent]:
+    def subscribe(self, accepts: EventFilter | None = None) -> Queue[StudioEvent]:
         subscriber: Queue[StudioEvent] = Queue(self._queue_size)
         with self._lock:
-            self._subscribers.add(subscriber)
+            self._subscribers[subscriber] = accepts
         return subscriber
 
     def unsubscribe(self, subscriber: Queue[StudioEvent]) -> None:
         with self._lock:
-            self._subscribers.discard(subscriber)
+            self._subscribers.pop(subscriber, None)
 
     def publish(self, event_type: str, payload: dict[str, Any]) -> None:
-        event = (event_type, payload)
         with self._lock:
-            for subscriber in self._subscribers:
+            self._seq += 1
+            event = (event_type, {**payload, "seq": self._seq})
+            for subscriber, accepts in self._subscribers.items():
+                if accepts is not None and not accepts(*event):
+                    continue
                 try:
                     subscriber.put_nowait(event)
                 except Full:
-                    try:
-                        subscriber.get_nowait()
+                    while True:
+                        try:
+                            subscriber.get_nowait()
+                        except Empty:
+                            break
                         subscriber.task_done()
-                    except Empty:
-                        pass  # The consumer freed space before we could drop an event.
-                    subscriber.put_nowait(event)
+                    subscriber.put_nowait(("studio.resync", {"seq": self._seq}))

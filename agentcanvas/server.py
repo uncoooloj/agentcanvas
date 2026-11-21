@@ -66,7 +66,7 @@ from .git_diff import (
     get_file_diff,
     get_git_status,
     read_file_slice,
-    safe_resolve_workspace_file,
+    resolve_workspace_path,
 )
 from .graph import AnnotationsStore, build_demo_studio_document, load_studio_document
 from .progress import ProgressError, progress_status, safe_progress_status, write_progress
@@ -129,7 +129,7 @@ def run_server(
     diff_base: Optional[str] = None,
 ) -> None:
     root = resolve_workspace(workspace)
-    safe_resolve_workspace_file(root, ".agentcanvas")
+    resolve_workspace_path(root, ".agentcanvas")
     token = token or secrets.token_urlsafe(24)
     assistant_id, assistant_name = resolve_assistant(agent)
     if demo_mode and assistant_id == "generic":
@@ -142,14 +142,13 @@ def run_server(
         demo_mode,
         landing_mode=landing_mode,
         session_id=session_id,
-        diff_base=diff_base,
         allow_remote_origin=host.lower() not in {"localhost", "127.0.0.1", "::1"},
     )
     httpd = ThreadingHTTPServer((host, port), handler_class)
     heartbeat = None
     previous_sigterm = None
     try:
-        initialize_studio_server(httpd, root, diff_base)
+        initialize_studio_server(httpd, root)
         if os.name == "posix" and threading.current_thread() is threading.main_thread():
             previous_sigterm = signal.signal(signal.SIGTERM, _stop_on_sigterm)
         actual_host, actual_port = httpd.server_address[:2]
@@ -201,11 +200,13 @@ def _stop_on_sigterm(_signum, _frame) -> None:
     raise SystemExit(0)
 
 
-def initialize_studio_server(server: ThreadingHTTPServer, root: Path, diff_base: Optional[str]) -> None:
+def initialize_studio_server(server: ThreadingHTTPServer, root: Path) -> None:
     server.event_bus = EventBus()
-    server.annotations = AnnotationsStore(root)
+    server.annotations = AnnotationsStore(
+        root,
+        on_update=lambda annotations: server.event_bus.publish("annotations.updated", {"annotations": annotations}),
+    )
     server.studio_stop = threading.Event()
-    server.diff_base = diff_base
     server.run_manager = RunManager(root, server.event_bus)
 
 
@@ -810,7 +811,6 @@ def make_handler(
     demo_mode: bool = False,
     landing_mode: bool = False,
     session_id: Optional[str] = None,
-    diff_base: Optional[str] = None,
     allow_remote_origin: bool = False,
 ):
     web_root = (Path(__file__).resolve().parent / "web").resolve()
@@ -821,10 +821,10 @@ def make_handler(
             return False, None
         candidate_bytes = candidate.encode("utf-8", errors="surrogatepass")
         if secrets.compare_digest(token.encode("utf-8", errors="surrogatepass"), candidate_bytes):
-            return True, session_id
+            return True, None
 
         try:
-            launch_path = safe_resolve_workspace_file(workspace, ".agentcanvas/launch.json")
+            launch_path = resolve_workspace_path(workspace, ".agentcanvas/launch.json")
             with launch_path.open(encoding="utf-8") as handle:
                 launch_record = json.load(handle)
         except (OSError, ValueError):
@@ -833,7 +833,7 @@ def make_handler(
         if not isinstance(bindings, dict):
             return False, None
         for session_token, bound_session_id in bindings.items():
-            if not isinstance(session_token, str) or not isinstance(bound_session_id, str):
+            if not isinstance(session_token, str) or not isinstance(bound_session_id, str) or not bound_session_id.strip():
                 continue
             if secrets.compare_digest(session_token.encode("utf-8", errors="surrogatepass"), candidate_bytes):
                 return True, bound_session_id
@@ -1325,7 +1325,7 @@ def make_handler(
                 server = self.server
                 with studio_init_lock:
                     if not hasattr(server, "run_manager"):
-                        initialize_studio_server(server, workspace, diff_base)
+                        initialize_studio_server(server, workspace)
                 if method == "GET":
                     self.handle_studio_get(parsed)
                 else:
@@ -1333,7 +1333,9 @@ def make_handler(
             except (LookupError, FileNotFoundError) as exc:
                 self.write_json({"ok": False, "error": str(exc)}, status=HTTPStatus.NOT_FOUND)
             except (ValueError, TypeError) as exc:
-                self.write_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                error = str(exc)
+                status = HTTPStatus.FORBIDDEN if error == "INTERNAL_PATH_FORBIDDEN" else HTTPStatus.BAD_REQUEST
+                self.write_json({"ok": False, "error": error}, status=status)
             except RuntimeError as exc:
                 self.write_json({"ok": False, "error": str(exc)}, status=HTTPStatus.CONFLICT)
             except (BrokenPipeError, ConnectionResetError):
@@ -1345,7 +1347,16 @@ def make_handler(
                 )
 
         def requested_diff_base(self, query) -> Optional[str]:
-            return query.get("diffBase", query.get("diff_base", [self.server.diff_base]))[0]
+            return query.get("diffBase", query.get("diff_base", [None]))[0]
+
+        def can_access_run(self, run: Dict[str, Any]) -> bool:
+            return self.caller_session is None or run.get("owner_session") == self.caller_session
+
+        def accessible_run(self, run_id: str) -> Dict[str, Any]:
+            run = self.server.run_manager.get_run(run_id)
+            if not self.can_access_run(run):
+                raise LookupError("run not found")
+            return run
 
         def handle_studio_get(self, parsed) -> None:
             server = self.server
@@ -1363,7 +1374,7 @@ def make_handler(
                 mode = "demo" if show_demo else "landing" if landing_mode else "workspace"
                 runner_info = server.run_manager.runner_info()
                 git_status = get_git_status(workspace)
-                recent_runs = server.run_manager.list_runs()
+                recent_runs = [run for run in server.run_manager.list_runs() if self.can_access_run(run)]
                 active_run = next((run for run in recent_runs if run["status"] in {
                     "queued", "running", "needs_input", "awaiting_approval",
                 }), None)
@@ -1415,7 +1426,7 @@ def make_handler(
                 route = path.split("/")
                 if len(route) != 4 or not route[3]:
                     raise LookupError("not found")
-                self.write_json({"ok": True, "run": server.run_manager.get_run(unquote(route[3]))})
+                self.write_json({"ok": True, "run": self.accessible_run(unquote(route[3]))})
 
         def handle_studio_mutation(self, method: str, parsed) -> None:
             server = self.server
@@ -1427,7 +1438,6 @@ def make_handler(
                 annotation_id = unquote(route[3])
                 if method == "DELETE":
                     server.annotations.delete(annotation_id)
-                    server.event_bus.publish("annotations.updated", {"id": annotation_id, "deleted": True})
                     self.write_json({"ok": True})
                     return
                 payload = self.read_json_body(max_bytes=MAX_JSON_BODY_BYTES)
@@ -1442,7 +1452,6 @@ def make_handler(
             else:
                 self.handle_run_mutation(parsed, route)
                 return
-            server.event_bus.publish("annotations.updated", {"annotation": annotation})
             self.write_json({"ok": True, "annotation": annotation})
 
         def handle_run_mutation(self, parsed, route) -> None:
@@ -1454,15 +1463,17 @@ def make_handler(
                 if payload.get("kind") == "diff":
                     query = parse_qs(parsed.query, keep_blank_values=True)
                     payload.setdefault("diff_base", self.requested_diff_base(query) or None)
-                result = manager.start_run(**payload)
+                if "owner_session" in payload:
+                    raise ValueError("owner_session is assigned by authentication")
+                result = manager.start_run(**payload, owner_session=self.caller_session)
             elif len(route) == 5 and route[3]:
                 run_id, action = unquote(route[3]), route[4]
+                if self.caller_session is not None:
+                    self.accessible_run(run_id)
                 if action == "answer":
                     payload = self.read_json_body(max_bytes=MAX_JSON_BODY_BYTES)
                     if payload is None:
                         return
-                    if payload == {"answer": "approve"} and manager.get_run(run_id)["status"] == "awaiting_approval":
-                        payload = {"approve": True}
                     result = manager.answer_run(run_id, **payload)
                 elif action == "cancel":
                     result = manager.cancel_run(run_id)
@@ -1476,9 +1487,16 @@ def make_handler(
 
         def stream_events(self) -> None:
             bus = self.server.event_bus
-            subscriber = bus.subscribe()
+
+            def visible(event_type: str, payload: Dict[str, Any]) -> bool:
+                if event_type == "run.updated":
+                    return self.can_access_run(payload["run"])
+                if event_type == "run.log":
+                    return self.can_access_run(payload)
+                return True
+
+            subscriber = bus.subscribe(visible if self.caller_session is not None else None)
             try:
-                self.close_connection = True
                 self.connection.settimeout(15)
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/event-stream")
@@ -1490,6 +1508,7 @@ def make_handler(
                 self.wfile.write(b": ping\n\n")
                 self.wfile.flush()
                 while not self.server.studio_stop.is_set():
+                    resync = False
                     try:
                         event_type, payload = subscriber.get(timeout=15)
                     except Empty:
@@ -1499,11 +1518,16 @@ def make_handler(
                         if self.server.studio_stop.is_set():
                             break
                         message = f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
+                        resync = event_type == "studio.resync"
                     self.wfile.write(message.encode("utf-8"))
                     self.wfile.flush()
+                    if resync:
+                        # EventSource reconnects, letting the client reload its snapshot on open.
+                        break
             except OSError:
                 pass  # The client closed the stream or stopped reading.
             finally:
+                self.close_connection = True
                 bus.unsubscribe(subscriber)
 
         def authorized(self, parsed) -> bool:
@@ -1513,10 +1537,12 @@ def make_handler(
             bearer_token = None
             if auth.startswith("Bearer "):
                 bearer_token = auth[len("Bearer ") :].strip()
-            return any(
-                session_binding_for_token(candidate)[0]
-                for candidate in (query_token, header_token, bearer_token)
-            )
+            for candidate in (query_token, header_token, bearer_token):
+                valid, bound_session = session_binding_for_token(candidate)
+                if valid:
+                    self.caller_session = bound_session
+                    return True
+            return False
 
         def request_session_id(
             self,
@@ -1530,8 +1556,10 @@ def make_handler(
             bearer_token = auth[len("Bearer ") :].strip() if auth.startswith("Bearer ") else None
             for candidate in (query_token, header_token, bearer_token):
                 authorized_token, bound_session_id = session_binding_for_token(candidate)
-                if authorized_token and bound_session_id:
-                    return bound_session_id
+                if authorized_token:
+                    legacy_session = bound_session_id or session_id
+                    if legacy_session:
+                        return legacy_session
             query = parse_qs(parsed.query)
             values = [
                 *(query.get("sessionId") or []),

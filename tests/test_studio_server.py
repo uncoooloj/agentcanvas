@@ -19,8 +19,9 @@ from urllib.parse import parse_qs, urlparse
 from http.server import ThreadingHTTPServer
 
 from agentcanvas.cli import build_parser, main
-from agentcanvas.graph import build_demo_studio_document
-from agentcanvas.runner import RunManager
+from agentcanvas.events import EventBus
+from agentcanvas.graph import build_demo_studio_document, load_studio_document, save_studio_document
+from agentcanvas.runner import RUNS_SCHEMA, RunManager
 from agentcanvas.server import initialize_studio_server, make_handler
 from agentcanvas.supervisor import ensure_server_up, launch_url
 
@@ -51,7 +52,7 @@ class StudioServerTests(unittest.TestCase):
             self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler, bind_and_activate=False)
         else:
             self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
-        initialize_studio_server(self.httpd, self.root, None)
+        initialize_studio_server(self.httpd, self.root)
         self.addCleanup(self.close_server)
         if self.thread:
             self.thread.start()
@@ -186,6 +187,19 @@ class StudioServerTests(unittest.TestCase):
         self.assertEqual(status, 422)
         self.assertEqual(payload["error"], "BINARY_FILE")
 
+    def test_internal_paths_and_aliases_are_forbidden(self):
+        state = self.root / ".agentcanvas"
+        state.mkdir()
+        (state / "launch.json").write_text('{"token":"test-only"}', encoding="utf-8")
+        (self.root / "state-alias").symlink_to(state, target_is_directory=True)
+        (self.root / "file-alias").symlink_to(state / "launch.json")
+        for route in ("file-slice", "file-diff"):
+            for path in (".agentcanvas/launch.json", "state-alias/launch.json", "file-alias", ".git/config"):
+                with self.subTest(route=route, path=path):
+                    status, payload = self.request("GET", f"/api/{route}?path={path}")
+                    self.assertEqual(status, 403)
+                    self.assertEqual(payload["error"], "INTERNAL_PATH_FORBIDDEN")
+
     def test_file_diff_reports_worktree_edits(self):
         def git(*args):
             subprocess.run(["git", "-C", str(self.root), *args], check=True, capture_output=True, timeout=5)
@@ -202,6 +216,18 @@ class StudioServerTests(unittest.TestCase):
         self.assertTrue(payload["has_diff"])
         self.assertEqual(payload["additions"], 1)
         self.assertEqual(payload["deletions"], 1)
+
+    def test_diff_range_only_applies_to_the_request_that_supplied_it(self):
+        _, scoped = self.request("GET", "/api/studio?diffBase=feature%2Fexample..HEAD")
+        _, ordinary = self.request("GET", "/api/studio")
+        self.assertEqual((scoped["studio_mode"], scoped["diff_base"]), ("diff", "feature/example..HEAD"))
+        self.assertEqual((ordinary["studio_mode"], ordinary["diff_base"]), ("map", None))
+        _, blank = self.request("GET", "/api/studio?diffBase=")
+        self.assertEqual((blank["studio_mode"], blank["diff_base"]), ("diff", None))
+        _, scoped_file = self.request("GET", "/api/file-diff?path=app.py&base=HEAD")
+        _, ordinary_file = self.request("GET", "/api/file-diff?path=app.py")
+        self.assertEqual(scoped_file["base"], "HEAD")
+        self.assertIsNone(ordinary_file["base"])
 
     def test_annotation_crud(self):
         status, payload = self.request("POST", "/api/annotations", {
@@ -255,12 +281,96 @@ class StudioServerTests(unittest.TestCase):
                 self.assertEqual(payload["run"], run)
                 call.assert_called_once_with(run["id"], **(body or {}))
 
-        path = f"/api/runs/{run['id']}/answer"
-        with patch.object(manager, "get_run", return_value={"status": "awaiting_approval"}), patch.object(
-            manager, "answer_run", return_value=run
-        ) as answer:
-            self.assertEqual(self.request("POST", path, {"answer": "approve"})[0], 200)
-            answer.assert_called_once_with(run["id"], approve=True)
+    def test_run_ownership_limits_snapshots_actions_and_sse(self):
+        state = self.root / ".agentcanvas"
+        state.mkdir()
+        (state / "launch.json").write_text(json.dumps({
+            "session_tokens": {"token-a": "session-a", "token-b": "session-b"},
+        }), encoding="utf-8")
+        headers_a = {"Authorization": "Bearer token-a"}
+        headers_b = {"X-AgentCanvas-Token": "token-b"}
+        with self.connection() as client:
+            client.request("GET", "/api/events?token=token-b&sessionId=session-a")
+            with client.getresponse() as stream:
+                self.assertEqual(stream.status, 200)
+                self.assertEqual(stream.fp.readline(), b": ping\n")
+                self.assertEqual(stream.fp.readline(), b"\n")
+                status, payload = self.request("POST", "/api/runs?sessionId=session-b", {
+                    "kind": "plan", "runner": "copy",
+                }, headers_a)
+                self.assertEqual(status, 200)
+                run_a = payload["run"]
+                self.assertEqual(run_a["owner_session"], "session-a")
+                self.httpd.event_bus.publish("run.log", {
+                    "run_id": run_a["id"], "owner_session": "session-a", "entry": {"message": "private"},
+                })
+                status, payload = self.request("POST", "/api/runs", {"kind": "plan", "runner": "copy"}, headers_b)
+                self.assertEqual(status, 200)
+                run_b = payload["run"]
+                self.httpd.event_bus.publish("run.log", {
+                    "run_id": run_b["id"], "owner_session": "session-b", "entry": {"message": "visible"},
+                })
+                self.assertEqual(stream.fp.readline(), b"event: run.updated\n")
+                updated = json.loads(stream.fp.readline().removeprefix(b"data: "))
+                self.assertEqual(updated["run"]["id"], run_b["id"])
+                self.assertEqual(stream.fp.readline(), b"\n")
+                self.assertEqual(stream.fp.readline(), b"event: run.log\n")
+                log = json.loads(stream.fp.readline().removeprefix(b"data: "))
+                self.assertEqual(log["run_id"], run_b["id"])
+                self.assertGreater(log["seq"], updated["seq"])
+
+        path = f"/api/runs/{run_a['id']}"
+        self.assertEqual(self.request("GET", path + "?sessionId=session-a", headers=headers_b)[0], 404)
+        for action, body in (("answer", {"approve": True}), ("answer", {"answer": "clarification"}),
+                             ("cancel", None), ("discard", None)):
+            with self.subTest(action=action, body=body):
+                self.assertEqual(self.request("POST", f"{path}/{action}", body, headers_b)[0], 404)
+        self.assertEqual(self.request("GET", path, headers=headers_a)[0], 200)
+        self.assertEqual(self.request("GET", path)[0], 200)
+        _, scoped = self.request("GET", "/api/studio?sessionId=session-a", headers=headers_b)
+        self.assertEqual([run["id"] for run in scoped["recent_runs"]], [run_b["id"]])
+        _, primary = self.request("GET", "/api/studio")
+        self.assertEqual({run["id"] for run in primary["recent_runs"]}, {run_a["id"], run_b["id"]})
+        status, _ = self.request("POST", "/api/runs", {
+            "kind": "plan", "runner": "copy", "owner_session": "session-a",
+        }, headers_b)
+        self.assertEqual(status, 400)
+
+    def test_studio_skips_malformed_runs_and_checks_plan_approval(self):
+        workspace_document, _ = load_studio_document(self.root)
+        plan = {
+            "id": "proposal", "kind": "plan", "runner": "copy", "status": "awaiting_approval",
+            "logs": [], "prompt": "Change the canvas", "created_at": "2026-01-01", "updated_at": "2026-01-01",
+            "approvable": True, "proposed_document": workspace_document, "base_revision": 0,
+            "owner_session": "session-a",
+        }
+        runs_path = self.root / ".agentcanvas" / "runs.json"
+        runs_path.parent.mkdir()
+        (runs_path.parent / "launch.json").write_text(json.dumps({
+            "session_tokens": {"token-b": "session-b"},
+        }), encoding="utf-8")
+        runs_path.write_text(json.dumps({"schema": RUNS_SCHEMA, "runs": [
+            dict(plan, id="wrong-status", status=["completed"]), dict(plan, id="wrong-kind", kind={}),
+            dict(plan, id="wrong-runner", runner=[]), "not a record",
+            dict(plan, id="wrong-logs", logs="not an array"), dict(plan, id="wrong-log-entry", logs=[{"message": 1}]),
+            plan,
+        ]}), encoding="utf-8")
+        self.httpd.run_manager.shutdown()
+        self.httpd.run_manager = RunManager(self.root, self.httpd.event_bus)
+        status, payload = self.request("GET", "/api/studio")
+        self.assertEqual(status, 200)
+        self.assertEqual([run["id"] for run in payload["recent_runs"]], ["proposal"])
+        self.assertEqual(payload["active_run"]["id"], "proposal")
+        status, payload = self.request("GET", "/api/studio?token=token-b")
+        self.assertEqual(status, 200)
+        self.assertIsNone(payload["active_run"])
+        self.assertEqual(payload["recent_runs"], [])
+        path = "/api/runs/proposal/answer"
+        self.assertEqual(self.request("POST", path, {"answer": "approve"})[0], 409)
+        save_studio_document(self.root, workspace_document)
+        self.assertEqual(self.request("POST", path, {"approve": True}), (
+            409, {"ok": False, "error": "REVISION_CONFLICT"},
+        ))
 
     def test_sse_streams_annotation_write_after_initial_ping(self):
         with self.connection() as client:
@@ -280,8 +390,36 @@ class StudioServerTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(response.fp.readline(), b"event: annotations.updated\n")
                 data = response.fp.readline().removeprefix(b"data: ")
-                self.assertEqual(json.loads(data)["annotation"], payload["annotation"])
+                created = json.loads(data)
+                self.assertEqual(created["annotations"], [payload["annotation"]])
                 self.assertEqual(response.fp.readline(), b"\n")
+                path = "/api/annotations/" + payload["annotation"]["id"]
+                for method, body in (("PATCH", {"resolved": True}), ("DELETE", None)):
+                    status, result = self.request(method, path, body)
+                    self.assertEqual(status, 200)
+                    self.assertEqual(response.fp.readline(), b"event: annotations.updated\n")
+                    event = json.loads(response.fp.readline().removeprefix(b"data: "))
+                    self.assertEqual(response.fp.readline(), b"\n")
+                    self.assertGreater(event["seq"], created["seq"])
+                    self.assertEqual(event["annotations"], [result["annotation"]] if method == "PATCH" else [])
+                    created = event
+
+    def test_sse_overflow_closes_stream_for_snapshot_reconnect(self):
+        bus = EventBus(queue_size=1)
+        self.httpd.event_bus = bus
+        subscribe = bus.subscribe
+
+        def subscribe_with_backlog(accepts):
+            subscriber = subscribe(accepts)
+            bus.publish("annotations.updated", {"annotations": []})
+            bus.publish("annotations.updated", {"annotations": []})
+            return subscriber
+
+        with patch.object(bus, "subscribe", side_effect=subscribe_with_backlog), self.connection() as client:
+            client.request("GET", "/api/events", headers=AUTH)
+            with client.getresponse() as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.read(), b': ping\n\nevent: studio.resync\ndata: {"seq": 2}\n\n')
 
     def test_map_run_streams_progress_and_persists_the_canvas(self):
         document = build_demo_studio_document()
@@ -327,6 +465,19 @@ class StudioServerTests(unittest.TestCase):
         self.assertIsNone(payload["active_run"])
         self.assertEqual(payload["recent_runs"][0]["id"], run_id)
         self.assertEqual(payload["runners"]["available"][0]["id"], "codex")
+
+
+class StudioEventTests(unittest.TestCase):
+    def test_overflow_emits_resync_with_monotonic_sequence(self):
+        bus = EventBus(queue_size=2)
+        slow = bus.subscribe()
+        fast = bus.subscribe()
+        for seq in range(1, 5):
+            bus.publish("run.updated", {"seq": -1})
+            self.assertEqual(fast.get_nowait(), ("run.updated", {"seq": seq}))
+        self.assertEqual(slow.get_nowait(), ("studio.resync", {"seq": 3}))
+        self.assertEqual(slow.get_nowait(), ("run.updated", {"seq": 4}))
+        self.assertTrue(slow.empty())
 
 
 class StudioLaunchTests(unittest.TestCase):
@@ -377,7 +528,7 @@ class StudioLaunchTests(unittest.TestCase):
             ) as spawn, patch("agentcanvas.supervisor.wait_until_ready"):
                 result = ensure_server_up(root, diff_base="")
             self.assertFalse(result["already_running"])
-            self.assertEqual(spawn.call_args.kwargs["diff_base"], "")
+            self.assertNotIn("diff_base", spawn.call_args.kwargs)
             params = parse_qs(urlparse(result["url"]).query, keep_blank_values=True)
             self.assertEqual(params["tab"], ["diff"])
             self.assertEqual(params["diffBase"], [""])

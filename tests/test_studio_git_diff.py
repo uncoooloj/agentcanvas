@@ -27,14 +27,15 @@ class GitDiffTests(unittest.TestCase):
     def git(self, *args):
         command = [
             "git", "-C", str(self.root), "-c", "user.name=Studio Test",
-            "-c", "user.email=studio@example.test", "-c", "core.hooksPath=/dev/null", *args,
+            "-c", "user.email=studio@example.test", "-c", "core.hooksPath=/dev/null",
+            "-c", "core.autocrlf=false", *args,
         ]
         return subprocess.run(command, check=True, capture_output=True, timeout=5, text=True).stdout.strip()
 
     def write(self, path, text):
         file = self.root / path
         file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text(text, encoding="utf-8")
+        file.write_bytes(text.encode("utf-8"))
         return file
 
     def init_repo(self):

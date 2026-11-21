@@ -522,22 +522,23 @@ class RunManager:
                 prompt_file.write_text(prompt, encoding="utf-8", errors="replace")
                 env = dict(os.environ)
                 env.pop("AGENTCANVAS_SERVER_TOKEN", None)
-                with prompt_file.open("rb") as stdin:
-                    if run["kind"] == "build":
-                        before = get_git_status(self.root)
-                    # Check twice: the approval request races other writers, and a
-                    # different process may complete a build while this one waits.
-                    if run["kind"] == "build" and run["base_revision"] != studio_revision(self.root):
-                        raise StudioRevisionConflict()
-                    with self._lock:
-                        if self._closed or self._runs[run_id]["status"] != "running":
-                            return
-                        process = self.command_factory(
-                            self._command(run, schema, schema_file), cwd=str(self.root), env=env, stdin=stdin,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                            errors="replace", start_new_session=True,
-                        )
-                        self._processes[run_id] = process
+                try:
+                    with prompt_file.open("rb") as stdin:
+                        if run["kind"] == "build":
+                            before = get_git_status(self.root)
+                        # Check twice: the approval request races other writers, and a
+                        # different process may complete a build while this one waits.
+                        if run["kind"] == "build" and run["base_revision"] != studio_revision(self.root):
+                            raise StudioRevisionConflict()
+                        with self._lock:
+                            if self._closed or self._runs[run_id]["status"] != "running":
+                                return
+                            process = self.command_factory(
+                                self._command(run, schema, schema_file), cwd=str(self.root), env=env, stdin=stdin,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                errors="replace", start_new_session=True,
+                            )
+                            self._processes[run_id] = process
                     deadline = time.monotonic() + self._run_timeout_seconds
                     output = self._read_output(run_id, process, deadline=deadline)
                     remaining = deadline - time.monotonic()
@@ -549,6 +550,9 @@ class RunManager:
                         raise RuntimeError("RUN_DEADLINE_EXCEEDED") from exc
                     if exit_code != 0:
                         raise RuntimeError(f"{run['runner']} exited with status {process.returncode}")
+                finally:
+                    if process is not None and process.poll() is None:
+                        _terminate(process)
         except Exception as exc:
             failure = str(exc) or type(exc).__name__
         finally:

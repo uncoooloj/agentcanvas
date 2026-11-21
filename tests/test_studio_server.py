@@ -36,8 +36,8 @@ class StudioServerTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
-        (self.root / "pyproject.toml").write_text('[project]\nname = "sample"\n', encoding="utf-8")
-        (self.root / "app.py").write_text("def greet():\n    return 'hello'\n", encoding="utf-8")
+        (self.root / "pyproject.toml").write_bytes(b'[project]\nname = "sample"\n')
+        (self.root / "app.py").write_bytes(b"def greet():\n    return 'hello'\n")
         patcher = patch("agentcanvas.runner.detect_runners", return_value=COPY_RUNNER)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -202,7 +202,10 @@ class StudioServerTests(unittest.TestCase):
 
     def test_file_diff_reports_worktree_edits(self):
         def git(*args):
-            subprocess.run(["git", "-C", str(self.root), *args], check=True, capture_output=True, timeout=5)
+            subprocess.run(
+                ["git", "-C", str(self.root), "-c", "core.autocrlf=false", *args],
+                check=True, capture_output=True, timeout=5,
+            )
 
         git("init", "-q")
         git("add", "app.py")
@@ -210,7 +213,7 @@ class StudioServerTests(unittest.TestCase):
             "-c", "user.name=Studio Test", "-c", "user.email=studio@example.test",
             "-c", "core.hooksPath=/dev/null", "commit", "--no-gpg-sign", "-qm", "Initial",
         )
-        (self.root / "app.py").write_text("def greet():\n    return 'updated'\n", encoding="utf-8")
+        (self.root / "app.py").write_bytes(b"def greet():\n    return 'updated'\n")
         status, payload = self.request("GET", "/api/file-diff?path=app.py&base=HEAD")
         self.assertEqual(status, 200)
         self.assertTrue(payload["has_diff"])

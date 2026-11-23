@@ -61,6 +61,7 @@ class NoTelemetryTests(unittest.TestCase):
                     "url(\"/api/reindex?includeGraph=1\"",
                     "url(\"/api/changes\"",
                     "u.toString(",
+                    "this.url(path, params",
                 }:
                     offenders.append(f"{rel} uses fetch({target}")
 

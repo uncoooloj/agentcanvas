@@ -8,7 +8,9 @@ import hashlib
 import json
 import mimetypes
 import os
+from queue import Empty
 import secrets
+import signal
 import threading
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -58,7 +60,17 @@ from .core.behavior_canvas import (
 )
 from .core.workspace_profile import infer_workspace_profile
 from .failure_ids import FailureId, failure_payload
+from .events import EventBus
+from .git_diff import (
+    compute_stale_node_ids,
+    get_file_diff,
+    get_git_status,
+    read_file_slice,
+    resolve_workspace_path,
+)
+from .graph import AnnotationsStore, build_demo_studio_document, load_studio_document
 from .progress import ProgressError, progress_status, safe_progress_status, write_progress
+from .runner import RunManager
 
 
 # Known coding-agent platforms that may launch AgentCanvas, with human labels.
@@ -73,6 +85,7 @@ DEMO_MARKER_FILENAME = ".agentcanvas-demo"
 CANVAS_V2_SCHEMA = "agentcanvas.canvas.v2"
 SERVER_HEARTBEAT_FILENAME = "server.heartbeat.json"
 HEARTBEAT_INTERVAL_SECONDS = 15
+MAX_JSON_BODY_BYTES = 1024 * 1024
 
 
 class AppContextMode(str, Enum):
@@ -113,13 +126,14 @@ def run_server(
     landing_mode: bool = False,
     session_id: Optional[str] = None,
     supervised: bool = False,
+    diff_base: Optional[str] = None,
 ) -> None:
     root = resolve_workspace(workspace)
+    resolve_workspace_path(root, ".agentcanvas")
     token = token or secrets.token_urlsafe(24)
     assistant_id, assistant_name = resolve_assistant(agent)
     if demo_mode and assistant_id == "generic":
         assistant_name = "No agent connected"
-    ensure_ir(root)
     handler_class = make_handler(
         root,
         token,
@@ -128,51 +142,79 @@ def run_server(
         demo_mode,
         landing_mode=landing_mode,
         session_id=session_id,
+        allow_remote_origin=host.lower() not in {"localhost", "127.0.0.1", "::1"},
     )
     httpd = ThreadingHTTPServer((host, port), handler_class)
-    actual_host, actual_port = httpd.server_address[:2]
-    display_host = "127.0.0.1" if actual_host in {"0.0.0.0", "::"} else actual_host
     heartbeat = None
-    if server_heartbeat_enabled(demo_mode=demo_mode, landing_mode=landing_mode):
-        heartbeat = start_server_heartbeat(
-            root,
-            host=display_host,
-            port=int(actual_port),
-            token=token,
-            session_id=session_id,
-            agent=assistant_id if assistant_id != "generic" else None,
-            agent_name=assistant_name if assistant_id != "generic" else None,
-        )
-    query = {"token": token}
-    if session_id:
-        query["sessionId"] = session_id
-    url = f"http://{display_host}:{actual_port}/?{urlencode(query)}"
-
-    if landing_mode:
-        prefix = "AgentCanvas launch page serving"
-    elif demo_mode:
-        prefix = "AgentCanvas demo mode serving"
-    else:
-        prefix = "AgentCanvas serving"
-    print(f"{prefix} {root}", flush=True)
-    if not supervised:
-        print(f"Open {url}", flush=True)
-        print("Press Ctrl-C to stop.", flush=True)
-
+    previous_sigterm = None
     try:
+        initialize_studio_server(httpd, root)
+        if os.name == "posix" and threading.current_thread() is threading.main_thread():
+            previous_sigterm = signal.signal(signal.SIGTERM, _stop_on_sigterm)
+        actual_host, actual_port = httpd.server_address[:2]
+        display_host = "127.0.0.1" if actual_host in {"0.0.0.0", "::"} else actual_host
+        if server_heartbeat_enabled(demo_mode=demo_mode, landing_mode=landing_mode):
+            heartbeat = start_server_heartbeat(
+                root,
+                host=display_host,
+                port=int(actual_port),
+                token=token,
+                session_id=session_id,
+                agent=assistant_id if assistant_id != "generic" else None,
+                agent_name=assistant_name if assistant_id != "generic" else None,
+            )
+        if landing_mode:
+            prefix = "AgentCanvas launch page serving"
+        elif demo_mode:
+            prefix = "AgentCanvas demo mode serving"
+        else:
+            prefix = "AgentCanvas serving"
+        print(f"{prefix} {root}", flush=True)
+        if not supervised:
+            query = {"token": token}
+            if session_id:
+                query["sessionId"] = session_id
+            if diff_base is not None:
+                query.update(tab="diff", diffBase=diff_base)
+            url = f"http://{display_host}:{actual_port}/?{urlencode(query)}"
+            print(f"Open {url}", flush=True)
+            print("Press Ctrl-C to stop.", flush=True)
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nAgentCanvas stopped.", flush=True)
     finally:
-        if heartbeat is not None:
-            stop_server_heartbeat(heartbeat)
-        httpd.server_close()
+        try:
+            if hasattr(httpd, "run_manager"):
+                httpd.studio_stop.set()
+                httpd.event_bus.publish("server.stopping", {})
+                httpd.run_manager.shutdown()
+        finally:
+            if previous_sigterm is not None:
+                signal.signal(signal.SIGTERM, previous_sigterm)
+            if heartbeat is not None:
+                stop_server_heartbeat(heartbeat)
+            httpd.server_close()
 
 
-def ensure_ir(workspace: Path) -> None:
-    _, ir_path, _ = state_paths(workspace)
-    if not ir_path.exists():
-        index_workspace(workspace)
+def _stop_on_sigterm(_signum, _frame) -> None:
+    raise SystemExit(0)
+
+
+def initialize_studio_server(server: ThreadingHTTPServer, root: Path) -> None:
+    server.event_bus = EventBus()
+    server.annotations = AnnotationsStore(
+        root,
+        on_update=lambda annotations: server.event_bus.publish("annotations.updated", {"annotations": annotations}),
+    )
+    server.studio_stop = threading.Event()
+    server.run_manager = RunManager(root, server.event_bus)
+
+
+def ensure_ir(workspace: Path) -> Dict[str, Any]:
+    try:
+        return load_ir(workspace)
+    except FileNotFoundError:
+        return index_workspace(workspace)
 
 
 def server_heartbeat_enabled(*, demo_mode: bool, landing_mode: bool) -> bool:
@@ -769,28 +811,31 @@ def make_handler(
     demo_mode: bool = False,
     landing_mode: bool = False,
     session_id: Optional[str] = None,
+    allow_remote_origin: bool = False,
 ):
     web_root = (Path(__file__).resolve().parent / "web").resolve()
+    studio_init_lock = threading.Lock()
 
     def session_binding_for_token(candidate: Optional[str]) -> Tuple[bool, Optional[str]]:
         if not isinstance(candidate, str) or not candidate:
             return False, None
-        if secrets.compare_digest(token, candidate):
-            return True, session_id
+        candidate_bytes = candidate.encode("utf-8", errors="surrogatepass")
+        if secrets.compare_digest(token.encode("utf-8", errors="surrogatepass"), candidate_bytes):
+            return True, None
 
-        launch_path = state_paths(workspace)[0] / "launch.json"
         try:
+            launch_path = resolve_workspace_path(workspace, ".agentcanvas/launch.json")
             with launch_path.open(encoding="utf-8") as handle:
                 launch_record = json.load(handle)
-        except (OSError, json.JSONDecodeError):
+        except (OSError, ValueError):
             return False, None
         bindings = launch_record.get("session_tokens") if isinstance(launch_record, dict) else None
         if not isinstance(bindings, dict):
             return False, None
         for session_token, bound_session_id in bindings.items():
-            if not isinstance(session_token, str) or not isinstance(bound_session_id, str):
+            if not isinstance(session_token, str) or not isinstance(bound_session_id, str) or not bound_session_id.strip():
                 continue
-            if secrets.compare_digest(session_token, candidate):
+            if secrets.compare_digest(session_token.encode("utf-8", errors="surrogatepass"), candidate_bytes):
                 return True, bound_session_id
         return False, None
 
@@ -801,9 +846,11 @@ def make_handler(
             return
 
         def do_OPTIONS(self) -> None:
+            if not self.check_api_origin():
+                return
             self.send_response(HTTPStatus.NO_CONTENT)
-            self.send_header("Access-Control-Allow-Origin", "http://localhost")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.write_cors_headers()
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
             self.send_header(
                 "Access-Control-Allow-Headers",
                 "Authorization, Content-Type, X-AgentCanvas-Token",
@@ -813,36 +860,98 @@ def make_handler(
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             if parsed.path.startswith("/api/"):
-                self.handle_api_get(parsed)
+                if self.check_api_origin():
+                    self.handle_api_get(parsed)
+                return
+            self.serve_static(parsed.path)
+
+        def do_HEAD(self) -> None:
+            parsed = urlparse(self.path)
+            if parsed.path.startswith("/api/"):
+                if self.check_api_origin() and self.require_api_token(parsed):
+                    self.write_json({"ok": False, "error": "method not allowed"}, HTTPStatus.METHOD_NOT_ALLOWED)
                 return
             self.serve_static(parsed.path)
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
             if parsed.path.startswith("/api/"):
-                self.handle_api_post(parsed)
+                if self.check_api_origin():
+                    self.handle_api_post(parsed)
                 return
             self.write_json(
                 {"ok": False, "error": "not found"},
                 status=HTTPStatus.NOT_FOUND,
             )
 
+        def do_PATCH(self) -> None:
+            self.handle_annotation_method("PATCH")
+
+        def do_DELETE(self) -> None:
+            self.handle_annotation_method("DELETE")
+
+        def handle_annotation_method(self, method: str) -> None:
+            parsed = urlparse(self.path)
+            if not self.check_api_origin() or not self.require_api_token(parsed):
+                return
+            if parsed.path.startswith("/api/annotations/"):
+                self.handle_studio_request(method, parsed)
+            else:
+                self.write_json({"ok": False, "error": "not found"}, status=HTTPStatus.NOT_FOUND)
+
+        def check_api_origin(self) -> bool:
+            self._origin_allowed = False
+            origin = self.headers.get("Origin")
+            if origin is None:
+                return True
+            try:
+                parsed = urlparse(origin)
+                if (
+                    parsed.scheme in {"http", "https"}
+                    and parsed.hostname
+                    and (
+                        parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+                        or (allow_remote_origin and parsed.netloc == self.headers.get("Host"))
+                    )
+                    and parsed.username is None
+                    and origin == f"{parsed.scheme}://{parsed.netloc}"
+                ):
+                    self._origin_allowed = True
+                    return True
+            except ValueError:
+                pass
+            self.write_json({"ok": False, "error": "origin is not allowed"}, status=HTTPStatus.FORBIDDEN)
+            return False
+
+        def write_cors_headers(self) -> None:
+            origin = self.headers.get("Origin")
+            if origin and self._origin_allowed:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+
+        _origin_allowed = False
+
+        def require_api_token(self, parsed) -> bool:
+            if self.authorized(parsed):
+                return True
+            self.write_json(
+                failure_payload(FailureId.TOKEN_INVALID, "missing or invalid token"),
+                status=HTTPStatus.UNAUTHORIZED,
+            )
+            return False
+
         def handle_api_get(self, parsed) -> None:
-            if not self.authorized(parsed):
-                self.write_json(
-                    failure_payload(
-                        FailureId.TOKEN_INVALID,
-                        "missing or invalid token",
-                    ),
-                    status=HTTPStatus.UNAUTHORIZED,
-                )
+            if not AgentCanvasHandler.require_api_token(self, parsed):
+                return
+
+            if parsed.path in {
+                "/api/studio", "/api/events", "/api/file-slice", "/api/file-diff",
+            } or parsed.path.startswith("/api/runs/"):
+                self.handle_studio_request("GET", parsed)
                 return
 
             if parsed.path == "/api/graph":
-                try:
-                    graph = load_ir(workspace)
-                except FileNotFoundError:
-                    graph = index_workspace(workspace)
+                graph = ensure_ir(workspace)
                 self.write_json({"ok": True, "graph": graph})
                 return
 
@@ -1002,14 +1111,11 @@ def make_handler(
             )
 
         def handle_api_post(self, parsed) -> None:
-            if not self.authorized(parsed):
-                self.write_json(
-                    failure_payload(
-                        FailureId.TOKEN_INVALID,
-                        "missing or invalid token",
-                    ),
-                    status=HTTPStatus.UNAUTHORIZED,
-                )
+            if not AgentCanvasHandler.require_api_token(self, parsed):
+                return
+
+            if parsed.path in {"/api/annotations", "/api/runs"} or parsed.path.startswith("/api/runs/"):
+                self.handle_studio_request("POST", parsed)
                 return
 
             if parsed.path == "/api/reindex":
@@ -1214,6 +1320,216 @@ def make_handler(
                 status=HTTPStatus.NOT_FOUND,
             )
 
+        def handle_studio_request(self, method: str, parsed) -> None:
+            try:
+                server = self.server
+                with studio_init_lock:
+                    if not hasattr(server, "run_manager"):
+                        initialize_studio_server(server, workspace)
+                if method == "GET":
+                    self.handle_studio_get(parsed)
+                else:
+                    self.handle_studio_mutation(method, parsed)
+            except (LookupError, FileNotFoundError) as exc:
+                self.write_json({"ok": False, "error": str(exc)}, status=HTTPStatus.NOT_FOUND)
+            except (ValueError, TypeError) as exc:
+                error = str(exc)
+                status = HTTPStatus.FORBIDDEN if error == "INTERNAL_PATH_FORBIDDEN" else HTTPStatus.BAD_REQUEST
+                self.write_json({"ok": False, "error": error}, status=status)
+            except RuntimeError as exc:
+                self.write_json({"ok": False, "error": str(exc)}, status=HTTPStatus.CONFLICT)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except OSError:
+                self.write_json(
+                    {"ok": False, "error": "Workspace state could not be accessed"},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+
+        def requested_diff_base(self, query) -> Optional[str]:
+            return query.get("diffBase", query.get("diff_base", [None]))[0]
+
+        def can_access_run(self, run: Dict[str, Any]) -> bool:
+            return self.caller_session is None or run.get("owner_session") == self.caller_session
+
+        def accessible_run(self, run_id: str) -> Dict[str, Any]:
+            run = self.server.run_manager.get_run(run_id)
+            if not self.can_access_run(run):
+                raise LookupError("run not found")
+            return run
+
+        def handle_studio_get(self, parsed) -> None:
+            server = self.server
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            base = self.requested_diff_base(query)
+            path = parsed.path
+            if path == "/api/studio":
+                show_demo = demo_mode or self.request_demo_mode(parsed)
+                if show_demo:
+                    document, mapped = build_demo_studio_document(), True
+                    if is_demo_workspace(workspace):
+                        document["workspace"] = str(workspace)
+                else:
+                    document, mapped = load_studio_document(workspace)
+                mode = "demo" if show_demo else "landing" if landing_mode else "workspace"
+                runner_info = server.run_manager.runner_info()
+                git_status = get_git_status(workspace)
+                recent_runs = [run for run in server.run_manager.list_runs() if self.can_access_run(run)]
+                active_run = next((run for run in recent_runs if run["status"] in {
+                    "queued", "running", "needs_input", "awaiting_approval",
+                }), None)
+                self.write_json({
+                    "ok": True,
+                    "workspace": str(workspace) if mode != "landing" else "",
+                    "workspace_name": document["workspace_name"],
+                    "document": document,
+                    "has_mapped_canvas": mapped,
+                    "annotations": server.annotations.load(),
+                    "runners": {
+                        "preferred": runner_info["preferred"],
+                        "available": [
+                            {"id": name, "label": _ASSISTANTS["claude-code" if name == "claude" else name], "binary": name}
+                            for name in runner_info["available"] if name in {"codex", "claude"}
+                        ],
+                    },
+                    "git": git_status,
+                    "stale_node_ids": compute_stale_node_ids(workspace, document, git_status=git_status),
+                    "mode": mode,
+                    "studio_mode": "diff" if base is not None else document["mode"],
+                    "diff_base": (base or None) if base is not None else document["diff_base"],
+                    "recent_runs": recent_runs[:20],
+                    "active_run": active_run,
+                })
+            elif path == "/api/events":
+                self.stream_events()
+            elif path in {"/api/file-slice", "/api/file-diff"}:
+                file_path = query.get("path", [""])[0]
+                if not file_path:
+                    raise ValueError("path is required")
+                if path == "/api/file-slice":
+                    raw_line = query.get("line", [""])[0]
+                    line = int(raw_line) if raw_line else None
+                    context = int(query.get("context", ["12"])[0])
+                    result = read_file_slice(workspace, file_path, line, context)
+                else:
+                    result = get_file_diff(workspace, file_path, query.get("base", [base])[0] or None)
+                status = HTTPStatus.OK
+                if not result["ok"]:
+                    status = {
+                        "FILE_NOT_FOUND": HTTPStatus.NOT_FOUND,
+                        "FILE_UNREADABLE": HTTPStatus.FORBIDDEN,
+                        "BINARY_FILE": HTTPStatus.UNPROCESSABLE_ENTITY,
+                        "GIT_DIFF_UNAVAILABLE": HTTPStatus.SERVICE_UNAVAILABLE,
+                    }.get(result["error"], HTTPStatus.BAD_REQUEST)
+                self.write_json(result, status)
+            else:
+                route = path.split("/")
+                if len(route) != 4 or not route[3]:
+                    raise LookupError("not found")
+                self.write_json({"ok": True, "run": self.accessible_run(unquote(route[3]))})
+
+        def handle_studio_mutation(self, method: str, parsed) -> None:
+            server = self.server
+            path = parsed.path
+            route = path.split("/")
+            if method in {"PATCH", "DELETE"}:
+                if len(route) != 4 or not route[3]:
+                    raise LookupError("not found")
+                annotation_id = unquote(route[3])
+                if method == "DELETE":
+                    server.annotations.delete(annotation_id)
+                    self.write_json({"ok": True})
+                    return
+                payload = self.read_json_body(max_bytes=MAX_JSON_BODY_BYTES)
+                if payload is None:
+                    return
+                annotation = server.annotations.update(annotation_id, **payload)
+            elif path == "/api/annotations":
+                payload = self.read_json_body(max_bytes=MAX_JSON_BODY_BYTES)
+                if payload is None:
+                    return
+                annotation = server.annotations.create(**payload)
+            else:
+                self.handle_run_mutation(parsed, route)
+                return
+            self.write_json({"ok": True, "annotation": annotation})
+
+        def handle_run_mutation(self, parsed, route) -> None:
+            manager = self.server.run_manager
+            if parsed.path == "/api/runs":
+                payload = self.read_json_body(max_bytes=MAX_JSON_BODY_BYTES)
+                if payload is None:
+                    return
+                if payload.get("kind") == "diff":
+                    query = parse_qs(parsed.query, keep_blank_values=True)
+                    payload.setdefault("diff_base", self.requested_diff_base(query) or None)
+                if "owner_session" in payload:
+                    raise ValueError("owner_session is assigned by authentication")
+                result = manager.start_run(**payload, owner_session=self.caller_session)
+            elif len(route) == 5 and route[3]:
+                run_id, action = unquote(route[3]), route[4]
+                if self.caller_session is not None:
+                    self.accessible_run(run_id)
+                if action == "answer":
+                    payload = self.read_json_body(max_bytes=MAX_JSON_BODY_BYTES)
+                    if payload is None:
+                        return
+                    result = manager.answer_run(run_id, **payload)
+                elif action == "cancel":
+                    result = manager.cancel_run(run_id)
+                elif action == "discard":
+                    result = manager.discard_run(run_id)
+                else:
+                    raise LookupError("not found")
+            else:
+                raise LookupError("not found")
+            self.write_json({"ok": True, "run": result})
+
+        def stream_events(self) -> None:
+            bus = self.server.event_bus
+
+            def visible(event_type: str, payload: Dict[str, Any]) -> bool:
+                if event_type == "run.updated":
+                    return self.can_access_run(payload["run"])
+                if event_type == "run.log":
+                    return self.can_access_run(payload)
+                return True
+
+            subscriber = bus.subscribe(visible if self.caller_session is not None else None)
+            try:
+                self.connection.settimeout(15)
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.send_header("X-Accel-Buffering", "no")
+                self.write_cors_headers()
+                self.end_headers()
+                self.wfile.write(b": ping\n\n")
+                self.wfile.flush()
+                while not self.server.studio_stop.is_set():
+                    resync = False
+                    try:
+                        event_type, payload = subscriber.get(timeout=15)
+                    except Empty:
+                        message = ": ping\n\n"
+                    else:
+                        subscriber.task_done()
+                        if self.server.studio_stop.is_set():
+                            break
+                        message = f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
+                        resync = event_type == "studio.resync"
+                    self.wfile.write(message.encode("utf-8"))
+                    self.wfile.flush()
+                    if resync:
+                        # EventSource reconnects, letting the client reload its snapshot on open.
+                        break
+            except OSError:
+                pass  # The client closed the stream or stopped reading.
+            finally:
+                self.close_connection = True
+                bus.unsubscribe(subscriber)
+
         def authorized(self, parsed) -> bool:
             query_token = parse_qs(parsed.query).get("token", [None])[0]
             header_token = self.headers.get("X-AgentCanvas-Token")
@@ -1221,10 +1537,12 @@ def make_handler(
             bearer_token = None
             if auth.startswith("Bearer "):
                 bearer_token = auth[len("Bearer ") :].strip()
-            return any(
-                session_binding_for_token(candidate)[0]
-                for candidate in (query_token, header_token, bearer_token)
-            )
+            for candidate in (query_token, header_token, bearer_token):
+                valid, bound_session = session_binding_for_token(candidate)
+                if valid:
+                    self.caller_session = bound_session
+                    return True
+            return False
 
         def request_session_id(
             self,
@@ -1238,8 +1556,10 @@ def make_handler(
             bearer_token = auth[len("Bearer ") :].strip() if auth.startswith("Bearer ") else None
             for candidate in (query_token, header_token, bearer_token):
                 authorized_token, bound_session_id = session_binding_for_token(candidate)
-                if authorized_token and bound_session_id:
-                    return bound_session_id
+                if authorized_token:
+                    legacy_session = bound_session_id or session_id
+                    if legacy_session:
+                        return legacy_session
             query = parse_qs(parsed.query)
             values = [
                 *(query.get("sessionId") or []),
@@ -1275,7 +1595,7 @@ def make_handler(
             value = parse_qs(parsed.query).get("demo", [""])[0]
             return value.lower() in {"1", "true", "yes"}
 
-        def read_json_body(self) -> Optional[Dict[str, Any]]:
+        def read_json_body(self, *, max_bytes: Optional[int] = None) -> Optional[Dict[str, Any]]:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
@@ -1285,6 +1605,12 @@ def make_handler(
                 self.write_json(
                     {"ok": False, "error": "request body must be JSON"},
                     status=HTTPStatus.BAD_REQUEST,
+                )
+                return None
+            if max_bytes is not None and length > max_bytes:
+                self.write_json(
+                    {"ok": False, "error": "request body is too large"},
+                    status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
                 )
                 return None
 
@@ -1326,8 +1652,10 @@ def make_handler(
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
-            self.wfile.write(data)
+            if self.command != "HEAD":
+                self.wfile.write(data)
 
         def write_json(
             self,
@@ -1339,7 +1667,9 @@ def make_handler(
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(data)))
+            self.write_cors_headers()
             self.end_headers()
-            self.wfile.write(data)
+            if self.command != "HEAD":
+                self.wfile.write(data)
 
     return AgentCanvasHandler

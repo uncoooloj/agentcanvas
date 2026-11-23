@@ -16,6 +16,7 @@ from agentcanvas.supervisor import (
     launch_url,
     prepend_pythonpath,
     pid_is_alive,
+    scoped_studio_url,
     stop_server,
     validate_loopback_host,
     validate_launch_record,
@@ -78,6 +79,68 @@ class SupervisorTests(unittest.TestCase):
             refreshed = json.loads(launch_record_path(workspace).read_text(encoding="utf-8"))
             self.assertEqual(refreshed["session_tokens"][session_token], "session-2")
             self.assertEqual(refreshed["url"], record["url"])
+
+    def test_fresh_server_issues_distinct_session_token_without_sticky_diff_scope(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            child = type("Child", (), {"pid": 12345})()
+            with patch("agentcanvas.supervisor.read_launch_record", return_value=None), patch(
+                "agentcanvas.supervisor.choose_port", return_value=8765
+            ), patch("agentcanvas.supervisor.spawn_server", return_value=child) as spawn, patch(
+                "agentcanvas.supervisor.wait_until_ready"
+            ), patch(
+                "agentcanvas.supervisor.secrets.token_urlsafe",
+                side_effect=["primary-token", "session-token"],
+            ):
+                result = ensure_server_up(
+                    workspace,
+                    session_id="session-1",
+                    diff_base="feature/foo..HEAD",
+                )
+
+            self.assertFalse(result["already_running"])
+            self.assertEqual(result["token"], "session-token")
+            self.assertNotIn("session_tokens", result)
+            params = parse_qs(urlparse(result["url"]).query)
+            self.assertEqual(params["token"], ["session-token"])
+            self.assertEqual(params["sessionId"], ["session-1"])
+            self.assertEqual(params["tab"], ["diff"])
+            self.assertEqual(params["diffBase"], ["feature/foo..HEAD"])
+            self.assertNotIn("diff_base", spawn.call_args.kwargs)
+            record = json.loads(launch_record_path(workspace).read_text(encoding="utf-8"))
+            self.assertEqual(record["token"], "primary-token")
+            self.assertEqual(record["session_tokens"]["session-token"], "session-1")
+            self.assertNotIn("primary-token", record["session_tokens"])
+
+    def test_scoped_studio_url_replaces_old_scope_and_clears_it_for_ordinary_reuse(self):
+        original = "http://127.0.0.1:8765/?token=secret&sessionId=session-1&tab=diff&diffBase=old"
+        self.assertEqual(
+            scoped_studio_url(original, "new..HEAD"),
+            "http://127.0.0.1:8765/?token=secret&sessionId=session-1&tab=diff&diffBase=new..HEAD",
+        )
+        self.assertEqual(
+            scoped_studio_url(original, None),
+            "http://127.0.0.1:8765/?token=secret&sessionId=session-1",
+        )
+
+    def test_ordinary_reuse_does_not_inherit_persisted_diff_scope(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            workspace = Path(temp_root) / "workspace"
+            workspace.mkdir()
+            persisted = {
+                "pid": os.getpid(),
+                "host": "127.0.0.1",
+                "port": 8765,
+                "token": "secret-token",
+                "url": "http://127.0.0.1:8765/?token=secret-token&tab=diff&diffBase=old",
+            }
+            write_launch_record(workspace, persisted)
+            with patch("agentcanvas.supervisor.validate_launch_record", return_value=persisted):
+                result = ensure_server_up(workspace)
+
+            self.assertEqual(result["url"], "http://127.0.0.1:8765/?token=secret-token")
+
     def test_launch_record_is_owner_only_and_contains_recoverable_url(self):
         with tempfile.TemporaryDirectory() as temp_root:
             workspace = Path(temp_root) / "workspace"

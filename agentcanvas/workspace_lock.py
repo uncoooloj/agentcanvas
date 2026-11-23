@@ -21,6 +21,30 @@ DEFAULT_LOCK_TIMEOUT_SECONDS = 10.0
 _POLL_INITIAL_SECONDS = 0.01
 _POLL_MAX_SECONDS = 0.10
 _thread_state = threading.local()
+_process_locks_guard = threading.Lock()
+_process_locks: Dict[str, threading.Lock] = {}
+
+
+def _workspace_process_lock(root_key: str) -> threading.Lock:
+    with _process_locks_guard:
+        lock = _process_locks.get(root_key)
+        if lock is None:
+            lock = threading.Lock()
+            _process_locks[root_key] = lock
+        return lock
+
+
+def _unlink_with_retry(path: Path, *, retries: int = 30, delay: float = 0.01) -> None:
+    for attempt in range(retries):
+        try:
+            path.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if os.name != "nt" or attempt + 1 >= retries:
+                raise
+            time.sleep(delay)
 
 
 class WorkspaceLockBusy(ValueError):
@@ -71,6 +95,7 @@ class WorkspaceWriteLock:
         self.lock_path = workspace_lock_path(self.root)
         self.break_events: List[Dict[str, Any]] = []
         self._physical_lock = False
+        self._process_lock: Optional[threading.Lock] = None
 
     def __enter__(self) -> "WorkspaceWriteLock":
         held = _held_lock_counts()
@@ -82,39 +107,61 @@ class WorkspaceWriteLock:
 
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + max(0.0, self.timeout)
+        process_lock = _workspace_process_lock(root_key)
+        remaining = max(0.0, deadline - time.monotonic())
+        if not process_lock.acquire(timeout=remaining):
+            raise WorkspaceLockBusy(
+                "workspace is busy with another AgentCanvas writer",
+                writer=self.writer,
+                lock_path=self.lock_path,
+                timeout_seconds=self.timeout,
+                holder=_read_json_object(self.lock_path),
+            )
+        self._process_lock = process_lock
         poll_seconds = _POLL_INITIAL_SECONDS
         last_holder: Optional[Dict[str, Any]] = None
-        while True:
-            try:
-                self._create_lock_file()
-            except FileExistsError:
-                holder = _read_json_object(self.lock_path)
-                last_holder = holder if isinstance(holder, dict) else None
-                if is_stale_process_claim(
-                    holder,
-                    lease_seconds=self.lease_seconds,
-                    path=self.lock_path,
-                ):
-                    event = self._break_stale_lock(holder)
-                    self.break_events.append(event)
-                    _record_lock_break(self.root, event)
+        try:
+            while True:
+                try:
+                    self._create_lock_file()
+                except PermissionError:
+                    if os.name != "nt" or time.monotonic() >= deadline:
+                        raise
+                    time.sleep(min(poll_seconds, max(0.0, deadline - time.monotonic())))
+                    poll_seconds = min(_POLL_MAX_SECONDS, poll_seconds * 1.5)
                     continue
-                if time.monotonic() >= deadline:
-                    raise WorkspaceLockBusy(
-                        "workspace is busy with another AgentCanvas writer",
-                        writer=self.writer,
-                        lock_path=self.lock_path,
-                        timeout_seconds=self.timeout,
-                        holder=last_holder,
-                    )
-                time.sleep(min(poll_seconds, max(0.0, deadline - time.monotonic())))
-                poll_seconds = min(_POLL_MAX_SECONDS, poll_seconds * 1.5)
-                continue
+                except FileExistsError:
+                    holder = _read_json_object(self.lock_path)
+                    last_holder = holder if isinstance(holder, dict) else None
+                    if is_stale_process_claim(
+                        holder,
+                        lease_seconds=self.lease_seconds,
+                        path=self.lock_path,
+                    ):
+                        event = self._break_stale_lock(holder)
+                        self.break_events.append(event)
+                        _record_lock_break(self.root, event)
+                        continue
+                    if time.monotonic() >= deadline:
+                        raise WorkspaceLockBusy(
+                            "workspace is busy with another AgentCanvas writer",
+                            writer=self.writer,
+                            lock_path=self.lock_path,
+                            timeout_seconds=self.timeout,
+                            holder=last_holder,
+                        )
+                    time.sleep(min(poll_seconds, max(0.0, deadline - time.monotonic())))
+                    poll_seconds = min(_POLL_MAX_SECONDS, poll_seconds * 1.5)
+                    continue
 
-            self._physical_lock = True
-            held[root_key] = 1
-            _lock_break_events()[root_key] = self.break_events
-            return self
+                self._physical_lock = True
+                held[root_key] = 1
+                _lock_break_events()[root_key] = self.break_events
+                return self
+        except BaseException:
+            self._process_lock = None
+            process_lock.release()
+            raise
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         held = _held_lock_counts()
@@ -125,8 +172,14 @@ class WorkspaceWriteLock:
             return
         held.pop(root_key, None)
         _lock_break_events().pop(root_key, None)
-        if self._physical_lock:
-            self._release_lock_file()
+        try:
+            if self._physical_lock:
+                self._release_lock_file()
+        finally:
+            process_lock = self._process_lock
+            self._process_lock = None
+            if process_lock is not None:
+                process_lock.release()
 
     def _create_lock_file(self) -> None:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
@@ -154,10 +207,7 @@ class WorkspaceWriteLock:
             "lock_path": str(self.lock_path),
             "stale_holder": holder if isinstance(holder, Mapping) else None,
         }
-        try:
-            self.lock_path.unlink()
-        except FileNotFoundError:
-            pass
+        _unlink_with_retry(self.lock_path)
         return event
 
     def _release_lock_file(self) -> None:
@@ -166,10 +216,7 @@ class WorkspaceWriteLock:
             return
         if holder.get("pid") != os.getpid() or holder.get("nonce") != self.nonce:
             return
-        try:
-            self.lock_path.unlink()
-        except FileNotFoundError:
-            pass
+        _unlink_with_retry(self.lock_path)
 
 
 def workspace_write_lock(

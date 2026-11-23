@@ -16,9 +16,10 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from . import __version__
+from .git_diff import resolve_workspace_path
 from .ir import ensure_state_dirs, now_utc, resolve_workspace
 from .workspace_lock import workspace_write_lock
 from .server import server_heartbeat_path, token_hint
@@ -71,14 +72,23 @@ def ensure_server_up(
     agent: Optional[str] = None,
     session_id: Optional[str] = None,
     open_browser: bool = False,
+    diff_base: Optional[str] = None,
 ) -> Dict[str, Any]:
     validate_loopback_host(host)
     root = resolve_workspace(workspace)
+    normalized_session_id = session_id.strip() if isinstance(session_id, str) else None
+    if not normalized_session_id:
+        normalized_session_id = None
+    try:
+        resolve_workspace_path(root, ".agentcanvas/launch.json")
+        resolve_workspace_path(root, ".agentcanvas/server.log")
+    except ValueError as exc:
+        raise SupervisorError("PATH_OUTSIDE_WORKSPACE", "AgentCanvas launch files must be inside the workspace") from exc
     record = read_launch_record(root)
     live = validate_launch_record(record, workspace=root) if record else None
     if live:
-        if session_id:
-            result = issue_session_launch(root, live, session_id=session_id)
+        if normalized_session_id:
+            result = issue_session_launch(root, live, session_id=normalized_session_id)
         else:
             result = dict(live)
         result = {
@@ -86,6 +96,7 @@ def ensure_server_up(
             "ok": True,
             "already_running": True,
         }
+        result["url"] = scoped_studio_url(result["url"], diff_base)
         if open_browser:
             webbrowser.open(result["url"])
         return result
@@ -101,9 +112,10 @@ def ensure_server_up(
         port=selected_port,
         token=token,
         agent=agent,
-        session_id=session_id,
+        session_id=normalized_session_id,
     )
-    url = launch_url(host, selected_port, token, session_id=session_id)
+    url = launch_url(host, selected_port, token, session_id=normalized_session_id)
+    browser_token = secrets.token_urlsafe(24) if normalized_session_id else token
     record = {
         "schema": "agentcanvas.launch.v1",
         "pid": child.pid,
@@ -113,12 +125,12 @@ def ensure_server_up(
         "url": url,
         "started_at": now_utc(),
         "version": __version__,
-        "session_id": session_id,
+        "session_id": normalized_session_id,
         "agent": agent,
         "workspace": str(root),
     }
-    if session_id:
-        record["session_tokens"] = {token: session_id}
+    if normalized_session_id:
+        record["session_tokens"] = {browser_token: normalized_session_id}
 
     try:
         wait_until_ready(record, workspace=root, timeout_seconds=READY_TIMEOUT_SECONDS)
@@ -134,13 +146,17 @@ def ensure_server_up(
         )
 
     write_launch_record(root, record)
+    browser_url = launch_url(host, selected_port, browser_token, session_id=normalized_session_id)
     result = {
         **record,
+        "token": browser_token,
+        "url": scoped_studio_url(browser_url, diff_base),
         "ok": True,
         "already_running": False,
     }
+    result.pop("session_tokens", None)
     if open_browser:
-        webbrowser.open(url)
+        webbrowser.open(result["url"])
     return result
 
 
@@ -175,7 +191,7 @@ def issue_session_launch(
         record["session_tokens"] = bindings
         write_launch_record(root, record)
 
-    return {
+    result = {
         **live,
         "token": token,
         "url": launch_url(
@@ -186,6 +202,10 @@ def issue_session_launch(
         ),
         "session_id": normalized_session_id,
     }
+    # A caller requesting a browser session must never receive the launch
+    # record's primary token or its complete token-binding map.
+    result.pop("session_tokens", None)
+    return result
 
 
 def stop_server(workspace: str | Path) -> Dict[str, Any]:
@@ -485,6 +505,18 @@ def launch_url(host: str, port: int, token: str, *, session_id: Optional[str] = 
     if session_id:
         query["sessionId"] = session_id
     return f"http://{host}:{int(port)}/?{urlencode(query)}"
+
+
+def scoped_studio_url(url: str, diff_base: Optional[str]) -> str:
+    parsed = urlsplit(url)
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key not in {"tab", "diffBase", "diff_base"}
+    ]
+    if diff_base is not None:
+        query.extend((("tab", "diff"), ("diffBase", str(diff_base))))
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
 
 
 def api_url(host: str, port: int, path: str, token: str, *, session_id: Optional[str] = None) -> str:
